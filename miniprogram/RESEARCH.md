@@ -168,23 +168,30 @@ MP 端把 token 存 `wx.setStorageSync`，后续每个请求带 Authorization he
 ### 目录结构（含 shared）
 
 ```
-project/
-├── shared/                       ← 前后端共用的纯函数
-│   ├── merge.js                  ← 与 mergeMergedByType.ts 同语义
-│   ├── extract.js                ← 与 extractMergedFromResponse.ts 同语义
-│   └── types.d.ts                ← 类型注解（仅 Web 端用）
-├── app/                          ← Web 前端（Nuxt）
+project/                            ← Git 仓库根目录
+├── shared/                         ← 前后端共用的纯函数（plain JS + JSDoc）
+│   ├── merge.js                    ← 与 mergeMergedByType.ts 同语义
+│   ├── extract.js                  ← 与 extractMergedFromResponse.ts 同语义
+│   └── types.d.ts                  ← 类型注解（仅 Web 端用，MP 端可忽略）
+├── app/                            ← Web 前端（Nuxt）
 │   └── utils/
-│       ├── mergeMergedByType.ts  ← 可 wrap shared/merge.js
+│       ├── mergeMergedByType.ts    ← 可 wrap shared/merge.js
 │       └── extractMergedFromResponse.ts
-├── server/                       ← 后端 Nitro + API 路由
-│   └── api/、core/
-└── miniprogram/                  ← 原生微信小程序
+├── server/                         ← 后端 Nitro + API 路由（auth.ts 已兼容 MP）
+│   ├── api/、core/
+│   └── utils/auth.ts               ← createAuthToken / verifyAuthToken / isUnlocked
+└── miniprogram/                    ← 原生微信小程序（微信开发者工具根目录）
+    ├── app.js / app.json / app.wxss
+    ├── project.config.json         ← miniprogramRoot: "./"
+    ├── sitemap.json
+    ├── pages/
+    │   ├── index/                  ← 搜索首页（一页式，含历史/热搜/结果/筛选）
+    │   └── settings/               ← 设置
     └── utils/
-        ├── api.js                ← 封装 wx.request
-        ├── auth.js               ← wx.setStorageSync + Authorization header
-        ├── merge.js              ← require ../../../shared/merge.js
-        └── extract.js            ← require ../../../shared/extract.js
+        ├── api.js                  ← wx.request 封装（自动带 x-panhub-client-secret）
+        ├── auth.js                 ← wx.setStorageSync + Authorization header（待）
+        ├── merge.js                ← require '../../../shared/merge.js'
+        └── extract.js              ← require '../../../shared/extract.js'
 ```
 
 ### 共享代码的风格公约

@@ -1,0 +1,8 @@
+{
+  "name": "panhub-miniprogram",
+  "version": "0.1.0",
+  "description": "PanHub WeChat Mini Program",
+  "dependencies": {
+    "tdesign-miniprogram": "~1.8.0"
+  }
+}

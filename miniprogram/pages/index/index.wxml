@@ -1,0 +1,127 @@
+<view class="page">
+  <!-- 解锁浮层 -->
+  <view wx:if="{{showUnlock}}" class="unlock-mask">
+    <view class="unlock-card">
+      <text class="unlock-title">🔒 需要密码解锁</text>
+      <text class="unlock-sub">请输入搜索密码以继续使用</text>
+      <input
+        class="unlock-input"
+        password="{{true}}"
+        value="{{unlockPwd}}"
+        placeholder="搜索密码"
+        placeholder-class="unlock-ph"
+        bindinput="onUnlockInput"
+        confirm-type="done"
+        bindconfirm="onUnlockConfirm" />
+      <button class="unlock-btn" loading="{{unlocking}}" bindtap="onUnlockConfirm">解锁</button>
+    </view>
+  </view>
+
+  <!-- 品牌 Hero -->
+  <view class="hero">
+    <view class="hero-card">
+      <view class="hero-brand">
+        <text class="hero-logo">PanHub</text>
+        <text class="hero-badge">网盘聚合</text>
+      </view>
+      <text class="hero-slogan">一个入口，搜遍全网网盘资源</text>
+    </view>
+  </view>
+
+  <t-search
+    value="{{keyword}}"
+    placeholder="搜索网盘资源"
+    focus="{{false}}"
+    bind:change="onKeywordChange"
+    bind:search="onSearch"
+    bind:clear="onClear"
+    shape="round"
+    placeholder-class="search-placeholder">
+    <view slot="action" class="search-btn" bindtap="onSearch">搜索</view>
+  </t-search>
+
+  <!-- 热门搜索 -->
+  <view wx:if="{{!searched && hotTags.length > 0}}" class="tag-row">
+    <view class="tag-row-label">热门搜索</view>
+    <view class="tag-row-list">
+      <t-tag
+        wx:for="{{hotTags}}"
+        wx:key="*this"
+        class="tag-pill"
+        theme="primary"
+        variant="light"
+        data-term="{{item}}"
+        bind:click="onQuickSearch">
+        {{item}}
+      </t-tag>
+    </view>
+  </view>
+
+  <!-- 搜索中 -->
+  <view wx:if="{{loading}}" class="loading-wrap">
+    <t-loading theme="circular" text="搜索中…" size="60rpx"></t-loading>
+  </view>
+
+  <!-- 搜索结果 -->
+  <block wx:if="{{searched && !loading}}">
+    <view wx:if="{{hasResults}}" class="stats">
+      <text class="stats-count">共 {{total}} 条结果</text>
+      <text wx:if="{{elapsedMs > 0}}" class="stats-time">· {{elapsedMs}}ms</text>
+    </view>
+
+    <!-- 平台筛选 -->
+    <view wx:if="{{hasResults && platforms.length > 0}}" class="filters">
+      <view class="filter-pill {{filterPlatform === 'all' ? 'active' : ''}}" bindtap="setFilter" data-p="all">全部 ({{total}})</view>
+      <view
+        wx:for="{{platforms}}"
+        wx:key="*this"
+        class="filter-pill {{filterPlatform === item ? 'active' : ''}}"
+        bindtap="setFilter"
+        data-p="{{item}}">
+        {{platformName(item)}} ({{merged[item].length}})
+      </view>
+    </view>
+
+    <!-- 结果分组列表 -->
+    <view wx:if="{{hasResults}}" class="group-list">
+      <view wx:for="{{groupedResults}}" wx:key="type" class="group">
+        <view class="group-head">
+          <view class="group-bar" style="background:{{platformColor(item.type)}}"></view>
+          <text class="group-title">{{platformName(item.type)}}</text>
+          <text class="group-count">{{item.items.length}}</text>
+        </view>
+        <view class="result-list">
+          <view
+            wx:for="{{item.items}}"
+            wx:for-item="link"
+            wx:key="url"
+            class="result-card"
+            hover-class="card-hover"
+            data-url="{{link.url}}"
+            bindtap="onCopyLink">
+            <view class="result-main">
+              <text class="result-title">{{link.note || link.url}}</text>
+              <view class="result-meta">
+                <text wx:if="{{link.datetime}}" class="meta-time">{{link.datetime}}</text>
+                <text wx:if="{{link.password}}" class="meta-pwd">提取码 {{link.password}}</text>
+              </view>
+              <text wx:if="{{link.note}}" class="result-url">{{link.url}}</text>
+            </view>
+            <view class="result-copy" catchtap="onCopyLink" data-url="{{link.url}}">复制</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 空状态 -->
+    <t-empty wx:elif="{{!hasResults && !error}}" icon="search" description="未找到相关资源，换个词试试"></t-empty>
+  </block>
+
+  <!-- 错误 -->
+  <view wx:if="{{error}}" class="error">
+    <text class="error-icon">⚠️</text>
+    <text>{{error}}</text>
+  </view>
+
+  <t-message id="t-message" />
+</view>

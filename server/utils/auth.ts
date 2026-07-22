@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { H3Event } from "h3";
-import { getCookie, setHeader } from "h3";
+import { getCookie, getRequestHeader, setHeader } from "h3";
 
 const COOKIE_NAME = "panhub_unlock";
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 天
@@ -36,4 +36,30 @@ export function setAuthCookie(event: H3Event, token: string): void {
   setHeader(event, "Set-Cookie", [
     `${COOKIE_NAME}=${token}; Path=${COOKIE_PATH}; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`,
   ].join(""));
+}
+
+/**
+ * 统一鉴权入口。兼容三套凭证：
+ *   1. Web 端 Cookie（panhub_unlock）
+ *   2. 小程序 Authorization: Bearer <HMAC token>（已输密码解锁的 MP 用户）
+ *   3. 小程序共享密钥（x-panhub-client-secret 匹配 MP_CLIENT_SECRET）—— 上线初期放开，后续收口
+ * 任一通过即算已解锁。secret 为空时直接放行（未设置密码门）。
+ */
+export function isUnlocked(event: H3Event, secret: string): boolean {
+  if (!secret.trim()) return true;
+  if (verifyAuthCookie(event, secret)) return true;
+  const h = getRequestHeader(event, "authorization");
+  if (h && h.startsWith("Bearer ")) {
+    return verifyAuthToken(h.slice(7), secret);
+  }
+  const mpSecret = process.env.MP_CLIENT_SECRET;
+  if (mpSecret && mpSecret.trim()) {
+    const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
+    if (clientSecret) {
+      const a = Buffer.from(clientSecret);
+      const b = Buffer.from(mpSecret);
+      if (a.length === b.length && timingSafeEqual(a, b)) return true;
+    }
+  }
+  return false;
 }

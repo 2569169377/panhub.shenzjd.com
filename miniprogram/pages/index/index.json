@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "PanHub 搜索",
+  "usingComponents": {
+    "t-search": "tdesign-miniprogram/search/search",
+    "t-tag": "tdesign-miniprogram/tag/tag",
+    "t-loading": "tdesign-miniprogram/loading/loading",
+    "t-empty": "tdesign-miniprogram/empty/empty",
+    "t-message": "tdesign-miniprogram/message/message"
+  }
+}

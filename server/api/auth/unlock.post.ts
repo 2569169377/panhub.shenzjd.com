@@ -48,5 +48,5 @@ export default defineEventHandler(async (event) => {
   limiter.recordSuccess(ip);
   const token = createAuthToken(password);
   setAuthCookie(event, token);
-  return { ok: true };
+  return { ok: true, token };
 });

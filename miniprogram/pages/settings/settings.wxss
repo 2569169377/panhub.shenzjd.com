@@ -1,0 +1,14 @@
+.page {
+  padding: 24rpx;
+}
+
+.settings-group {
+  margin-bottom: 24rpx;
+}
+
+.settings-tip {
+  text-align: center;
+  font-size: 22rpx;
+  color: #9ca3af;
+  margin-top: 32rpx;
+}

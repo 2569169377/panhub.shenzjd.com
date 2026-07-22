@@ -1,0 +1,17 @@
+<view class="page">
+  <view class="settings-group">
+    <t-cell-group>
+      <t-cell title="版本" note="v0.1.0" bordered="{{false}}"></t-cell>
+      <t-cell title="后端接口" note="panhub.shenzjd.com" bordered="{{false}}"></t-cell>
+    </t-cell-group>
+  </view>
+
+  <view class="settings-group">
+    <t-cell-group>
+      <t-cell title="解锁状态" note="{{unlocked ? '已解锁' : '未解锁'}}" bordered="{{false}}"></t-cell>
+      <t-cell wx:if="{{unlocked}}" title="退出解锁" arrow hover bind:click="onLogout"></t-cell>
+    </t-cell-group>
+  </view>
+
+  <view class="settings-tip">PanHub · 网盘资源聚合搜索</view>
+</view>
