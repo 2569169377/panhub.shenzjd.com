@@ -20,6 +20,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   return undefined;
 }
 import { requireSearchAuth } from "../utils/requireAuth";
+import { parseList } from "../utils/parseQuery";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -37,22 +38,9 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  const parseList = (val: any): string[] | undefined => {
-    if (Array.isArray(val)) {
-      return val.filter((s) => typeof s === "string" && s.trim());
-    }
-    if (typeof val === "string") {
-      return val
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    return undefined;
-  };
-
-  body.channels = parseList((body as any).channels);
-  body.plugins = parseList((body as any).plugins);
-  body.cloud_types = parseList((body as any).cloud_types);
+  body.channels = parseList(body.channels);
+  body.plugins = parseList(body.plugins);
+  body.cloud_types = parseList(body.cloud_types);
 
   if (!body.res || body.res === "merge") body.res = "merged_by_type";
   if (!body.src) body.src = "all";

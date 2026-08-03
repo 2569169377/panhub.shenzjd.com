@@ -20,17 +20,9 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   return undefined;
 }
 import { requireSearchAuth } from "../utils/requireAuth";
+import { parseList } from "../utils/parseQuery";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
-
-function parseList(val: string | undefined): string[] | undefined {
-  if (!val) return undefined;
-  const parts = val
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return parts.length ? parts : undefined;
-}
 
 export default defineEventHandler(async (event) => {
   requireSearchAuth(event);
@@ -73,7 +65,7 @@ export default defineEventHandler(async (event) => {
 
   const req: SearchRequest = {
     kw,
-    channels: parseList(q.channels as string | undefined),
+    channels: parseList(q.channels),
     conc: (() => {
       const n = q.conc ? parseInt(String(q.conc), 10) : NaN;
       return Number.isFinite(n) && n >= 1 && n <= 16 ? n : undefined;
@@ -81,8 +73,8 @@ export default defineEventHandler(async (event) => {
     refresh: String(q.refresh).trim() === "true",
     res: (q.res as any) || "merged_by_type",
     src: (q.src as any) || "all",
-    plugins: parseList(q.plugins as string | undefined),
-    cloud_types: parseList(q.cloud_types as string | undefined),
+    plugins: parseList(q.plugins),
+    cloud_types: parseList(q.cloud_types),
     ext,
   };
 
