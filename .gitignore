@@ -25,4 +25,16 @@ logs
 
 # Runtime data (SQLite database, hot-searches)
 data/
-.playwright-mcpminiprogram_npm/
+
+# Tooling / IDE local data (never project source)
+.claude/
+.codebuddy/
+.playwright-mcp/
+.workbuddy/
+
+# WeChat mini-program: "构建 npm" output (regenerated locally)
+miniprogram/miniprogram_npm/
+
+# Guard: this project uses npm, NOT pnpm — ignore accidental pnpm artifacts
+pnpm-lock.yaml
+pnpm-workspace.yaml
