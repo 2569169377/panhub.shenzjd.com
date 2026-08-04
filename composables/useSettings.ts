@@ -67,7 +67,14 @@ export function useSettings(): UseSettingsReturn {
           ? parsed.enabledTgChannels.filter((x: unknown) => typeof x === "string")
           : [...(defaultTgChannels.value?.length ? defaultTgChannels.value : channelsConfig.defaultChannels)],
         enabledPlugins: Array.isArray(parsed.enabledPlugins)
-          ? parsed.enabledPlugins.filter((x: unknown) => typeof x === "string")
+          ? parsed.enabledPlugins
+              .filter((x: unknown) => typeof x === "string")
+              // 合并新增插件：老用户 localStorage 里只有旧名单，新加的插件自动启用
+              .concat(
+                ALL_PLUGIN_NAMES.filter(
+                  (n) => !parsed.enabledPlugins.includes(n)
+                )
+              )
           : [...DEFAULT_USER_SETTINGS.enabledPlugins],
         concurrency:
           typeof parsed.concurrency === "number" && parsed.concurrency > 0
