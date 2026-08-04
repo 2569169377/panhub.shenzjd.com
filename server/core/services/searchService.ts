@@ -15,6 +15,41 @@ import {
 import { buildSearchKeywordVariants } from "../utils/searchKeyword";
 import { loggers } from "../utils/logger";
 
+/**
+ * 规范化单个插件返回的结果（隔离闸 C）：
+ * - 强制 links 为数组、每条 link 必含 string 类型的 url；
+ * - datetime / title / content 等统一为字符串；
+ * 避免某个插件返回畸形结构（如 links 为非数组）在后续合并阶段抛错拖垮整响应。
+ */
+function normalizeSearchResult(raw: any): SearchResult {
+  const safeStr = (v: unknown): string =>
+    typeof v === "string" ? v : v == null ? "" : String(v);
+
+  const linksRaw = Array.isArray(raw?.links) ? raw.links : [];
+  const links: SearchResult["links"] = linksRaw
+    .filter((l: any) => l && typeof l.url === "string" && l.url.length > 0)
+    .map((l: any) => ({
+      type: safeStr(l.type),
+      url: safeStr(l.url),
+      password: safeStr(l.password),
+    }));
+
+  const tagsRaw = Array.isArray(raw?.tags) ? raw.tags : undefined;
+  const tags = tagsRaw?.map((t: any) => safeStr(t)).filter(Boolean);
+
+  return {
+    message_id: safeStr(raw?.message_id),
+    unique_id:
+      safeStr(raw?.unique_id) || `plugin-${Math.random().toString(36).slice(2)}`,
+    channel: safeStr(raw?.channel),
+    datetime: safeStr(raw?.datetime),
+    title: safeStr(raw?.title),
+    content: safeStr(raw?.content),
+    links,
+    tags: tags && tags.length ? tags : undefined,
+  };
+}
+
 export interface SearchServiceOptions {
   priorityChannels: string[];
   defaultChannels: string[];
@@ -117,31 +152,49 @@ export class SearchService {
 
     if (effSourceType === "all" || effSourceType === "tg") {
       tasks.push(async () => {
-        const concOverride =
-          typeof concurrency === "number" && concurrency > 0
-            ? concurrency
-            : undefined;
-        tgResults = await this.searchTG(
-          keyword,
-          effChannels,
-          !!forceRefresh,
-          concOverride,
-          ext,
-          signal
-        );
+        try {
+          const concOverride =
+            typeof concurrency === "number" && concurrency > 0
+              ? concurrency
+              : undefined;
+          tgResults = await this.searchTG(
+            keyword,
+            effChannels,
+            !!forceRefresh,
+            concOverride,
+            ext,
+            signal
+          );
+        } catch (err) {
+          // 隔离闸 B：TG 整路抛错时降级为 []，不影响插件结果返回
+          loggers.search.error("TG 搜索整路失败，已降级", {
+            keyword,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          tgResults = [];
+        }
       });
     }
     if (effSourceType === "all" || effSourceType === "plugin") {
       tasks.push(async () => {
-        pluginResults = await this.searchPlugins(
-          keyword,
-          plugins,
-          !!forceRefresh,
-          effConcurrency,
-          ext ?? {},
-          errorCollector,
-          signal
-        );
+        try {
+          pluginResults = await this.searchPlugins(
+            keyword,
+            plugins,
+            !!forceRefresh,
+            effConcurrency,
+            ext ?? {},
+            errorCollector,
+            signal
+          );
+        } catch (err) {
+          // 隔离闸 B：插件整路抛错时降级为 []，不影响 TG 结果返回
+          loggers.search.error("插件搜索整路失败，已降级", {
+            keyword,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          pluginResults = [];
+        }
       });
     }
 
@@ -394,7 +447,10 @@ export class SearchService {
             controller
           );
 
-          results = this.mergeUniqueResults(results, currentResults || []);
+          results = this.mergeUniqueResults(
+            results,
+            (currentResults || []).map(normalizeSearchResult)
+          );
 
           if (
             results.length >= SearchService.PLUGIN_VARIANT_TRIGGER ||
@@ -526,7 +582,10 @@ export class SearchService {
         : undefined;
     const out: MergedLinks = {};
     for (const result of results) {
-      for (const link of result.links || []) {
+      // 隔离闸 C：即使上游插件返回畸形 links（非数组）也不会在此抛错
+      if (!Array.isArray(result.links)) continue;
+      for (const link of result.links) {
+        if (!link || typeof link.url !== "string") continue;
         const type = (link.type || "").toLowerCase();
         if (allow && !allow.has(type)) continue;
         if (!out[type]) out[type] = [];

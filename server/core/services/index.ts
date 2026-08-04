@@ -1,5 +1,10 @@
 import { SearchService, type SearchServiceOptions } from "./searchService";
-import { PluginManager, registerGlobalPlugin } from "../plugins/manager";
+import {
+  PluginManager,
+  registerGlobalPlugin,
+  type AsyncSearchPlugin,
+} from "../plugins/manager";
+import { loggers } from "../utils/logger";
 // NOTE: 8 dead plugins removed on 2026-07-06 based on log analysis:
 //   hunhepan   - 3 APIs all dead (504/414/404)
 //   jikepan    - source down (CF 522)
@@ -10,19 +15,44 @@ import { PluginManager, registerGlobalPlugin } from "../plugins/manager";
 //   panta      - overseas IP unreachable (likely blocked)
 //   xuexizhinan - small site offline
 // See: data/panhub.shenzjd.com-20260706090537.log analysis
+// NOTE: 5 个死插件于 2026-08-04 删除（无引用）：zhizhen / hdr4k / muou / huban / shandian
 import { PansearchPlugin } from "../plugins/pansearch";
 import { NyaaPlugin } from "../plugins/nyaa";
+import { MelostPlugin } from "../plugins/melost";
+import { Quark4kPlugin } from "../plugins/quark4k";
+import { OugePlugin } from "../plugins/ouge";
+import { WanouPlugin } from "../plugins/wanou";
 
 const SERVICE_CONTEXT_KEY = "__panhub_search_service__";
+
+/**
+ * 安全注册插件（隔离闸 A）：单个插件构造或初始化抛错只跳过该插件，
+ * 不会让整个服务启不起来。这是“新增插件有问题也不影响现有服务”的第一道闸。
+ */
+function safeRegister(label: string, factory: () => AsyncSearchPlugin) {
+  try {
+    const plugin = factory();
+    registerGlobalPlugin(plugin);
+  } catch (err) {
+    loggers.plugin.error("插件注册失败，已跳过（不影响其他插件）", {
+      plugin: label,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 /**
  * 创建插件管理器并注册所有可用插件
  */
 function createPluginManager(): PluginManager {
   const pm = new PluginManager();
-  // 仅注册稳定可用的插件
-  registerGlobalPlugin(new PansearchPlugin());
-  registerGlobalPlugin(new NyaaPlugin());
+  // 仅注册稳定可用的插件；新增插件统一走 safeRegister，单点失败不影响整体
+  safeRegister("pansearch", () => new PansearchPlugin());
+  safeRegister("nyaa", () => new NyaaPlugin());
+  safeRegister("melost", () => new MelostPlugin());
+  safeRegister("quark4k", () => new Quark4kPlugin());
+  safeRegister("ouge", () => new OugePlugin());
+  safeRegister("wanou", () => new WanouPlugin());
   pm.registerAllGlobalPlugins();
   return pm;
 }

@@ -6,6 +6,10 @@
 export const ALL_PLUGIN_NAMES = [
   "pansearch",
   "nyaa",
+  "melost",
+  "quark4k",
+  "ouge",
+  "wanou",
 ] as const;
 
 // 平台信息配置 — icon 为官方 favicon 图片路径
