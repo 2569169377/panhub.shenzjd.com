@@ -22,6 +22,8 @@ import { MelostPlugin } from "../plugins/melost";
 import { Quark4kPlugin } from "../plugins/quark4k";
 import { OugePlugin } from "../plugins/ouge";
 import { WanouPlugin } from "../plugins/wanou";
+import { YunsoPlugin } from "../plugins/yunso";
+import { U3c3Plugin } from "../plugins/u3c3";
 
 const SERVICE_CONTEXT_KEY = "__panhub_search_service__";
 
@@ -53,6 +55,8 @@ function createPluginManager(): PluginManager {
   safeRegister("quark4k", () => new Quark4kPlugin());
   safeRegister("ouge", () => new OugePlugin());
   safeRegister("wanou", () => new WanouPlugin());
+  safeRegister("yunso", () => new YunsoPlugin());
+  safeRegister("u3c3", () => new U3c3Plugin());
   pm.registerAllGlobalPlugins();
   return pm;
 }

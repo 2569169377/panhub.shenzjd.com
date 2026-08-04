@@ -10,6 +10,8 @@ export const ALL_PLUGIN_NAMES = [
   "quark4k",
   "ouge",
   "wanou",
+  "yunso",
+  "u3c3",
 ] as const;
 
 // 平台信息配置 — icon 为官方 favicon 图片路径
@@ -27,6 +29,7 @@ export const PLATFORM_INFO: Record<
   "123": { name: "123网盘", color: "#10b981", icon: "/icons/123.png" },
   mobile: { name: "移动云盘", color: "#0ea5e9", icon: "/icons/mobile.png" },
   others: { name: "其他网盘", color: "#6b7280", icon: "/icons/others.png" },
+  magnet: { name: "磁力链接", color: "#22c55e", icon: "/icons/magnet.png" },
 };
 
 // 默认用户设置

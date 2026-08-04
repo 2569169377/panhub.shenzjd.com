@@ -68,3 +68,25 @@ export function extractLinksFromText(text: string): Link[] {
   collect(MAGNET_RE);
   return Array.from(found.values());
 }
+
+/**
+ * 把 HTML 片段转成纯文本（去标签 + 还原常见 HTML 实体）。
+ * 供各 HTML 解析类插件（quark4k / yunso / u3c3 等）复用，避免每个插件各写一份。
+ */
+export function cleanHTML(html?: string): string {
+  let s = html || "";
+  s = s.replace(/<br\s*\/?>/gi, "\n");
+  s = s.replace(/<[^>]+>/g, "\n");
+  s = s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+  return s
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join("\n");
+}
