@@ -1,6 +1,19 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearchStore";
 
 /**
+ * 与 SQLite 版保持一致的 EWMA 热度衰减：
+ * λ=1.0 → 半衰期约 17 小时；score = score × e^(-λ×间隔天数) + 1
+ */
+const LAMBDA = 1.0;
+const HOT_WINDOW_DAYS = 3;
+const HOT_WINDOW_MS = HOT_WINDOW_DAYS * 86400000;
+
+function decayScore(score: number, lastSearched: number, now: number): number {
+  const elapsedDays = (now - lastSearched) / 86400000;
+  return score * Math.exp(-LAMBDA * elapsedDays);
+}
+
+/**
  * 内存热搜存储实现
  * 用于 JSON 文件不可用时的降级方案（Vercel/CF 无持久化文件系统）
  */
@@ -12,7 +25,8 @@ export class MemoryHotSearchStore implements IHotSearchStore {
 
     const existing = this.memoryStore.get(term);
     if (existing) {
-      existing.score += 1;
+      // 指数加权：旧热度先按间隔衰减，再 +1，避免历史累计分数永久霸榜
+      existing.score = decayScore(existing.score, existing.lastSearched, now) + 1;
       existing.lastSearched = now;
     } else {
       this.memoryStore.set(term, {
@@ -25,17 +39,38 @@ export class MemoryHotSearchStore implements IHotSearchStore {
   }
 
   async getHotSearches(limit: number): Promise<HotSearchItem[]> {
+    const now = Date.now();
+    const cutoff = now - HOT_WINDOW_MS;
     return Array.from(this.memoryStore.values())
+      .filter((item) => item.lastSearched >= cutoff)
+      .map((item) => ({
+        ...item,
+        displayScore: Math.round(decayScore(item.score, item.lastSearched, now) * 100) / 100,
+      }))
       .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
+        const aScore = a.displayScore ?? 0;
+        const bScore = b.displayScore ?? 0;
+        if (aScore !== bScore) return bScore - aScore;
         return b.lastSearched - a.lastSearched;
       })
       .slice(0, limit);
   }
 
   async cleanupOldEntries(maxEntries: number): Promise<void> {
+    const now = Date.now();
+    const cutoff = now - HOT_WINDOW_MS;
+
+    // 先清理超过窗口期未搜索的旧词
+    for (const [term, item] of this.memoryStore) {
+      if (item.lastSearched < cutoff) {
+        this.memoryStore.delete(term);
+      }
+    }
+
     const entries = Array.from(this.memoryStore.entries()).sort((a, b) => {
-      if (b[1].score !== a[1].score) return b[1].score - a[1].score;
+      const aScore = a[1].score ?? 0;
+      const bScore = b[1].score ?? 0;
+      if (aScore !== bScore) return bScore - aScore;
       return b[1].lastSearched - a[1].lastSearched;
     });
 

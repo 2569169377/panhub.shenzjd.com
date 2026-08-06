@@ -6,9 +6,13 @@ import { resolve } from "node:path";
 const MAX_ENTRIES = 30;
 const DEFAULT_DB_DIR = "./data";
 const DEFAULT_DB_PATH = "./data/hot-searches.db";
-const LAMBDA = 0.05;
-/** 热搜只展示最近 N 天内有搜索记录的词 */
-const HOT_WINDOW_DAYS = 7;
+/**
+ * 热度衰减系数（/天）：score = score × e^(-λ×间隔天数) + 1
+ * λ=1.0 → 半衰期约 17 小时，保证"近期热度"快速体现，旧词自然退场，新词有上升通道
+ */
+const LAMBDA = 1.0;
+/** 热搜只展示最近 N 天内有搜索记录的词（配合 λ=1.0，3 天后热度基本归零） */
+const HOT_WINDOW_DAYS = 3;
 
 function isForbidden(term: string): boolean {
   const forbiddenPatterns = [
@@ -157,9 +161,14 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     if (!normalized) return;
     if (isForbidden(normalized)) return;
 
-    const existing = this.db.exec("SELECT score FROM hot_searches WHERE term = ?", [normalized]);
+    const existing = this.db.exec("SELECT score, last_searched_at FROM hot_searches WHERE term = ?", [normalized]);
     if (existing.length > 0 && existing[0].values.length > 0) {
-      this.db.run("UPDATE hot_searches SET score = score + 1, last_searched_at = ? WHERE term = ?", [now, normalized]);
+      const prevScore = existing[0].values[0][0] as number;
+      const prevTime = existing[0].values[0][1] as number;
+      // 指数加权：旧热度先按间隔衰减，再 +1，避免历史累计分数永久霸榜
+      const elapsedDays = (now - prevTime) / 86400000;
+      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + 1;
+      this.db.run("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?", [newScore, now, normalized]);
     } else {
       this.db.run("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)", [normalized, now, now]);
     }
@@ -174,10 +183,10 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     const cutoff = now - HOT_WINDOW_DAYS * 86400000;
     const result = this.db.exec(`
       SELECT term, score, last_searched_at, created_at,
-        score * exp(-0.05 * ((${now} - last_searched_at) / 86400000.0)) as decayed_score
+        score * exp(-${LAMBDA} * ((${now} - last_searched_at) / 86400000.0)) as decayed_score
       FROM hot_searches
       WHERE last_searched_at >= ${cutoff}
-      ORDER BY decayed_score DESC
+      ORDER BY decayed_score DESC, last_searched_at DESC
       LIMIT ${Math.min(limit, MAX_ENTRIES)}
     `);
 
@@ -198,7 +207,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
   }
 
   cleanupOldEntries(maxEntries: number): void {
-    // 清理超过 7 天未搜索的旧词，释放空间
+    // 清理超过 HOT_WINDOW_DAYS 天未搜索的旧词，释放空间
     const now = Date.now();
     const cutoff = now - HOT_WINDOW_DAYS * 86400000;
     this.db.run(`

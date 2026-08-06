@@ -35,7 +35,7 @@ describe("SqliteHotSearchStore", () => {
     const items = await store.getHotSearches(10);
     expect(items).toHaveLength(1);
     expect(items[0].term).toBe("星际穿越");
-    expect(items[0].score).toBe(1);
+    expect(items[0].score).toBeCloseTo(1, 5);
   });
 
   it("should increment score for repeated searches", async () => {
@@ -45,7 +45,7 @@ describe("SqliteHotSearchStore", () => {
     await store.recordSearch("海王", now + 2000);
     const items = await store.getHotSearches(10);
     expect(items).toHaveLength(1);
-    expect(items[0].score).toBe(3);
+    expect(items[0].score).toBeCloseTo(3, 4);
   });
 
   it("should normalize full-width characters", async () => {

@@ -23,7 +23,7 @@ describe("HotSearchService (JSON file store)", () => {
 
     expect(searches.length).toBeGreaterThan(0);
     expect(searches[0].term).toBe("测试电影");
-    expect(searches[0].score).toBe(1);
+    expect(searches[0].score).toBeCloseTo(1, 5);
   });
 
   it("应该能够增加已有搜索词的分数", async () => {
@@ -33,7 +33,7 @@ describe("HotSearchService (JSON file store)", () => {
     const searches = await service.getHotSearches(10);
     const item = searches.find((s) => s.term === "测试电影");
 
-    expect(item?.score).toBe(3);
+    expect(item?.score).toBeCloseTo(3, 5);
   });
 
   it("应该能够获取热搜列表", async () => {
@@ -90,9 +90,9 @@ describe("HotSearchService (JSON file store)", () => {
     const searches = await service.getHotSearches(10);
 
     expect(searches[0].term).toBe("高分词");
-    expect(searches[0].score).toBe(3);
+    expect(searches[0].score).toBeCloseTo(3, 5);
     expect(searches[1].term).toBe("低分词");
-    expect(searches[1].score).toBe(1);
+    expect(searches[1].score).toBeCloseTo(1, 5);
   });
 
   it("应该处理空搜索词", async () => {
