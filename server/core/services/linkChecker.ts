@@ -1047,6 +1047,40 @@ async function checkMobile(
 const inflight = new Map<string, Promise<LinkCheckResult>>();
 const cache = new Map<string, { result: LinkCheckResult; expiresAt: number }>();
 
+// ========== 平台级熔断（防已断平台反复打满超时） ==========
+
+const CIRCUIT_FAIL_THRESHOLD = 3;
+const CIRCUIT_OPEN_MS = 5 * 60 * 1000;
+const circuit = new Map<Platform, { failures: number; until: number }>();
+
+/** 熔断是否开启（内部使用，导出供测试） */
+export function isCircuitOpen(platform: Platform): boolean {
+  const c = circuit.get(platform);
+  if (!c) return false;
+  // until=0 表示"计数中但未熔断"，不清除条目、不视为熔断
+  if (c.until > 0) {
+    if (Date.now() < c.until) return true;
+    circuit.delete(platform); // 熔断到期自动半开
+  }
+  return false;
+}
+
+/** 记录一次网络失败（内部使用，导出供测试） */
+export function recordCircuitFailure(platform: Platform): void {
+  const c = circuit.get(platform) || { failures: 0, until: 0 };
+  c.failures++;
+  if (c.failures >= CIRCUIT_FAIL_THRESHOLD) {
+    c.until = Date.now() + CIRCUIT_OPEN_MS;
+    c.failures = 0;
+  }
+  circuit.set(platform, c);
+}
+
+/** 记录一次成功（内部使用，导出供测试） */
+export function recordCircuitSuccess(platform: Platform): void {
+  circuit.delete(platform);
+}
+
 async function doCheck(item: CheckItem): Promise<LinkCheckResult> {
   const platform = detectPlatform(item.url);
   const base: LinkCheckResult = {
@@ -1058,6 +1092,11 @@ async function doCheck(item: CheckItem): Promise<LinkCheckResult> {
 
   if (platform === "others") {
     return { ...base, reason: "unsupported link type" };
+  }
+
+  // 平台熔断中：直接返回 unknown，不发无意义的超时请求
+  if (isCircuitOpen(platform)) {
+    return { ...base, status: "uncertain", reason: "平台探活熔断中（5 分钟后自动重试）" };
   }
 
   try {
@@ -1120,8 +1159,15 @@ async function doCheck(item: CheckItem): Promise<LinkCheckResult> {
       default:
         outcome = { status: "unsupported" };
     }
+    // 网络层失败（respSummary 生成的"请求失败:..."）触发熔断计数；业务判定（locked/bad/ok）不算
+    if (/^请求失败/.test(outcome.reason || "")) {
+      recordCircuitFailure(platform);
+    } else {
+      recordCircuitSuccess(platform);
+    }
     return { ...base, status: outcome.status, reason: outcome.reason };
   } catch (err) {
+    recordCircuitFailure(platform);
     return {
       ...base,
       status: "uncertain",
@@ -1198,6 +1244,11 @@ export async function checkLinks(items: CheckItem[]): Promise<LinkCheckResult[]>
 export function _clearLinkCheckCache(): void {
   cache.clear();
   inflight.clear();
+}
+
+/** 仅测试用：重置熔断状态 */
+export function _resetCircuits(): void {
+  circuit.clear();
 }
 
 // ========== 缓存定期清理（防止长期运行内存增长） ==========

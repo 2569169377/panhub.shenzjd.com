@@ -26,6 +26,10 @@ import {
   decryptMobilePayload,
   checkLink,
   _clearLinkCheckCache,
+  _resetCircuits,
+  isCircuitOpen,
+  recordCircuitFailure,
+  recordCircuitSuccess,
 } from "../../server/core/services/linkChecker";
 
 describe("linkChecker / classifyAliyun（pansou 逻辑）", () => {
@@ -349,5 +353,44 @@ describe("linkChecker / checkLink 无网络路径", () => {
     _clearLinkCheckCache();
     const r = await checkLink({ url: "https://example.com/foo" });
     expect(r.status).toBe("unsupported");
+  });
+});
+
+describe("linkChecker / 平台熔断", () => {
+  it("连续 3 次网络失败后熔断开启", () => {
+    _resetCircuits();
+    expect(isCircuitOpen("quark")).toBe(false);
+    recordCircuitFailure("quark");
+    recordCircuitFailure("quark");
+    expect(isCircuitOpen("quark")).toBe(false); // 2 次未熔断
+    recordCircuitFailure("quark");
+    expect(isCircuitOpen("quark")).toBe(true); // 3 次熔断
+    _resetCircuits();
+  });
+
+  it("成功一次即清除熔断", () => {
+    _resetCircuits();
+    recordCircuitFailure("quark");
+    recordCircuitFailure("quark");
+    recordCircuitFailure("quark");
+    expect(isCircuitOpen("quark")).toBe(true);
+    recordCircuitSuccess("quark");
+    expect(isCircuitOpen("quark")).toBe(false);
+    _resetCircuits();
+  });
+
+  it("熔断中的链接直接返回 uncertain 且不发网络（快速）", async () => {
+    _resetCircuits();
+    _clearLinkCheckCache();
+    // 熔断 quark
+    recordCircuitFailure("quark");
+    recordCircuitFailure("quark");
+    recordCircuitFailure("quark");
+    const start = Date.now();
+    const r = await checkLink({ url: "https://pan.quark.cn/s/abcdef1234" });
+    expect(r.status).toBe("uncertain");
+    expect(r.reason).toContain("熔断");
+    expect(Date.now() - start).toBeLessThan(500); // 无网络请求
+    _resetCircuits();
   });
 });
