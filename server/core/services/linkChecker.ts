@@ -1161,3 +1161,18 @@ export function _clearLinkCheckCache(): void {
   cache.clear();
   inflight.clear();
 }
+
+// ========== 缓存定期清理（防止长期运行内存增长） ==========
+
+const CACHE_CLEAN_INTERVAL_MS = 60 * 60 * 1000;
+
+function pruneExpiredCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(key);
+  }
+}
+
+// unref：不让定时器阻止进程退出（vitest / CLI 场景）
+const cacheTimer = setInterval(pruneExpiredCache, CACHE_CLEAN_INTERVAL_MS);
+cacheTimer.unref?.();

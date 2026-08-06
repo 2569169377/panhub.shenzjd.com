@@ -26,6 +26,7 @@
         <div class="resource-content">
           <a
             class="resource-link"
+            :class="{ 'resource-link--dead': linkStatus(r) === 'bad' }"
             :href="r.url"
             target="_blank"
             rel="noopener noreferrer nofollow"
@@ -57,6 +58,23 @@
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
                 提取码: {{ r.password }}
+              </span>
+
+              <!-- 服务端探活结果角标（异步懒查，不阻塞渲染） -->
+              <span v-if="linkStatus(r) === 'bad'" class="meta-tag dead">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                已失效
+              </span>
+              <span v-else-if="linkStatus(r) === 'locked'" class="meta-tag locked">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <circle cx="12" cy="16" r="1"></circle>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                需密码
               </span>
             </div>
 
@@ -105,6 +123,27 @@ const emit = defineEmits(["toggle", "copy"]);
 
 const copiedUrl = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 链接有效性检测（服务端探活，异步懒查当前可见链接）
+const { enqueue, statusOf } = useLinkCheck();
+
+function linkStatus(r: any) {
+  return statusOf(r.url)?.status;
+}
+
+watch(
+  () => visibleItems.value,
+  (items) => {
+    if (!items || items.length === 0) return;
+    enqueue(
+      items.map((r) => ({
+        url: typeof r.url === "string" ? r.url : "",
+        password: typeof r.password === "string" ? r.password : "",
+      }))
+    );
+  },
+  { immediate: true }
+);
 
 function handleCopy(url: string) {
   emit("copy", url);
@@ -381,6 +420,28 @@ function formatDate(d?: string) {
   background: rgba(16, 185, 129, 0.1);
   border-color: rgba(16, 185, 129, 0.2);
   color: var(--success);
+}
+
+/* 失效角标（红） */
+.meta-tag.dead {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #ef4444;
+}
+
+/* 需密码角标（橙） */
+.meta-tag.locked {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #f59e0b;
+}
+
+/* 失效链接：删除线 + 弱化 */
+.resource-link--dead {
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+  text-decoration-thickness: 1.5px;
+  opacity: 0.6;
 }
 
 /* 复制按钮 */
