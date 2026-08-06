@@ -96,7 +96,7 @@ async function httpRequest(
   url: string,
   init: RequestInit = {},
   timeoutMs: number = REQUEST_TIMEOUT_MS
-): Promise<HttpResp | null> {
+): Promise<HttpResp> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -107,15 +107,19 @@ async function httpRequest(
     });
     const text = await res.text();
     return { status: res.status, text };
-  } catch {
-    return null;
+  } catch (err) {
+    // 网络层失败（DNS/TLS/连接/超时）：把错误信息带出来便于诊断
+    return {
+      status: 0,
+      text: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
-function jsonBody(resp: HttpResp | null): any | null {
-  if (!resp) return null;
+function jsonBody(resp: HttpResp): any | null {
+  if (resp.status === 0) return null;
   try {
     return JSON.parse(resp.text);
   } catch {
@@ -124,8 +128,8 @@ function jsonBody(resp: HttpResp | null): any | null {
 }
 
 /** 诊断用：把失败响应压缩成一行摘要（HTTP 状态 + 响应片段） */
-function respSummary(resp: HttpResp | null): string {
-  if (!resp) return "请求失败";
+function respSummary(resp: HttpResp): string {
+  if (resp.status === 0) return `请求失败: ${resp.text.slice(0, 120)}`;
   const head = resp.text.replace(/\s+/g, " ").slice(0, 80);
   if (resp.status < 200 || resp.status >= 400) {
     return `HTTP ${resp.status} ${head}`;
@@ -818,7 +822,7 @@ async function checkUC(url: string): Promise<CheckOutcome> {
         "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     }),
   });
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
+  if (resp.status === 0) return { status: "uncertain", reason: respSummary(resp) };
   return classifyUCPage(resp.text, resp.status);
 }
 
@@ -869,7 +873,7 @@ async function checkTianyi(
   const resp = await httpRequest(url, {
     headers: h({ referer, "sign-type": "1" }),
   });
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
+  if (resp.status === 0) return { status: "uncertain", reason: respSummary(resp) };
   return classifyTianyi(resp.text, resp.status);
 }
 
@@ -940,7 +944,7 @@ async function checkXunlei(
       "x-captcha-token": captchaToken,
     }),
   });
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
+  if (resp.status === 0) return { status: "uncertain", reason: respSummary(resp) };
   if (resp.status === 404 || resp.status === 403) {
     return { status: "bad", reason: "链接失效" };
   }
@@ -970,7 +974,7 @@ async function check115(
       "sec-fetch-site": "same-origin",
     }),
   });
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
+  if (resp.status === 0) return { status: "uncertain", reason: respSummary(resp) };
   const rsp = jsonBody(resp);
   if (!rsp) return { status: "uncertain", reason: respSummary(resp) };
   return classify115(rsp);
@@ -1014,7 +1018,7 @@ async function checkMobile(
       body: JSON.stringify({ data: encrypted }),
     }
   );
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
+  if (resp.status === 0) return { status: "uncertain", reason: respSummary(resp) };
   let decrypted: string;
   try {
     decrypted = decryptMobilePayload(resp.text);
