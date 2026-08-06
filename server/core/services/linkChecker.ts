@@ -92,6 +92,23 @@ interface HttpResp {
   text: string;
 }
 
+/** 递归提取错误 cause 链（undici fetch 的真实错误在 cause 里） */
+function errorChain(err: unknown): string {
+  const parts: string[] = [];
+  let cur: any = err;
+  const seen = new Set<object>();
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const msg =
+      typeof cur.message === "string" && cur.message ? cur.message : String(cur);
+    const code = typeof cur.code === "string" && cur.code ? ` [${cur.code}]` : "";
+    parts.push(msg + code);
+    cur = cur.cause ?? (Array.isArray(cur.errors) ? cur.errors[0] : undefined);
+    if (parts.length >= 4) break;
+  }
+  return parts.join(" <- ");
+}
+
 async function httpRequest(
   url: string,
   init: RequestInit = {},
@@ -108,11 +125,8 @@ async function httpRequest(
     const text = await res.text();
     return { status: res.status, text };
   } catch (err) {
-    // 网络层失败（DNS/TLS/连接/超时）：把错误信息带出来便于诊断
-    return {
-      status: 0,
-      text: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-    };
+    // 网络层失败（DNS/TLS/连接/超时）：把错误 cause 链带出来便于诊断
+    return { status: 0, text: errorChain(err) };
   } finally {
     clearTimeout(timer);
   }
