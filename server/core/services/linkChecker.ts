@@ -123,6 +123,16 @@ function jsonBody(resp: HttpResp | null): any | null {
   }
 }
 
+/** 诊断用：把失败响应压缩成一行摘要（HTTP 状态 + 响应片段） */
+function respSummary(resp: HttpResp | null): string {
+  if (!resp) return "请求失败";
+  const head = resp.text.replace(/\s+/g, " ").slice(0, 80);
+  if (resp.status < 200 || resp.status >= 400) {
+    return `HTTP ${resp.status} ${head}`;
+  }
+  return `响应非 JSON (HTTP ${resp.status}) ${head}`;
+}
+
 function h(headers: Record<string, string>): Record<string, string> {
   return { "User-Agent": UA, ...headers };
 }
@@ -753,8 +763,9 @@ async function checkAliyun(
       body: JSON.stringify({ share_id: shareID }),
     }
   );
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
-  return classifyAliyun(jsonBody(resp), resp.status);
+  const rsp = jsonBody(resp);
+  if (!rsp) return { status: "uncertain", reason: respSummary(resp) };
+  return classifyAliyun(rsp, resp.status);
 }
 
 async function checkQuark(
@@ -778,6 +789,7 @@ async function checkQuark(
     }
   );
   const tokenRsp = jsonBody(tokenResp);
+  if (!tokenRsp) return { status: "uncertain", reason: respSummary(tokenResp) };
   const tokenOutcome = classifyQuarkToken(tokenRsp);
   if (tokenOutcome.status !== "ok") return tokenOutcome;
   const stoken = tokenOutcome.stoken || "";
@@ -794,7 +806,9 @@ async function checkQuark(
       }),
     }
   );
-  return classifyQuarkDetail(jsonBody(detailResp));
+  const detailRsp = jsonBody(detailResp);
+  if (!detailRsp) return { status: "uncertain", reason: respSummary(detailResp) };
+  return classifyQuarkDetail(detailRsp);
 }
 
 async function checkUC(url: string): Promise<CheckOutcome> {
@@ -837,8 +851,9 @@ async function checkBaidu(
   });
   if (bdclnd) headers.cookie = `BDCLND=${bdclnd}`;
   const listResp = await httpRequest(listURL, { headers });
-  if (!listResp) return { status: "uncertain", reason: "请求失败" };
-  return classifyBaiduList(jsonBody(listResp));
+  const listRsp = jsonBody(listResp);
+  if (!listRsp) return { status: "uncertain", reason: respSummary(listResp) };
+  return classifyBaiduList(listRsp);
 }
 
 async function checkTianyi(
@@ -862,8 +877,9 @@ async function check123(shareKey: string): Promise<CheckOutcome> {
   const resp = await httpRequest(
     `https://www.123pan.com/api/share/info?shareKey=${encodeURIComponent(shareKey)}`
   );
-  if (!resp) return { status: "uncertain", reason: "请求失败" };
-  return classify123(jsonBody(resp), resp.status);
+  const rsp = jsonBody(resp);
+  if (!rsp) return { status: "uncertain", reason: respSummary(resp) };
+  return classify123(rsp, resp.status);
 }
 
 async function checkXunlei(
@@ -909,7 +925,7 @@ async function checkXunlei(
   );
   const tokenRsp = jsonBody(tokenResp);
   const captchaToken = tokenRsp?.captcha_token;
-  if (!captchaToken) return { status: "uncertain", reason: "获取验证令牌失败" };
+  if (!captchaToken) return { status: "uncertain", reason: respSummary(tokenResp) };
 
   const apiURL = `https://api-pan.xunlei.com/drive/v1/share?share_id=${encodeURIComponent(id)}&pass_code=${encodeURIComponent(password)}&limit=100&pass_code_token=&page_token=&thumbnail_size=SIZE_SMALL`;
   const resp = await httpRequest(apiURL, {
@@ -928,7 +944,9 @@ async function checkXunlei(
   if (resp.status === 404 || resp.status === 403) {
     return { status: "bad", reason: "链接失效" };
   }
-  return classifyXunlei(jsonBody(resp));
+  const rsp = jsonBody(resp);
+  if (!rsp) return { status: "uncertain", reason: respSummary(resp) };
+  return classifyXunlei(rsp);
 }
 
 async function check115(
@@ -953,7 +971,9 @@ async function check115(
     }),
   });
   if (!resp) return { status: "uncertain", reason: "请求失败" };
-  return classify115(jsonBody(resp));
+  const rsp = jsonBody(resp);
+  if (!rsp) return { status: "uncertain", reason: respSummary(resp) };
+  return classify115(rsp);
 }
 
 async function checkMobile(
