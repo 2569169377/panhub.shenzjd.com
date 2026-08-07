@@ -16,8 +16,8 @@ import { loggers } from "../utils/logger";
 //   xuexizhinan - small site offline
 // See: data/panhub.shenzjd.com-20260706090537.log analysis
 // NOTE: 5 个死插件于 2026-08-04 删除（无引用）：zhizhen / hdr4k / muou / huban / shandian
+// NOTE: nyaa 于 2026-08-07 移除：纯磁力种子站（搜索结果只产出 magnet 链接），产品要求不出现磁力链接
 import { PansearchPlugin } from "../plugins/pansearch";
-import { NyaaPlugin } from "../plugins/nyaa";
 import { MelostPlugin } from "../plugins/melost";
 import { Quark4kPlugin } from "../plugins/quark4k";
 import { OugePlugin } from "../plugins/ouge";
@@ -50,7 +50,6 @@ function createPluginManager(): PluginManager {
   const pm = new PluginManager();
   // 仅注册稳定可用的插件；新增插件统一走 safeRegister，单点失败不影响整体
   safeRegister("pansearch", () => new PansearchPlugin());
-  safeRegister("nyaa", () => new NyaaPlugin());
   safeRegister("melost", () => new MelostPlugin());
   safeRegister("quark4k", () => new Quark4kPlugin());
   safeRegister("ouge", () => new OugePlugin());

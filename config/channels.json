@@ -81,8 +81,7 @@
     "quanziyuanshe"
   ],
   "defaultPlugins": [
-    "pansearch",
-    "nyaa"
+    "pansearch"
   ],
   "defaultConcurrency": 4,
   "pluginTimeoutMs": 5000,

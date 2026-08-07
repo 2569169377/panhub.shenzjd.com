@@ -5,7 +5,6 @@
 //   - server/core/plugins/ 下的插件实现
 export const ALL_PLUGIN_NAMES = [
   "pansearch",
-  "nyaa",
   "melost",
   "quark4k",
   "ouge",
