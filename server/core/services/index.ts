@@ -26,6 +26,7 @@ import { OugePlugin } from "../plugins/ouge";
 import { WanouPlugin } from "../plugins/wanou";
 import { YunsoPlugin } from "../plugins/yunso";
 import { U3c3Plugin } from "../plugins/u3c3";
+import { DyyjvPlugin } from "../plugins/dyyjv";
 
 const SERVICE_CONTEXT_KEY = "__panhub_search_service__";
 
@@ -58,7 +59,8 @@ function createPluginManager(): PluginManager {
   safeRegister("wanou", () => new WanouPlugin());
   safeRegister("yunso", () => new YunsoPlugin());
   safeRegister("u3c3", () => new U3c3Plugin());
-  // 2026-08-07 盘点新增（混合网盘型，线上实测中，出货的留下）
+  // 2026-08-07 新增：dyyjv（电影云集，WordPress REST API，详情页内嵌夸克/百度链接）
+  safeRegister("dyyjv", () => new DyyjvPlugin());
   pm.registerAllGlobalPlugins();
   return pm;
 }

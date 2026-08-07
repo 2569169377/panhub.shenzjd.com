@@ -11,6 +11,8 @@ export const ALL_PLUGIN_NAMES = [
   "wanou",
   "yunso",
   "u3c3",
+  // 2026-08-07 新增：dyyjv（电影云集）
+  "dyyjv",
 ] as const;
 
 // 平台信息配置 — icon 为官方 favicon 图片路径
