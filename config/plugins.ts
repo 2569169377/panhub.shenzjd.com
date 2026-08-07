@@ -11,11 +11,6 @@ export const ALL_PLUGIN_NAMES = [
   "wanou",
   "yunso",
   "u3c3",
-  // 2026-08-07 盘点新增（混合网盘型，线上实测中）
-  "panyq",
-  "fox4k",
-  "susu",
-  "pan666",
 ] as const;
 
 // 平台信息配置 — icon 为官方 favicon 图片路径
