@@ -17,6 +17,8 @@ import { loggers } from "../utils/logger";
 // See: data/panhub.shenzjd.com-20260706090537.log analysis
 // NOTE: 5 个死插件于 2026-08-04 删除（无引用）：zhizhen / hdr4k / muou / huban / shandian
 // NOTE: nyaa 于 2026-08-07 移除：纯磁力种子站（搜索结果只产出 magnet 链接），产品要求不出现磁力链接
+// NOTE: 2026-08-07 盘点：solidtorrents/torrentgalaxy/x1337x 纯磁力站，按产品要求不注册；
+//       panyq/fox4k/susu/pan666 为混合网盘型，注册上线实测（能出货的留下，死的删）
 import { PansearchPlugin } from "../plugins/pansearch";
 import { MelostPlugin } from "../plugins/melost";
 import { Quark4kPlugin } from "../plugins/quark4k";
@@ -24,6 +26,10 @@ import { OugePlugin } from "../plugins/ouge";
 import { WanouPlugin } from "../plugins/wanou";
 import { YunsoPlugin } from "../plugins/yunso";
 import { U3c3Plugin } from "../plugins/u3c3";
+import { PanyqPlugin } from "../plugins/panyq";
+import { Fox4kPlugin } from "../plugins/fox4k";
+import { SusuPlugin } from "../plugins/susu";
+import { Pan666Plugin } from "../plugins/pan666";
 
 const SERVICE_CONTEXT_KEY = "__panhub_search_service__";
 
@@ -56,6 +62,11 @@ function createPluginManager(): PluginManager {
   safeRegister("wanou", () => new WanouPlugin());
   safeRegister("yunso", () => new YunsoPlugin());
   safeRegister("u3c3", () => new U3c3Plugin());
+  // 2026-08-07 盘点新增（混合网盘型，线上实测中，出货的留下）
+  safeRegister("panyq", () => new PanyqPlugin());
+  safeRegister("fox4k", () => new Fox4kPlugin());
+  safeRegister("susu", () => new SusuPlugin());
+  safeRegister("pan666", () => new Pan666Plugin());
   pm.registerAllGlobalPlugins();
   return pm;
 }

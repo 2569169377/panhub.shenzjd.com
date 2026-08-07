@@ -1,4 +1,4 @@
-import { BaseAsyncPlugin, registerGlobalPlugin } from "./manager";
+import { BaseAsyncPlugin } from "./manager";
 import type { SearchResult } from "../types/models";
 import { ofetch } from "ofetch";
 
@@ -127,5 +127,3 @@ function extractPwd(url: string): string {
   if (m2) return m2[1];
   return "";
 }
-
-registerGlobalPlugin(new PanyqPlugin());

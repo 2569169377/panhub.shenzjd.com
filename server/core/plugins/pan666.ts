@@ -1,4 +1,4 @@
-import { BaseAsyncPlugin, registerGlobalPlugin } from "./manager";
+import { BaseAsyncPlugin } from "./manager";
 import type { SearchResult } from "../types/models";
 import { ofetch } from "ofetch";
 
@@ -92,5 +92,3 @@ export class Pan666Plugin extends BaseAsyncPlugin {
     return out;
   }
 }
-
-registerGlobalPlugin(new Pan666Plugin());
