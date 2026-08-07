@@ -16,6 +16,29 @@ import { buildSearchKeywordVariants } from "../utils/searchKeyword";
 import { loggers } from "../utils/logger";
 
 /**
+ * 判断链接是否为磁力链接（产品需求：搜索结果不出现磁力链接）。
+ * 按 URL 协议与 type 双重判断，避免上游把 magnet URL 标成其他 type 而漏网。
+ */
+function isMagnetLink(link: { type?: string; url?: string } | undefined | null): boolean {
+  if (!link) return false;
+  if (typeof link.url === "string" && link.url.toLowerCase().startsWith("magnet:")) {
+    return true;
+  }
+  return (link.type || "").toLowerCase() === "magnet";
+}
+
+/**
+ * 从结果中剔除磁力链接（原地修改 links）。
+ * @returns 是否确实移除了磁力链接（供调用方判断“纯磁力资源”以丢弃整条结果）
+ */
+function stripMagnetLinks(result: SearchResult): boolean {
+  if (!Array.isArray(result.links) || result.links.length === 0) return false;
+  const before = result.links.length;
+  result.links = result.links.filter((l) => !isMagnetLink(l));
+  return result.links.length !== before;
+}
+
+/**
  * 规范化单个插件返回的结果（隔离闸 C）：
  * - 强制 links 为数组、每条 link 必含 string 类型的 url；
  * - datetime / title / content 等统一为字符串；
@@ -205,8 +228,12 @@ export class SearchService {
 
     const filteredForResults: SearchResult[] = [];
     for (const result of allResults) {
+      // 统一剔除磁力链接（TG / 插件来源都覆盖）
+      const strippedMagnet = stripMagnetLinks(result);
       const hasTime = !!result.datetime;
       const hasLinks = Array.isArray(result.links) && result.links.length > 0;
+      // 原本只有磁力链接的资源（如种子站点结果）过滤后无链接，整条不展示
+      if (strippedMagnet && !hasLinks) continue;
       if (hasTime || hasLinks) {
         filteredForResults.push(result);
       }
@@ -586,6 +613,8 @@ export class SearchService {
       if (!Array.isArray(result.links)) continue;
       for (const link of result.links) {
         if (!link || typeof link.url !== "string") continue;
+        // 磁力链接一律不进聚合结果（双保险，防上游 type 标注异常）
+        if (isMagnetLink(link)) continue;
         const type = (link.type || "").toLowerCase();
         if (allow && !allow.has(type)) continue;
         if (!out[type]) out[type] = [];
