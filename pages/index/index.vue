@@ -119,11 +119,11 @@
         <div v-if="hotTerms.length > 0" class="empty-suggestions">
           <span class="empty-suggestions__label">大家都在搜：</span>
           <button
-            v-for="term in hotTerms.slice(0, 5)"
-            :key="term"
+            v-for="item in mixedHotTerms"
+            :key="item.term"
             class="empty-suggestions__tag"
-            @click="quickSearch(term)">
-            {{ term }}
+            @click="quickSearch(item.term)">
+            {{ item.term }}<span v-if="item.isNew" class="empty-suggestions__new">新</span>
           </button>
         </div>
       </div>
@@ -145,7 +145,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
+import { isNewTerm, minutesAgo } from "~/utils/hotSearch";
 import { PLATFORM_INFO } from "~/config/plugins";
 
 const config = useRuntimeConfig();
@@ -229,17 +230,50 @@ const initialVisible = 3;
 const expandedSet = ref<Set<string>>(new Set());
 
 // 空状态热搜推荐
-const hotTerms = ref<string[]>([]);
+interface HotTermItem {
+  term: string;
+  createdAt: number;
+  lastSearched: number;
+  isNew: boolean;
+  minutesAgo: number;
+}
+
+const hotTerms = ref<HotTermItem[]>([]);
 
 async function fetchHotTerms() {
   try {
-    const res = await fetch("/api/hot-searches?limit=5");
+    const res = await fetch("/api/hot-searches?limit=30");
     const data = await res.json();
     if (data.code === 0) {
-      hotTerms.value = data.data.hotSearches.map((s: any) => s.term);
+      const now = Date.now();
+      hotTerms.value = data.data.hotSearches.map((s: any) => ({
+        term: s.term,
+        createdAt: s.createdAt ?? 0,
+        lastSearched: s.lastSearched ?? 0,
+        isNew: isNewTerm(s.createdAt ?? 0, now),
+        minutesAgo: minutesAgo(s.lastSearched ?? 0, now),
+      }));
     }
   } catch {}
 }
+
+// 混合选词：2 个最热 + 1 个新词 + 1 个最近被搜 + 补足，保证每次打开都能看到新面孔
+const mixedHotTerms = computed<HotTermItem[]>(() => {
+  const list = hotTerms.value;
+  if (list.length <= 5) return list;
+  const picked = new Set<string>();
+  const result: HotTermItem[] = [];
+  const push = (item: HotTermItem) => {
+    if (picked.has(item.term) || result.length >= 5) return;
+    picked.add(item.term);
+    result.push(item);
+  };
+  list.slice(0, 2).forEach(push); // 最热
+  [...list].sort((a, b) => b.createdAt - a.createdAt).forEach((i) => i.isNew && push(i)); // 新词（最新出现优先）
+  [...list].sort((a, b) => a.minutesAgo - b.minutesAgo).forEach(push); // 最近被搜
+  list.forEach(push); // 补足到 5 个
+  return result.slice(0, 5);
+});
 
 // 使用搜索 composable
 const {
@@ -844,6 +878,18 @@ function visibleSorted(items: any[]) {
 .empty-suggestions__tag:hover {
   border-color: var(--primary);
   color: var(--primary);
+}
+.empty-suggestions__new {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  vertical-align: 1px;
 }
 
 /* 错误提示 */

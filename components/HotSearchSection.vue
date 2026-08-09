@@ -8,6 +8,10 @@
         <span>搜索热度加载中…</span>
       </div>
 
+      <div v-if="!loading && searches.length > 0 && latestAgoText" class="hot-update-info">
+        更新于 {{ latestAgoText }}
+      </div>
+
       <ClientOnly>
         <div
           v-show="!loading && searches.length > 0"
@@ -26,6 +30,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from "vue";
+import { minutesAgo, formatAgo } from "~/utils/hotSearch";
 
 interface Props {
   onSearch: (term: string) => void;
@@ -43,6 +48,7 @@ const props = defineProps<Props>();
 const loading = ref(false);
 const searches = ref<HotSearchItem[]>([]);
 const hasInitialized = ref(false);
+const latestAgoText = ref("");
 const tagCloudRef = ref<HTMLElement | null>(null);
 const isUpdating = ref(false);
 let tagCloudInstance: { update: (t: string[]) => void; destroy: () => void } | null = null;
@@ -56,11 +62,19 @@ async function fetchHotSearches() {
     if (data.code === 0 && data.data?.hotSearches) {
       // 服务端已按衰减后的 displayScore 排序，直接使用，不要按原始 score 重排（会导致顺序错位）
       searches.value = data.data.hotSearches.slice(0, 25);
+      // 榜单最近一次搜索时间（用于"更新于 X 分钟前"）
+      const latest = Math.max(
+        0,
+        ...searches.value.map((s) => s.lastSearched ?? 0)
+      );
+      latestAgoText.value = latest > 0 ? formatAgo(minutesAgo(latest)) : "";
     } else {
       searches.value = [];
+      latestAgoText.value = "";
     }
   } catch {
     searches.value = [];
+    latestAgoText.value = "";
   } finally {
     loading.value = false;
   }
@@ -162,6 +176,13 @@ defineExpose({ init, refresh });
 
 .cloud-container {
   width: 100%;
+}
+
+.hot-update-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+  margin-bottom: 8px;
 }
 
 .tag-cloud-wrap {
