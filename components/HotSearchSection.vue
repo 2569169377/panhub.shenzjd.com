@@ -54,9 +54,8 @@ async function fetchHotSearches() {
     const response = await fetch("/api/hot-searches?limit=25");
     const data = await response.json();
     if (data.code === 0 && data.data?.hotSearches) {
-      searches.value = data.data.hotSearches
-        .sort((a: HotSearchItem, b: HotSearchItem) => b.score - a.score)
-        .slice(0, 25);
+      // 服务端已按衰减后的 displayScore 排序，直接使用，不要按原始 score 重排（会导致顺序错位）
+      searches.value = data.data.hotSearches.slice(0, 25);
     } else {
       searches.value = [];
     }
