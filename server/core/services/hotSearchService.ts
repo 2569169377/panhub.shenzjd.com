@@ -1,5 +1,6 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearchStore";
 import { MemoryHotSearchStore } from "./memoryHotSearchStore";
+import { loggers } from "../utils/logger";
 
 let sharedMemoryStore: MemoryHotSearchStore | null = null;
 
@@ -25,6 +26,7 @@ export class HotSearchService {
   private store: IHotSearchStore;
   private storeType: "sqlite" | "memory";
   private initPromise: Promise<void> | null = null;
+  private summaryLogged = false;
 
   constructor() {
     const memoryStore = getOrCreateSharedMemoryStore();
@@ -59,7 +61,19 @@ export class HotSearchService {
 
   async getHotSearches(limit: number = 30): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    return this.store.getHotSearches(limit);
+    const items = await this.store.getHotSearches(limit);
+    // 启动后首次读取时输出榜单摘要，便于线上观测（只打一次，避免刷日志）
+    if (!this.summaryLogged) {
+      this.summaryLogged = true;
+      loggers.hotSearch.info("热搜榜单摘要", {
+        total: items.length,
+        top5: items.slice(0, 5).map((i) => ({
+          term: i.term,
+          score: Math.round((i.displayScore ?? i.score) * 100) / 100,
+        })),
+      });
+    }
+    return items;
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {

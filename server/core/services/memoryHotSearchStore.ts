@@ -1,4 +1,5 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearchStore";
+import { loggers } from "../utils/logger";
 
 /**
  * 与 SQLite 版保持一致的 EWMA 热度衰减：
@@ -35,6 +36,8 @@ export class MemoryHotSearchStore implements IHotSearchStore {
         lastSearched: now,
         createdAt: now,
       });
+      // 观测日志：新词首次出现（与 SQLite 版保持一致）
+      loggers.hotSearch.info("新词出现", { term });
     }
   }
 

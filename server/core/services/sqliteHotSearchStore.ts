@@ -2,6 +2,7 @@ import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearch
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { loggers } from "../utils/logger";
 
 const MAX_ENTRIES = 30;
 const DEFAULT_DB_DIR = "./data";
@@ -171,6 +172,8 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       this.db.run("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?", [newScore, now, normalized]);
     } else {
       this.db.run("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)", [normalized, now, now]);
+      // 观测日志：新词首次出现（驱动热搜产品观察的关键信号）
+      loggers.hotSearch.info("新词出现", { term: normalized });
     }
 
     this.cleanupOldEntries(MAX_ENTRIES);
