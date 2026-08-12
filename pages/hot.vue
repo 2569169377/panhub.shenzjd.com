@@ -172,8 +172,8 @@ async function refresh() {
 }
 
 function quickSearch(term: string) {
-  // 跳转首页并触发搜索（首页 onMounted 会读取 ?q 参数）
-  navigateTo({ path: "/", query: { q: term } });
+  // 跳转 SEO 落地页（自动检索该词，站内互链利于收录）
+  navigateTo({ path: `/s/${encodeURIComponent(term)}` });
 }
 
 function deltaClass(item: TrendingItem): string {
