@@ -1,5 +1,5 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearchStore";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem } from "./hotSearchStore";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loggers } from "../utils/logger";
@@ -14,6 +14,13 @@ const DEFAULT_DB_PATH = "./data/hot-searches.db";
 const LAMBDA = 1.0;
 /** 热搜只展示最近 N 天内有搜索记录的词（配合 λ=1.0，3 天后热度基本归零） */
 const HOT_WINDOW_DAYS = 3;
+
+/** 本地时区日期键 YYYY-MM-DD（对齐用户感知的"今日"） */
+function formatDateKey(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 function isForbidden(term: string): boolean {
   const forbiddenPatterns = [
@@ -93,8 +100,36 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     this.db.run("CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)");
 
+    // 全量搜索词库（联想补全 + 智能化原料，不清理）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS search_terms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        term TEXT NOT NULL UNIQUE,
+        count INTEGER NOT NULL DEFAULT 1,
+        first_at INTEGER NOT NULL,
+        last_at INTEGER NOT NULL
+      )
+    `);
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)");
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)");
+
+    // 每日榜单快照（飙升榜计算基础，懒生成）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS rank_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        snap_date TEXT NOT NULL,
+        term TEXT NOT NULL,
+        rank INTEGER NOT NULL,
+        score REAL NOT NULL,
+        UNIQUE(snap_date, term)
+      )
+    `);
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON rank_snapshots(snap_date)");
+
     // 迁移 JSON 数据
     this.migrateFromJson();
+    // 从日志初始化词库（仅词库为空时执行，纯新增不影响热榜）
+    this.seedSearchTermsFromLogs();
 
     this.saveToDisk();
     console.log("[SqliteHotSearchStore] ✅ SQLite (sql.js) 存储已初始化");
@@ -124,6 +159,43 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       stmt.free();
       this.saveToDisk();
       console.log(`[SqliteHotSearchStore] ✅ 从 JSON 迁移了 ${data.items.length} 条数据`);
+    } catch {}
+  }
+
+  /**
+   * 从 data/*.log 中解析历史"新词出现"记录，初始化词库表
+   * 仅在词库为空时执行（幂等），纯新增不影响热榜数据
+   */
+  private seedSearchTermsFromLogs(): void {
+    try {
+      const result = this.db.exec("SELECT COUNT(*) as c FROM search_terms");
+      if (result[0]?.values[0]?.[0] > 0) return;
+
+      if (!existsSync(this.dbDir)) return;
+      const logs = readdirSync(this.dbDir).filter((f) => f.endsWith(".log"));
+      if (logs.length === 0) return;
+
+      const countMap = new Map<string, number>();
+      const re = /新词出现[\s\S]*?"term": "([^"]+)"/g;
+      for (const file of logs) {
+        const content = readFileSync(resolve(this.dbDir, file), "utf-8");
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          const term = m[1];
+          if (!term) continue;
+          countMap.set(term, (countMap.get(term) ?? 0) + 1);
+        }
+      }
+      if (countMap.size === 0) return;
+
+      const now = Date.now();
+      const stmt = this.db.prepare("INSERT OR IGNORE INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)");
+      for (const [term, count] of countMap) {
+        stmt.run([term, count, now, now]);
+      }
+      stmt.free();
+      this.saveToDisk();
+      console.log(`[SqliteHotSearchStore] ✅ 从日志初始化词库 ${countMap.size} 条`);
     } catch {}
   }
 
@@ -174,6 +246,14 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       this.db.run("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)", [normalized, now, now]);
       // 观测日志：新词首次出现（驱动热搜产品观察的关键信号）
       loggers.hotSearch.info("新词出现", { term: normalized });
+    }
+
+    // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
+    const termRow = this.db.exec("SELECT count FROM search_terms WHERE term = ?", [normalized]);
+    if (termRow.length > 0 && termRow[0].values.length > 0) {
+      this.db.run("UPDATE search_terms SET count = count + 1, last_at = ? WHERE term = ?", [now, normalized]);
+    } else {
+      this.db.run("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, 1, ?, ?)", [normalized, now, now]);
     }
 
     this.cleanupOldEntries(MAX_ENTRIES);
@@ -259,6 +339,73 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       }
     } catch {}
     return 0;
+  }
+
+  async ensureTodaySnapshot(): Promise<void> {
+    await this.waitForInit();
+    const date = formatDateKey(Date.now());
+    const existing = this.db.exec("SELECT COUNT(*) as c FROM rank_snapshots WHERE snap_date = ?", [date]);
+    if (existing[0]?.values[0]?.[0] > 0) return;
+
+    const items = await this.getHotSearches(MAX_ENTRIES);
+    const stmt = this.db.prepare("INSERT OR REPLACE INTO rank_snapshots (snap_date, term, rank, score) VALUES (?, ?, ?, ?)");
+    items.forEach((item, index) => {
+      stmt.run([date, item.term, index + 1, item.displayScore ?? item.score]);
+    });
+    stmt.free();
+    this.scheduleSave();
+  }
+
+  async getTrending(limit: number): Promise<TrendingItem[]> {
+    await this.waitForInit();
+    await this.ensureTodaySnapshot();
+
+    const today = formatDateKey(Date.now());
+    const yesterday = formatDateKey(Date.now() - 86400000);
+
+    const todayResult = this.db.exec(
+      "SELECT term, rank FROM rank_snapshots WHERE snap_date = ? ORDER BY rank ASC",
+      [today]
+    );
+    const todayRows = todayResult.length
+      ? todayResult[0].values.map((row: any[]) => ({ term: row[0] as string, rank: row[1] as number }))
+      : [];
+
+    const yestResult = this.db.exec(
+      "SELECT term, rank FROM rank_snapshots WHERE snap_date = ?",
+      [yesterday]
+    );
+    const prevRankMap = new Map<string, number>();
+    if (yestResult.length) {
+      for (const row of yestResult[0].values) {
+        prevRankMap.set(row[0] as string, row[1] as number);
+      }
+    }
+
+    const items: TrendingItem[] = todayRows.map((row) => {
+      const prevRank = prevRankMap.get(row.term) ?? null;
+      return {
+        term: row.term,
+        rank: row.rank,
+        prevRank,
+        // 新上榜视为最大飙升（delta 取当前排名，越小越靠前）
+        delta: prevRank === null ? row.rank : prevRank - row.rank,
+        score: 0,
+      };
+    });
+
+    // 新上榜优先（按当前排名升序），其余按上升幅度降序
+    items.sort((a, b) => {
+      const aNew = a.prevRank === null;
+      const bNew = b.prevRank === null;
+      if (aNew && bNew) return a.rank - b.rank;
+      if (aNew) return -1;
+      if (bNew) return 1;
+      if (b.delta !== a.delta) return b.delta - a.delta;
+      return a.rank - b.rank;
+    });
+
+    return items.slice(0, Math.min(Math.max(1, limit), 100));
   }
 
   close(): void {

@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 
 /**
@@ -14,12 +14,20 @@ function decayScore(score: number, lastSearched: number, now: number): number {
   return score * Math.exp(-LAMBDA * elapsedDays);
 }
 
+function formatDateKey(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /**
  * 内存热搜存储实现
  * 用于 JSON 文件不可用时的降级方案（Vercel/CF 无持久化文件系统）
  */
 export class MemoryHotSearchStore implements IHotSearchStore {
   private memoryStore = new Map<string, HotSearchItem>();
+  private termDict = new Map<string, { count: number; firstAt: number; lastAt: number }>();
+  private snapshots = new Map<string, Map<string, number>>();
 
   async recordSearch(term: string, now: number): Promise<void> {
     if (!term || term.trim().length === 0) return;
@@ -38,6 +46,15 @@ export class MemoryHotSearchStore implements IHotSearchStore {
       });
       // 观测日志：新词首次出现（与 SQLite 版保持一致）
       loggers.hotSearch.info("新词出现", { term });
+    }
+
+    // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
+    const dict = this.termDict.get(term);
+    if (dict) {
+      dict.count += 1;
+      dict.lastAt = now;
+    } else {
+      this.termDict.set(term, { count: 1, firstAt: now, lastAt: now });
     }
   }
 
@@ -105,7 +122,52 @@ export class MemoryHotSearchStore implements IHotSearchStore {
     };
   }
 
+  async ensureTodaySnapshot(): Promise<void> {
+    const date = formatDateKey(Date.now());
+    if (this.snapshots.has(date)) return;
+    const items = await this.getHotSearches(30);
+    const map = new Map<string, number>();
+    items.forEach((item, index) => {
+      map.set(item.term, index + 1);
+    });
+    this.snapshots.set(date, map);
+  }
+
+  async getTrending(limit: number): Promise<TrendingItem[]> {
+    await this.ensureTodaySnapshot();
+    const today = formatDateKey(Date.now());
+    const yesterday = formatDateKey(Date.now() - 86400000);
+
+    const todayMap = this.snapshots.get(today) ?? new Map<string, number>();
+    const prevMap = this.snapshots.get(yesterday) ?? new Map<string, number>();
+
+    const items: TrendingItem[] = Array.from(todayMap.entries()).map(([term, rank]) => {
+      const prevRank = prevMap.get(term) ?? null;
+      return {
+        term,
+        rank,
+        prevRank,
+        delta: prevRank === null ? rank : prevRank - rank,
+        score: 0,
+      };
+    });
+
+    items.sort((a, b) => {
+      const aNew = a.prevRank === null;
+      const bNew = b.prevRank === null;
+      if (aNew && bNew) return a.rank - b.rank;
+      if (aNew) return -1;
+      if (bNew) return 1;
+      if (b.delta !== a.delta) return b.delta - a.delta;
+      return a.rank - b.rank;
+    });
+
+    return items.slice(0, Math.min(Math.max(1, limit), 100));
+  }
+
   close(): void {
     this.memoryStore.clear();
+    this.termDict.clear();
+    this.snapshots.clear();
   }
 }

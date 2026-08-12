@@ -34,6 +34,16 @@ export interface IHotSearchStore {
   getStats(): Promise<HotSearchStats>;
 
   /**
+   * 懒生成当日榜单快照（无定时任务的 Serverless 环境友好）
+   */
+  ensureTodaySnapshot(): Promise<void>;
+
+  /**
+   * 获取飙升榜：对比今日与昨日榜单排名变化
+   */
+  getTrending(limit: number): Promise<TrendingItem[]>;
+
+  /**
    * 关闭存储连接
    */
   close(): void;
@@ -51,4 +61,14 @@ export interface HotSearchItem {
 export interface HotSearchStats {
   total: number;
   topTerms: HotSearchItem[];
+}
+
+export interface TrendingItem {
+  term: string;
+  rank: number;
+  /** 昨日排名，null 表示新上榜 */
+  prevRank: number | null;
+  /** rank 变化量（正=上升，负=下降，新上榜取 rank 本身） */
+  delta: number;
+  score: number;
 }
