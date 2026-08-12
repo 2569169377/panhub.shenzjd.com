@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm } from "./hotSearchStore";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -339,6 +339,24 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       }
     } catch {}
     return 0;
+  }
+
+  async getTopTerms(limit: number): Promise<TopTerm[]> {
+    await this.waitForInit();
+    const safeLimit = Math.min(Math.max(1, limit), 50000);
+    const result = this.db.exec(
+      `SELECT term, count FROM search_terms
+       WHERE count >= 2 AND length(term) >= 2
+       ORDER BY count DESC, last_at DESC
+       LIMIT ${safeLimit}`
+    );
+    if (!result.length) return [];
+    const cols = result[0].columns;
+    return result[0].values.map((row: any[]) => {
+      const obj: any = {};
+      cols.forEach((col: string, i: number) => (obj[col] = row[i]));
+      return { term: obj.term, count: obj.count };
+    });
   }
 
   async ensureTodaySnapshot(): Promise<void> {

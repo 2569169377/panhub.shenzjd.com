@@ -44,6 +44,11 @@ export interface IHotSearchStore {
   getTrending(limit: number): Promise<TrendingItem[]>;
 
   /**
+   * 获取高价值搜索词（按搜索次数降序，用于 SEO sitemap 选词）
+   */
+  getTopTerms(limit: number): Promise<TopTerm[]>;
+
+  /**
    * 关闭存储连接
    */
   close(): void;
@@ -71,4 +76,9 @@ export interface TrendingItem {
   /** rank 变化量（正=上升，负=下降，新上榜取 rank 本身） */
   delta: number;
   score: number;
+}
+
+export interface TopTerm {
+  term: string;
+  count: number;
 }

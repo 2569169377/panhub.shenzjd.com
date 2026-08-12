@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 
 /**
@@ -120,6 +120,15 @@ export class MemoryHotSearchStore implements IHotSearchStore {
       total: this.memoryStore.size,
       topTerms: items,
     };
+  }
+
+  async getTopTerms(limit: number): Promise<TopTerm[]> {
+    const safeLimit = Math.min(Math.max(1, limit), 50000);
+    return Array.from(this.termDict.entries())
+      .filter(([term, v]) => v.count >= 2 && term.length >= 2)
+      .sort((a, b) => b[1].count - a[1].count || b[1].lastAt - a[1].lastAt)
+      .map(([term, v]) => ({ term, count: v.count }))
+      .slice(0, safeLimit);
   }
 
   async ensureTodaySnapshot(): Promise<void> {

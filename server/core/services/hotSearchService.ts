@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm } from "./hotSearchStore";
 import { MemoryHotSearchStore } from "./memoryHotSearchStore";
 import { loggers } from "../utils/logger";
 
@@ -100,6 +100,11 @@ export class HotSearchService {
     return this.store.getTrending(limit);
   }
 
+  async getTopTerms(limit: number): Promise<TopTerm[]> {
+    await this.waitForInit();
+    return this.store.getTopTerms(limit);
+  }
+
   getDatabaseSize(): number {
     if (this.storeType === "sqlite") {
       try {
@@ -139,4 +144,4 @@ export function resetHotSearchService(): void {
   delete (globalThis as any)[HOT_SEARCH_SERVICE_KEY];
 }
 
-export type { HotSearchItem, HotSearchStats, TrendingItem };
+export type { HotSearchItem, HotSearchStats, TrendingItem, TopTerm };

@@ -80,6 +80,20 @@ describe("SqliteHotSearchStore 词库与飙升", () => {
     expect(result[0].values[0][0]).toBe(2);
   });
 
+  it("getTopTerms 按搜索次数降序，过滤低频与单字符词", async () => {
+    const now = Date.now();
+    // 剑来 ×3、仙逆 ×2、海 ×2（单字符应被过滤）、一次性词（count<2 应被过滤）
+    for (let i = 0; i < 3; i++) await store.recordSearch("剑来", now + i * 1000);
+    for (let i = 0; i < 2; i++) await store.recordSearch("仙逆", now + i * 1000);
+    for (let i = 0; i < 2; i++) await store.recordSearch("海", now + i * 1000);
+    await store.recordSearch("仅一次", now);
+
+    const top = await store.getTopTerms(10);
+    expect(top.map((t: any) => t.term)).toEqual(["剑来", "仙逆"]);
+    expect(top[0].count).toBe(3);
+    expect(top[1].count).toBe(2);
+  });
+
   it("从日志初始化词库（幂等）", async () => {
     const logFile = resolve(TEST_DB_DIR, "seed-test.log");
     writeFileSync(
@@ -139,5 +153,16 @@ describe("MemoryHotSearchStore 词库与飙升", () => {
     expect(trend[0].prevRank).toBeNull();
     expect(trend[1].delta).toBe(1);
     expect(trend[3].delta).toBe(-2);
+  });
+
+  it("getTopTerms 按搜索次数降序过滤低频词", async () => {
+    const now = Date.now();
+    for (let i = 0; i < 3; i++) await store.recordSearch("剑来", now + i * 1000);
+    for (let i = 0; i < 2; i++) await store.recordSearch("仙逆", now + i * 1000);
+    await store.recordSearch("仅一次", now);
+
+    const top = await store.getTopTerms(10);
+    expect(top.map((t: any) => t.term)).toEqual(["剑来", "仙逆"]);
+    expect(top[0].count).toBe(3);
   });
 });
