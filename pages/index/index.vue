@@ -29,6 +29,16 @@
       </aside>
     </div>
 
+    <!-- 热搜趋势入口 -->
+    <div class="trends-entry">
+      <NuxtLink to="/hot" class="trends-entry__link">
+        <span class="trends-entry__icon">🔥</span>
+        <span class="trends-entry__text">热搜趋势</span>
+        <span class="trends-entry__hint">飙升榜 · 完整榜单</span>
+        <span class="trends-entry__arrow">→</span>
+      </NuxtLink>
+    </div>
+
     <!-- 搜索框 -->
     <SearchBox
       v-model="kw"
@@ -607,6 +617,59 @@ function visibleSorted(items: any[]) {
 
 .hero-aside :deep(.hot-tagcloud) {
   height: 240px !important;
+}
+
+/* 热搜趋势入口 */
+.trends-entry {
+  display: flex;
+}
+
+.trends-entry__link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.trends-entry__link:hover {
+  border-color: rgba(15, 118, 110, 0.4);
+  color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.trends-entry__icon {
+  font-size: 15px;
+}
+
+.trends-entry__text {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.trends-entry__hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.trends-entry__arrow {
+  margin-left: auto;
+  font-size: 15px;
+  transition: transform var(--transition-fast);
+}
+
+.trends-entry__link:hover .trends-entry__arrow {
+  transform: translateX(3px);
 }
 
 /* 统计和过滤器栏 */
