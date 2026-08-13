@@ -30,22 +30,44 @@
           <span>日历加载中…</span>
         </div>
 
-        <div v-else-if="days.length > 0" class="calendar">
+        <div v-else-if="days.length > 0" class="calendar-wrap">
           <button
-            v-for="d in days"
-            :key="d.date"
-            class="cal-cell"
-            :class="[
-              `cal-cell--${level(d.count)}`,
-              { 'cal-cell--active': selected === d.date },
-              { 'cal-cell--future': d.date > todayKey },
-            ]"
+            class="cal-arrow"
             type="button"
-            :title="cellTitle(d)"
-            :aria-label="cellTitle(d)"
-            @click="selectDate(d.date)">
-            <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
-            <span v-if="d.count > 0" class="cal-cell__count">{{ d.count }}</span>
+            :disabled="!canScrollLeft"
+            aria-label="查看更早日期"
+            title="查看更早日期"
+            @click="scrollCalendar(-1)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </button>
+
+          <div ref="calendarRef" class="calendar" @scroll="onCalendarScroll">
+            <button
+              v-for="d in days"
+              :key="d.date"
+              class="cal-cell"
+              :class="[
+                `cal-cell--${level(d.count)}`,
+                { 'cal-cell--active': selected === d.date },
+                { 'cal-cell--future': d.date > todayKey },
+              ]"
+              type="button"
+              :title="cellTitle(d)"
+              :aria-label="cellTitle(d)"
+              @click="selectDate(d.date)">
+              <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
+              <span v-if="d.count > 0" class="cal-cell__count">{{ d.count }}</span>
+            </button>
+          </div>
+
+          <button
+            class="cal-arrow"
+            type="button"
+            :disabled="!canScrollRight"
+            aria-label="查看更新日期"
+            title="查看更新日期"
+            @click="scrollCalendar(1)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
           </button>
         </div>
 
@@ -137,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, nextTick } from "vue";
 
 interface DayInfo {
   date: string;
@@ -163,6 +185,9 @@ const view = ref<"cloud" | "list">("cloud");
 const calendarLoading = ref(false);
 const dayLoading = ref(false);
 const refreshing = ref(false);
+const calendarRef = ref<HTMLElement | null>(null);
+const canScrollLeft = ref(false);
+const canScrollRight = ref(false);
 
 const todayKey = computed(() => {
   const d = new Date();
@@ -194,7 +219,37 @@ async function loadCalendar() {
     days.value = [];
   } finally {
     calendarLoading.value = false;
+    // 等日历渲染后定位到最右（今天）
+    await nextTick();
+    scrollToToday();
   }
+}
+
+/* ---------- 日历横向滚动 ---------- */
+
+function scrollCalendar(dir: -1 | 1) {
+  const el = calendarRef.value;
+  if (!el) return;
+  el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+}
+
+function scrollToToday() {
+  const el = calendarRef.value;
+  if (!el) return;
+  el.scrollLeft = el.scrollWidth;
+  updateArrows();
+}
+
+function onCalendarScroll() {
+  updateArrows();
+}
+
+function updateArrows() {
+  const el = calendarRef.value;
+  if (!el) return;
+  const maxScroll = el.scrollWidth - el.clientWidth;
+  canScrollLeft.value = el.scrollLeft > 4;
+  canScrollRight.value = el.scrollLeft < maxScroll - 4;
 }
 
 async function selectDate(date: string) {
@@ -417,14 +472,58 @@ onMounted(() => {
   box-shadow: var(--shadow-sm);
 }
 
-/* 日历 */
+/* 日历：单行横排 + 横向滚动 + 箭头 */
+.calendar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .calendar {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  flex: 1;
+  min-width: 0;
+  display: flex;
   gap: 6px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  padding: 2px 0 6px;
+  /* 隐藏滚动条但保留滚动能力 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.calendar::-webkit-scrollbar {
+  display: none;
+}
+
+.cal-arrow {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cal-arrow:hover:not(:disabled) {
+  background: var(--bg-primary);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.cal-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .cal-cell {
+  flex: 0 0 52px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -693,12 +792,17 @@ onMounted(() => {
   }
 
   .calendar {
-    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
     gap: 4px;
   }
 
   .cal-cell {
+    flex-basis: 44px;
     min-height: 44px;
+  }
+
+  .cal-arrow {
+    width: 30px;
+    height: 30px;
   }
 }
 </style>
