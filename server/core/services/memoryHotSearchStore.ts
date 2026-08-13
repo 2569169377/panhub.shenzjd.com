@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 
 /**
@@ -27,7 +27,7 @@ function formatDateKey(ts: number): string {
 export class MemoryHotSearchStore implements IHotSearchStore {
   private memoryStore = new Map<string, HotSearchItem>();
   private termDict = new Map<string, { count: number; firstAt: number; lastAt: number }>();
-  private snapshots = new Map<string, Map<string, number>>();
+  private snapshots = new Map<string, Map<string, { rank: number; count: number }>>();
 
   async recordSearch(term: string, now: number): Promise<void> {
     if (!term || term.trim().length === 0) return;
@@ -133,13 +133,43 @@ export class MemoryHotSearchStore implements IHotSearchStore {
 
   async ensureTodaySnapshot(): Promise<void> {
     const date = formatDateKey(Date.now());
-    if (this.snapshots.has(date)) return;
-    const items = await this.getHotSearches(30);
-    const map = new Map<string, number>();
-    items.forEach((item, index) => {
-      map.set(item.term, index + 1);
-    });
+    const start = new Date(date + "T00:00:00").getTime();
+    const end = start + 86400000;
+    const dayTerms = Array.from(this.termDict.entries())
+      .filter(([, v]) => v.lastAt >= start && v.lastAt < end)
+      .sort((a, b) => b[1].count - a[1].count || b[1].lastAt - a[1].lastAt)
+      .map(([term, v], index) => ({ term, rank: index + 1, count: v.count }));
+    const map = new Map<string, { rank: number; count: number }>();
+    dayTerms.forEach((t) => map.set(t.term, { rank: t.rank, count: t.count }));
     this.snapshots.set(date, map);
+  }
+
+  async getCalendar(days: number): Promise<DaySnapshot[]> {
+    const safeDays = Math.min(Math.max(1, days), 90);
+    const out: DaySnapshot[] = [];
+    for (let i = safeDays - 1; i >= 0; i--) {
+      const date = formatDateKey(Date.now() - i * 86400000);
+      const map = this.snapshots.get(date);
+      if (!map || map.size === 0) {
+        out.push({ date, count: 0, top: [] });
+        continue;
+      }
+      const top = Array.from(map.entries())
+        .sort((a, b) => a[1].rank - b[1].rank)
+        .slice(0, 3)
+        .map(([term]) => term);
+      out.push({ date, count: map.size, top });
+    }
+    return out;
+  }
+
+  async getDayItems(date: string): Promise<DayTerm[]> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+    const map = this.snapshots.get(date);
+    if (!map) return [];
+    return Array.from(map.entries())
+      .map(([term, v]) => ({ term, rank: v.rank, count: v.count }))
+      .sort((a, b) => a.rank - b.rank);
   }
 
   async getTrending(limit: number): Promise<TrendingItem[]> {
@@ -147,16 +177,16 @@ export class MemoryHotSearchStore implements IHotSearchStore {
     const today = formatDateKey(Date.now());
     const yesterday = formatDateKey(Date.now() - 86400000);
 
-    const todayMap = this.snapshots.get(today) ?? new Map<string, number>();
-    const prevMap = this.snapshots.get(yesterday) ?? new Map<string, number>();
+    const todayMap = this.snapshots.get(today) ?? new Map<string, { rank: number; count: number }>();
+    const prevMap = this.snapshots.get(yesterday) ?? new Map<string, { rank: number; count: number }>();
 
-    const items: TrendingItem[] = Array.from(todayMap.entries()).map(([term, rank]) => {
-      const prevRank = prevMap.get(term) ?? null;
+    const items: TrendingItem[] = Array.from(todayMap.entries()).map(([term, v]) => {
+      const prevRank = prevMap.get(term)?.rank ?? null;
       return {
         term,
-        rank,
+        rank: v.rank,
         prevRank,
-        delta: prevRank === null ? rank : prevRank - rank,
+        delta: prevRank === null ? v.rank : prevRank - v.rank,
         score: 0,
       };
     });

@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -362,16 +362,88 @@ export class SqliteHotSearchStore implements IHotSearchStore {
   async ensureTodaySnapshot(): Promise<void> {
     await this.waitForInit();
     const date = formatDateKey(Date.now());
-    const existing = this.db.exec("SELECT COUNT(*) as c FROM rank_snapshots WHERE snap_date = ?", [date]);
-    if (existing[0]?.values[0]?.[0] > 0) return;
+    // 每天访问时全量重建当天快照（幂等、始终最新），历史天不受影响
+    const start = new Date(date + "T00:00:00").getTime();
+    const end = start + 86400000;
 
-    const items = await this.getHotSearches(MAX_ENTRIES);
+    const result = this.db.exec(
+      `SELECT term, count FROM search_terms
+       WHERE last_at >= ? AND last_at < ?
+       ORDER BY count DESC, last_at DESC`,
+      [start, end]
+    );
+    const rows = result.length ? result[0].values : [];
+
+    this.db.run("DELETE FROM rank_snapshots WHERE snap_date = ?", [date]);
     const stmt = this.db.prepare("INSERT OR REPLACE INTO rank_snapshots (snap_date, term, rank, score) VALUES (?, ?, ?, ?)");
-    items.forEach((item, index) => {
-      stmt.run([date, item.term, index + 1, item.displayScore ?? item.score]);
+    rows.forEach((row: any[], index: number) => {
+      stmt.run([date, row[0], index + 1, row[1]]);
     });
     stmt.free();
     this.scheduleSave();
+  }
+
+  async getCalendar(days: number): Promise<DaySnapshot[]> {
+    await this.waitForInit();
+    const safeDays = Math.min(Math.max(1, days), 90);
+    const start = formatDateKey(Date.now() - (safeDays - 1) * 86400000);
+
+    const countResult = this.db.exec(
+      `SELECT snap_date, COUNT(*) as c FROM rank_snapshots
+       WHERE snap_date >= ?
+       GROUP BY snap_date ORDER BY snap_date DESC`,
+      [start]
+    );
+    const countMap = new Map<string, number>();
+    if (countResult.length) {
+      for (const row of countResult[0].values) {
+        countMap.set(row[0] as string, row[1] as number);
+      }
+    }
+
+    const topResult = this.db.exec(
+      `SELECT snap_date, term FROM rank_snapshots
+       WHERE snap_date >= ? AND rank <= 3
+       ORDER BY snap_date, rank ASC`,
+      [start]
+    );
+    const topMap = new Map<string, string[]>();
+    if (topResult.length) {
+      for (const row of topResult[0].values) {
+        const date = row[0] as string;
+        const list = topMap.get(date) ?? [];
+        if (list.length < 3) list.push(row[1] as string);
+        topMap.set(date, list);
+      }
+    }
+
+    // 生成最近 safeDays 天的连续日期（含无数据的天）
+    const out: DaySnapshot[] = [];
+    for (let i = safeDays - 1; i >= 0; i--) {
+      const date = formatDateKey(Date.now() - i * 86400000);
+      out.push({
+        date,
+        count: countMap.get(date) ?? 0,
+        top: topMap.get(date) ?? [],
+      });
+    }
+    return out;
+  }
+
+  async getDayItems(date: string): Promise<DayTerm[]> {
+    await this.waitForInit();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+    const result = this.db.exec(
+      "SELECT term, rank, score FROM rank_snapshots WHERE snap_date = ? ORDER BY rank ASC",
+      [date]
+    );
+    if (!result.length) return [];
+    const cols = result[0].columns;
+    return result[0].values.map((row: any[]) => {
+      const obj: any = {};
+      cols.forEach((col: string, i: number) => (obj[col] = row[i]));
+      return { term: obj.term, rank: obj.rank, count: obj.score };
+    });
   }
 
   async getTrending(limit: number): Promise<TrendingItem[]> {
