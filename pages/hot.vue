@@ -222,6 +222,8 @@ async function loadCalendar() {
     // 等日历渲染后定位到最右（今天）
     await nextTick();
     scrollToToday();
+    // 首次进入即加载选中日期数据（修复竞态：onMounted 时 loadCalendar 未完成）
+    if (selected.value) await selectDate(selected.value);
   }
 }
 
@@ -270,7 +272,6 @@ async function selectDate(date: string) {
 async function refresh() {
   refreshing.value = true;
   await loadCalendar();
-  if (selected.value) await selectDate(selected.value);
   refreshing.value = false;
 }
 
@@ -318,7 +319,6 @@ function wordStyle(item: DayItem): Record<string, string> {
 
 onMounted(() => {
   loadCalendar();
-  if (selected.value) selectDate(selected.value);
 });
 </script>
 
