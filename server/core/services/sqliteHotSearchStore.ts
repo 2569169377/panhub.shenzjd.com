@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -444,58 +444,6 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       cols.forEach((col: string, i: number) => (obj[col] = row[i]));
       return { term: obj.term, rank: obj.rank, count: obj.score };
     });
-  }
-
-  async getTrending(limit: number): Promise<TrendingItem[]> {
-    await this.waitForInit();
-    await this.ensureTodaySnapshot();
-
-    const today = formatDateKey(Date.now());
-    const yesterday = formatDateKey(Date.now() - 86400000);
-
-    const todayResult = this.db.exec(
-      "SELECT term, rank FROM rank_snapshots WHERE snap_date = ? ORDER BY rank ASC",
-      [today]
-    );
-    const todayRows = todayResult.length
-      ? todayResult[0].values.map((row: any[]) => ({ term: row[0] as string, rank: row[1] as number }))
-      : [];
-
-    const yestResult = this.db.exec(
-      "SELECT term, rank FROM rank_snapshots WHERE snap_date = ?",
-      [yesterday]
-    );
-    const prevRankMap = new Map<string, number>();
-    if (yestResult.length) {
-      for (const row of yestResult[0].values) {
-        prevRankMap.set(row[0] as string, row[1] as number);
-      }
-    }
-
-    const items: TrendingItem[] = todayRows.map((row) => {
-      const prevRank = prevRankMap.get(row.term) ?? null;
-      return {
-        term: row.term,
-        rank: row.rank,
-        prevRank,
-        // 新上榜视为最大飙升（delta 取当前排名，越小越靠前）
-        delta: prevRank === null ? row.rank : prevRank - row.rank,
-        score: 0,
-      };
-    });
-
-    // 新上榜优先（按当前排名升序），其余按上升幅度降序
-    items.sort((a, b) => {
-      const aNew = a.prevRank === null;
-      const bNew = b.prevRank === null;
-      if (aNew && bNew) return a.rank - b.rank;
-      if (aNew) return -1;
-      if (bNew) return 1;
-      if (b.delta !== a.delta) return b.delta - a.delta;
-      return a.rank - b.rank;
-    });
-
-    return items.slice(0, Math.min(Math.max(1, limit), 100));
   }
 
   close(): void {

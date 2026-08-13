@@ -85,41 +85,6 @@ describe("SqliteHotSearchStore 日历与全量快照", () => {
     expect(await store.getDayItems("bad-date")).toEqual([]);
   });
 
-  it("getTrending 对比昨日排名：新上榜优先、上升靠前", async () => {
-    const now = Date.now();
-    const yesterday = dateKey(now - 86400000);
-    const today = dateKey(now);
-
-    // 今日有 4 个词（搜索顺序 B→C→A→D，D 最新）
-    await store.recordSearch("B", now);
-    await store.recordSearch("C", now + 1000);
-    await store.recordSearch("A", now + 2000);
-    await store.recordSearch("D", now + 3000);
-
-    // 昨日快照手动构造（昨日 3 词）
-    for (const [term, rank, score] of [["A", 1, 10], ["B", 2, 8], ["C", 3, 6]] as [string, number, number][]) {
-      store.db.run(
-        "INSERT OR REPLACE INTO rank_snapshots (snap_date, term, rank, score) VALUES (?, ?, ?, ?)",
-        [yesterday, term, rank, score]
-      );
-    }
-
-    const trend = await store.getTrending(10);
-    // 今日快照由 search_terms 生成：count 全为 1 → 按 last_at DESC → D,A,C,B
-    expect(trend.map((t: any) => t.term)).toEqual(["D", "C", "A", "B"]);
-    // D 新上榜
-    expect(trend[0].prevRank).toBeNull();
-    // C 昨日 3 → 今日 3，持平
-    expect(trend[1].term).toBe("C");
-    expect(trend[1].delta).toBe(0);
-    // A 昨日 1 → 今日 2，下降 1
-    expect(trend[2].term).toBe("A");
-    expect(trend[2].delta).toBe(-1);
-    // B 昨日 2 → 今日 4，下降 2
-    expect(trend[3].term).toBe("B");
-    expect(trend[3].delta).toBe(-2);
-  });
-
   it("getTopTerms 按搜索次数降序，过滤低频与单字符词", async () => {
     const now = Date.now();
     for (let i = 0; i < 3; i++) await store.recordSearch("剑来", now + i * 1000);
@@ -197,28 +162,6 @@ describe("MemoryHotSearchStore 日历与全量快照", () => {
     const items = await store.getDayItems(today);
     expect(items[0]).toEqual({ term: "词A", rank: 1, count: 2 });
     expect(items[1]).toEqual({ term: "词B", rank: 2, count: 1 });
-  });
-
-  it("getTrending 新上榜优先、上升靠前", async () => {
-    const now = Date.now();
-    const yesterday = dateKey(now - 86400000);
-    // 今日 4 词（搜索顺序 B→C→A→D）
-    await store.recordSearch("B", now);
-    await store.recordSearch("C", now + 1000);
-    await store.recordSearch("A", now + 2000);
-    await store.recordSearch("D", now + 3000);
-    // 昨日快照手动构造
-    store.snapshots.set(
-      yesterday,
-      new Map([["A", { rank: 1, count: 10 }], ["B", { rank: 2, count: 8 }], ["C", { rank: 3, count: 6 }]])
-    );
-
-    const trend = await store.getTrending(10);
-    expect(trend.map((t: any) => t.term)).toEqual(["D", "C", "A", "B"]);
-    expect(trend[0].prevRank).toBeNull();
-    expect(trend[1].delta).toBe(0);
-    expect(trend[2].delta).toBe(-1);
-    expect(trend[3].delta).toBe(-2);
   });
 
   it("getTopTerms 按搜索次数降序过滤低频词", async () => {

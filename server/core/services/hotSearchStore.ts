@@ -49,11 +49,6 @@ export interface IHotSearchStore {
   getDayItems(date: string): Promise<DayTerm[]>;
 
   /**
-   * 获取飙升榜：对比今日与昨日榜单排名变化
-   */
-  getTrending(limit: number): Promise<TrendingItem[]>;
-
-  /**
    * 获取高价值搜索词（按搜索次数降序，用于 SEO sitemap 选词）
    */
   getTopTerms(limit: number): Promise<TopTerm[]>;
@@ -76,16 +71,6 @@ export interface HotSearchItem {
 export interface HotSearchStats {
   total: number;
   topTerms: HotSearchItem[];
-}
-
-export interface TrendingItem {
-  term: string;
-  rank: number;
-  /** 昨日排名，null 表示新上榜 */
-  prevRank: number | null;
-  /** rank 变化量（正=上升，负=下降，新上榜取 rank 本身） */
-  delta: number;
-  score: number;
 }
 
 export interface TopTerm {

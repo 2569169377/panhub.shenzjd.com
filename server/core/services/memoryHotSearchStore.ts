@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 
 /**
@@ -170,38 +170,6 @@ export class MemoryHotSearchStore implements IHotSearchStore {
     return Array.from(map.entries())
       .map(([term, v]) => ({ term, rank: v.rank, count: v.count }))
       .sort((a, b) => a.rank - b.rank);
-  }
-
-  async getTrending(limit: number): Promise<TrendingItem[]> {
-    await this.ensureTodaySnapshot();
-    const today = formatDateKey(Date.now());
-    const yesterday = formatDateKey(Date.now() - 86400000);
-
-    const todayMap = this.snapshots.get(today) ?? new Map<string, { rank: number; count: number }>();
-    const prevMap = this.snapshots.get(yesterday) ?? new Map<string, { rank: number; count: number }>();
-
-    const items: TrendingItem[] = Array.from(todayMap.entries()).map(([term, v]) => {
-      const prevRank = prevMap.get(term)?.rank ?? null;
-      return {
-        term,
-        rank: v.rank,
-        prevRank,
-        delta: prevRank === null ? v.rank : prevRank - v.rank,
-        score: 0,
-      };
-    });
-
-    items.sort((a, b) => {
-      const aNew = a.prevRank === null;
-      const bNew = b.prevRank === null;
-      if (aNew && bNew) return a.rank - b.rank;
-      if (aNew) return -1;
-      if (bNew) return 1;
-      if (b.delta !== a.delta) return b.delta - a.delta;
-      return a.rank - b.rank;
-    });
-
-    return items.slice(0, Math.min(Math.max(1, limit), 100));
   }
 
   close(): void {

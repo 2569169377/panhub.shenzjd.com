@@ -1,4 +1,4 @@
-import type { IHotSearchStore, HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
+import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { MemoryHotSearchStore } from "./memoryHotSearchStore";
 import { loggers } from "../utils/logger";
 
@@ -95,11 +95,6 @@ export class HotSearchService {
     };
   }
 
-  async getTrending(limit: number): Promise<TrendingItem[]> {
-    await this.waitForInit();
-    return this.store.getTrending(limit);
-  }
-
   async getTopTerms(limit: number): Promise<TopTerm[]> {
     await this.waitForInit();
     return this.store.getTopTerms(limit);
@@ -154,4 +149,4 @@ export function resetHotSearchService(): void {
   delete (globalThis as any)[HOT_SEARCH_SERVICE_KEY];
 }
 
-export type { HotSearchItem, HotSearchStats, TrendingItem, TopTerm, DaySnapshot, DayTerm };
+export type { HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm };
