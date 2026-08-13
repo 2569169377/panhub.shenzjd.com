@@ -37,6 +37,8 @@ export class MemoryHotSearchStore implements IHotSearchStore {
       // 指数加权：旧热度先按间隔衰减，再 +1，避免历史累计分数永久霸榜
       existing.score = decayScore(existing.score, existing.lastSearched, now) + 1;
       existing.lastSearched = now;
+      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
+      loggers.hotSearch.info("搜索词", { term, isNew: false });
     } else {
       this.memoryStore.set(term, {
         term,
@@ -44,8 +46,8 @@ export class MemoryHotSearchStore implements IHotSearchStore {
         lastSearched: now,
         createdAt: now,
       });
-      // 观测日志：新词首次出现（与 SQLite 版保持一致）
-      loggers.hotSearch.info("新词出现", { term });
+      // 搜索流水日志：新词首次出现（与 SQLite 版保持一致）
+      loggers.hotSearch.info("搜索词", { term, isNew: true });
     }
 
     // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）

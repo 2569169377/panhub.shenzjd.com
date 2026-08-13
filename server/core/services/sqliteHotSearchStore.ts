@@ -176,7 +176,8 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       if (logs.length === 0) return;
 
       const countMap = new Map<string, number>();
-      const re = /新词出现[\s\S]*?"term": "([^"]+)"/g;
+      // 兼容旧格式「新词出现 {多行}」与新格式「搜索词 {"term":"..","isNew":..}」单行日志
+      const re = /(?:新词出现|搜索词)[\s\S]*?"term":\s*"([^"]+)"/g;
       for (const file of logs) {
         const content = readFileSync(resolve(this.dbDir, file), "utf-8");
         let m: RegExpExecArray | null;
@@ -242,10 +243,12 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       const elapsedDays = (now - prevTime) / 86400000;
       const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + 1;
       this.db.run("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?", [newScore, now, normalized]);
+      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       this.db.run("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)", [normalized, now, now]);
-      // 观测日志：新词首次出现（驱动热搜产品观察的关键信号）
-      loggers.hotSearch.info("新词出现", { term: normalized });
+      // 搜索流水日志：新词首次出现（驱动热搜产品观察的关键信号）
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
 
     // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）

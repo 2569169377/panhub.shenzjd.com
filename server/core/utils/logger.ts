@@ -71,9 +71,9 @@ export class Logger {
     // 消息
     parts.push(message);
 
-    // 元数据
+    // 元数据（单行紧凑格式：一行一条日志，便于 grep 与日志采集）
     if (meta && Object.keys(meta).length > 0) {
-      parts.push(this.colorize(JSON.stringify(meta, null, 2), "dim"));
+      parts.push(this.colorize(JSON.stringify(meta), "dim"));
     }
 
     return parts.join(" ");
