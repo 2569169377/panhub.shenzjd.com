@@ -1,6 +1,5 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { loggers } from "../utils/logger";
 
@@ -131,7 +130,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     // 从日志初始化词库（仅词库为空时执行，纯新增不影响热榜）
     this.seedSearchTermsFromLogs();
 
-    this.saveToDisk();
+    this.saveToDiskAtomic();
     console.log("[SqliteHotSearchStore] ✅ SQLite (sql.js) 存储已初始化");
   }
 
@@ -157,7 +156,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
         }
       }
       stmt.free();
-      this.saveToDisk();
+      this.saveToDiskAtomic();
       console.log(`[SqliteHotSearchStore] ✅ 从 JSON 迁移了 ${data.items.length} 条数据`);
     } catch {}
   }
@@ -195,32 +194,47 @@ export class SqliteHotSearchStore implements IHotSearchStore {
         stmt.run([term, count, now, now]);
       }
       stmt.free();
-      this.saveToDisk();
+      this.saveToDiskAtomic();
       console.log(`[SqliteHotSearchStore] ✅ 从日志初始化词库 ${countMap.size} 条`);
     } catch {}
   }
 
-  // 热路径（每 500ms 防抖触发）：异步写入避免阻塞事件循环
-  private saveToDisk(): void {
+  // 热路径：原子写盘（tmp + rename，POSIX 上 OS 级原子替换，绝不会出现半写文件）
+  // 旧的 fire-and-forget writeFile 在 dev server SIGINT/SIGKILL 时会导致 db 半写、
+  // sql.js 加载报 "database disk image is malformed" 索引错乱。
+  // 异常路径：atomic 失败时降级为直接覆盖写（保留数据），再失败才告警。
+  private saveToDiskAtomic(): void {
     try {
       const data = this.db.export();
       const buffer = Buffer.from(data);
-      writeFile(this.dbPath, buffer).catch(() => {});
-    } catch {}
+      const tmpPath = `${this.dbPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      writeFileSync(tmpPath, buffer);
+      // renameSync 在 Linux/macOS 是原子替换；极端 fs（如 NFS / 某些外置盘）不支持 → 走 fallback
+      renameSync(tmpPath, this.dbPath);
+    } catch (atomicErr) {
+      try {
+        // 降级：直接覆盖（可能产生半写但保留数据；除非同步断电，否则就是 OK）
+        const data = this.db.export();
+        writeFileSync(this.dbPath, Buffer.from(data));
+      } catch (fallbackErr) {
+        // 真兜不住：同时报原子失败 + 直写失败
+        console.warn(
+          "[SqliteHotSearchStore] ⚠️ 写盘失败（atomic 与 fallback 都失败，下次再重试）:",
+          atomicErr instanceof Error ? atomicErr.message : atomicErr
+        );
+      }
+    }
   }
 
-  // 同步写入：仅用于 close() 等需要确保数据落盘的场景
+  // 兼容性 sync 入口（close / 紧急刷盘场景）
   private saveToDiskSync(): void {
-    try {
-      const data = this.db.export();
-      const buffer = Buffer.from(data);
-      writeFileSync(this.dbPath, buffer);
-    } catch {}
+    this.saveToDiskAtomic();
   }
 
   private scheduleSave(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.saveToDisk(), 500);
+    // 防抖后同步原子写：500ms 内的多次 recordSearch 合并成一次落盘
+    this.saveTimer = setTimeout(() => this.saveToDiskAtomic(), 500);
   }
 
   private async waitForInit(): Promise<void> {
@@ -310,7 +324,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
     this.db.run("DELETE FROM hot_searches");
-    this.saveToDisk();
+    this.saveToDiskAtomic();
     return { success: true, message: "热搜记录已清除" };
   }
 
@@ -320,7 +334,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     const had = before[0]?.values[0]?.[0] ?? 0;
     this.db.run("DELETE FROM hot_searches WHERE term = ?", [term]);
     if (had > 0) {
-      this.saveToDisk();
+      this.saveToDiskAtomic();
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
     return { success: false, message: "热搜词不存在" };

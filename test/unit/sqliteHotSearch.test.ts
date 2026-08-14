@@ -104,4 +104,28 @@ describe("SqliteHotSearchStore", () => {
     expect(stats.total).toBe(2);
     expect(stats.topTerms).toHaveLength(2);
   });
+
+  it("多次 recordSearch + 重建 + 关闭 → 重新加载后 db 完整性 OK（atomic 写盘）", async () => {
+    // 模拟生产热路径：连续 recordSearch + ensureTodaySnapshot + 关闭（等价于 dev server 重启）
+    const now = Date.now();
+    for (let i = 0; i < 30; i++) {
+      await store.recordSearch(`原子写盘测试${i}`, now + i * 100);
+    }
+    await store.ensureTodaySnapshot();
+    // 关键：触发 scheduleSave 落盘（500ms 防抖）
+    await new Promise((r) => setTimeout(r, 700));
+    // 关闭（同步最后落盘）
+    store.close();
+
+    // 重新加载同一个 db：sqlite3 CLI 工具做 integrity_check
+    const { execSync } = await import("child_process");
+    const result = execSync(`sqlite3 "${TEST_DB_PATH}" "PRAGMA integrity_check;"`).toString().trim();
+    expect(result).toBe("ok");
+
+    // 不应残留 tmp 文件
+    const { existsSync } = await import("fs");
+    const { readdirSync } = await import("fs");
+    const tmpFiles = readdirSync(TEST_DB_DIR).filter((f) => f.includes(".tmp-"));
+    expect(tmpFiles).toEqual([]);
+  });
 });

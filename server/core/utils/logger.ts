@@ -54,8 +54,24 @@ export class Logger {
     return `${color}${text}${LOG_LEVEL_COLORS.reset}`;
   }
 
+  /**
+   * 北京时间（UTC+8）格式化，输出保留时区偏移的 ISO 风格时间：
+   * 例：2026-08-14T11:43:09.762+08:00
+   * 服务器可能运行在 UTC 环境（Docker/CF Workers），显式 +8，不依赖宿主时区
+   */
+  private formatBeijingTime(d: Date): string {
+    const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const t = new Date(d.getTime() + BEIJING_OFFSET_MS);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return (
+      `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}` +
+      `T${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}` +
+      `.${String(t.getUTCMilliseconds()).padStart(3, "0")}+08:00`
+    );
+  }
+
   private formatMessage(level: LogLevel, message: string, meta?: LogMeta): string {
-    const timestamp = new Date().toISOString();
+    const timestamp = this.formatBeijingTime(new Date());
 
     const parts: string[] = [];
 
