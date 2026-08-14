@@ -27,6 +27,11 @@ export class HotSearchService {
   private storeType: "sqlite" | "memory";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
+  // 单飞锁 + 30s memo：避免每次请求日历都重跑一次 ensureTodaySnapshot。
+  // 用 map 保存正在执行的 Promise 实现 single-flight；30s 内命中直接复用结果。
+  private snapshotInFlight = new Map<string, Promise<void>>();
+  private snapshotFreshUntil = new Map<string, number>();
+  private static readonly SNAPSHOT_FRESH_MS = 30_000;
 
   constructor() {
     const memoryStore = getOrCreateSharedMemoryStore();
@@ -102,12 +107,49 @@ export class HotSearchService {
 
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
+    // 日历自愈：首次/换库/跨天后访问日历时，自动重建今日快照
+    await this.ensureTodaySnapshotFresh();
     return this.store.getCalendar(days);
   }
 
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
+    // 仅当请求当天时触发自愈；历史天数据由历史快照提供，强行重建会被覆盖成空
+    if (date && date === this.formatDateKey(Date.now())) {
+      await this.ensureTodaySnapshotFresh();
+    }
     return this.store.getDayItems(date);
+  }
+
+  /**
+   * 单飞 + 30s memo 的今日快照重建
+   * - 命中：30s 内直接返回，不重复重建
+   * - 未命中：dedup 同进程并发请求，多个 await 共享同一个 Promise
+   */
+  private async ensureTodaySnapshotFresh(): Promise<void> {
+    const dateKey = this.formatDateKey(Date.now());
+    const cached = this.snapshotFreshUntil.get(dateKey);
+    if (cached && cached > Date.now()) return;
+
+    const inflight = this.snapshotInFlight.get(dateKey);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      try {
+        await this.store.ensureTodaySnapshot();
+        this.snapshotFreshUntil.set(dateKey, Date.now() + HotSearchService.SNAPSHOT_FRESH_MS);
+      } finally {
+        this.snapshotInFlight.delete(dateKey);
+      }
+    })();
+    this.snapshotInFlight.set(dateKey, promise);
+    return promise;
+  }
+
+  private formatDateKey(ts: number): string {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
   getDatabaseSize(): number {
