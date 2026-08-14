@@ -276,7 +276,8 @@ async function refresh() {
 }
 
 function quickSearch(term: string) {
-  navigateTo({ path: `/s/${encodeURIComponent(term)}` });
+  // 直接跳首页搜索（/?q=xxx），复用首页搜索体验，不再经过 /s 重定向
+  navigateTo({ path: "/", query: { q: term } });
 }
 
 /* ---------- 日历渲染辅助 ---------- */
