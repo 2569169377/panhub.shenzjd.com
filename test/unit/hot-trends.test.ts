@@ -5,13 +5,14 @@ import { resolve } from "path";
 const TEST_DB_DIR = "./data-test-terms";
 const TEST_DB_PATH = "./data-test-terms/test-terms.db";
 
+/** 北京时间（UTC+8）日期键，与实现保持一致 */
 function dateKey(ts: number): string {
-  const d = new Date(ts);
+  const d = new Date(ts + 8 * 3600 * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-describe("SqliteHotSearchStore 日历与全量快照", () => {
+describe("SqliteHotSearchStore 日历实时聚合", () => {
   let store: any;
 
   beforeAll(async () => {
@@ -37,25 +38,25 @@ describe("SqliteHotSearchStore 日历与全量快照", () => {
     await store.waitForInit();
   });
 
-  it("ensureTodaySnapshot 记录当天全部词（非仅 top30）", async () => {
+  it("日历实时聚合：无需手动 ensure，写入后立即可见全部词（非仅 top30）", async () => {
     const now = Date.now();
     for (let i = 0; i < 40; i++) {
       await store.recordSearch(`词${String(i).padStart(2, "0")}`, now + i * 1000);
     }
-    await store.ensureTodaySnapshot();
+    // 不调用任何快照生成，直接读日历
+    const cal = await store.getCalendar(5);
     const today = dateKey(now);
-    const result = store.db.exec("SELECT COUNT(*) as c FROM rank_snapshots WHERE snap_date = ?", [today]);
-    // 40 个词全部进入快照，不再限制 30 条
-    expect(result[0].values[0][0]).toBe(40);
+    const todayEntry = cal.find((d: any) => d.date === today);
+    // 40 个词全部进入日历，不再限制 30 条
+    expect(todayEntry.count).toBe(40);
   });
 
-  it("getCalendar 返回近 N 天连续日期与每天词数/top3", async () => {
+  it("getCalendar 返回近 N 天连续日期与每天词数/top3（实时聚合）", async () => {
     const now = Date.now();
     await store.recordSearch("词A", now);
     await store.recordSearch("词A", now + 1000); // count=2 热度最高
     await store.recordSearch("词B", now + 2000);
     await store.recordSearch("词C", now + 3000);
-    await store.ensureTodaySnapshot();
 
     const cal = await store.getCalendar(5);
     expect(cal).toHaveLength(5);
@@ -73,7 +74,6 @@ describe("SqliteHotSearchStore 日历与全量快照", () => {
     await store.recordSearch("词A", now);
     await store.recordSearch("词A", now + 1000);
     await store.recordSearch("词B", now + 2000);
-    await store.ensureTodaySnapshot();
 
     const today = dateKey(now);
     const items = await store.getDayItems(today);
@@ -133,7 +133,7 @@ describe("SqliteHotSearchStore 日历与全量快照", () => {
   });
 });
 
-describe("MemoryHotSearchStore 日历与全量快照", () => {
+describe("MemoryHotSearchStore 日历实时聚合", () => {
   let store: any;
 
   beforeEach(async () => {
@@ -145,12 +145,11 @@ describe("MemoryHotSearchStore 日历与全量快照", () => {
     store.close();
   });
 
-  it("getCalendar 与 getDayItems 返回当天全量词", async () => {
+  it("getCalendar 与 getDayItems 返回当天全量词（实时聚合，无需快照）", async () => {
     const now = Date.now();
     await store.recordSearch("词A", now);
     await store.recordSearch("词A", now + 1000);
     await store.recordSearch("词B", now + 2000);
-    await store.ensureTodaySnapshot();
 
     const today = dateKey(now);
     const cal = await store.getCalendar(5);

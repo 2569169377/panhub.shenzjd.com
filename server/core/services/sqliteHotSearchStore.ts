@@ -15,11 +15,17 @@ const LAMBDA = 1.0;
 /** 热搜只展示最近 N 天内有搜索记录的词（配合 λ=1.0，3 天后热度基本归零） */
 const HOT_WINDOW_DAYS = 3;
 
-/** 本地时区日期键 YYYY-MM-DD（对齐用户感知的"今日"） */
+/** 固定北京时间（UTC+8）日期键 YYYY-MM-DD，不依赖宿主时区（Docker/CF 为 UTC 也能对齐用户感知的"今日"） */
 function formatDateKey(ts: number): string {
-  const d = new Date(ts);
+  const d = new Date(ts + 8 * 3600 * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/** 北京时间 0 点对应的 epoch ms（入参 YYYY-MM-DD） */
+function beijingDayStart(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) - 8 * 3600 * 1000;
 }
 
 function isForbidden(term: string): boolean {
@@ -110,21 +116,10 @@ export class SqliteHotSearchStore implements IHotSearchStore {
         last_at INTEGER NOT NULL
       )
     `);
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)");
+    // 每日榜单快照（飙升榜计算基础，懒生成）已随飙升榜删除（1fc0f21），
+    // 日历数据改为实时聚合 search_terms，不再需要快照表
     this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)");
-
-    // 每日榜单快照（飙升榜计算基础，懒生成）
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS rank_snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        snap_date TEXT NOT NULL,
-        term TEXT NOT NULL,
-        rank INTEGER NOT NULL,
-        score REAL NOT NULL,
-        UNIQUE(snap_date, term)
-      )
-    `);
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON rank_snapshots(snap_date)");
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)");
 
     // 迁移 JSON 数据
     this.migrateFromJson();
@@ -362,40 +357,22 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     });
   }
 
-  async ensureTodaySnapshot(): Promise<void> {
-    await this.waitForInit();
-    const date = formatDateKey(Date.now());
-    // 每天访问时全量重建当天快照（幂等、始终最新），历史天不受影响
-    const start = new Date(date + "T00:00:00").getTime();
-    const end = start + 86400000;
-
-    const result = this.db.exec(
-      `SELECT term, count FROM search_terms
-       WHERE last_at >= ? AND last_at < ?
-       ORDER BY count DESC, last_at DESC`,
-      [start, end]
-    );
-    const rows = result.length ? result[0].values : [];
-
-    this.db.run("DELETE FROM rank_snapshots WHERE snap_date = ?", [date]);
-    const stmt = this.db.prepare("INSERT OR REPLACE INTO rank_snapshots (snap_date, term, rank, score) VALUES (?, ?, ?, ?)");
-    rows.forEach((row: any[], index: number) => {
-      stmt.run([date, row[0], index + 1, row[1]]);
-    });
-    stmt.free();
-    this.scheduleSave();
-  }
-
+  /**
+   * 日历：近 N 天每天词数与 top3（实时聚合 search_terms，不再依赖快照表）
+   * 日期边界用北京时间（+8h），保证与用户感知的"今日"一致
+   */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
     const safeDays = Math.min(Math.max(1, days), 90);
-    const start = formatDateKey(Date.now() - (safeDays - 1) * 86400000);
+    const startTs = beijingDayStart(formatDateKey(Date.now())) - (safeDays - 1) * 86400000;
 
+    // 每天词数（按北京时间分组）
     const countResult = this.db.exec(
-      `SELECT snap_date, COUNT(*) as c FROM rank_snapshots
-       WHERE snap_date >= ?
-       GROUP BY snap_date ORDER BY snap_date DESC`,
-      [start]
+      `SELECT date((last_at + 8*3600*1000) / 1000, 'unixepoch') as day, COUNT(*) as c
+       FROM search_terms
+       WHERE last_at >= ?
+       GROUP BY day`,
+      [startTs]
     );
     const countMap = new Map<string, number>();
     if (countResult.length) {
@@ -404,19 +381,23 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       }
     }
 
+    // 每天 top3（按 count 降序，count 相同按 last_at 新者优先）
     const topResult = this.db.exec(
-      `SELECT snap_date, term FROM rank_snapshots
-       WHERE snap_date >= ? AND rank <= 3
-       ORDER BY snap_date, rank ASC`,
-      [start]
+      `SELECT day, term FROM (
+         SELECT date((last_at + 8*3600*1000) / 1000, 'unixepoch') as day, term, count, last_at,
+                ROW_NUMBER() OVER (PARTITION BY date((last_at + 8*3600*1000) / 1000, 'unixepoch') ORDER BY count DESC, last_at DESC) as rn
+         FROM search_terms
+         WHERE last_at >= ?
+       ) WHERE rn <= 3`,
+      [startTs]
     );
     const topMap = new Map<string, string[]>();
     if (topResult.length) {
       for (const row of topResult[0].values) {
-        const date = row[0] as string;
-        const list = topMap.get(date) ?? [];
+        const day = row[0] as string;
+        const list = topMap.get(day) ?? [];
         if (list.length < 3) list.push(row[1] as string);
-        topMap.set(date, list);
+        topMap.set(day, list);
       }
     }
 
@@ -436,16 +417,20 @@ export class SqliteHotSearchStore implements IHotSearchStore {
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+    const start = beijingDayStart(date);
+    const end = start + 86400000;
     const result = this.db.exec(
-      "SELECT term, rank, score FROM rank_snapshots WHERE snap_date = ? ORDER BY rank ASC",
-      [date]
+      `SELECT term, count, last_at FROM search_terms
+       WHERE last_at >= ? AND last_at < ?
+       ORDER BY count DESC, last_at DESC`,
+      [start, end]
     );
     if (!result.length) return [];
     const cols = result[0].columns;
-    return result[0].values.map((row: any[]) => {
+    return result[0].values.map((row: any[], index: number) => {
       const obj: any = {};
       cols.forEach((col: string, i: number) => (obj[col] = row[i]));
-      return { term: obj.term, rank: obj.rank, count: obj.score };
+      return { term: obj.term, rank: index + 1, count: obj.count };
     });
   }
 

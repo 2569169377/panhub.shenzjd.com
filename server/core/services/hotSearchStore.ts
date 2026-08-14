@@ -34,12 +34,8 @@ export interface IHotSearchStore {
   getStats(): Promise<HotSearchStats>;
 
   /**
-   * 懒生成当日榜单快照（全量词，无定时任务的 Serverless 环境友好）
-   */
-  ensureTodaySnapshot(): Promise<void>;
-
-  /**
    * 获取每日榜单日历（近 N 天，每天词数与 top3）
+   * 实时聚合 search_terms / termDict，日期按北京时间
    */
   getCalendar(days: number): Promise<DaySnapshot[]>;
 

@@ -14,10 +14,17 @@ function decayScore(score: number, lastSearched: number, now: number): number {
   return score * Math.exp(-LAMBDA * elapsedDays);
 }
 
+/** 固定北京时间（UTC+8）日期键，不依赖宿主时区 */
 function formatDateKey(ts: number): string {
-  const d = new Date(ts);
+  const d = new Date(ts + 8 * 3600 * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/** 北京时间 0 点对应的 epoch ms */
+function beijingDayStart(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) - 8 * 3600 * 1000;
 }
 
 /**
@@ -27,7 +34,6 @@ function formatDateKey(ts: number): string {
 export class MemoryHotSearchStore implements IHotSearchStore {
   private memoryStore = new Map<string, HotSearchItem>();
   private termDict = new Map<string, { count: number; firstAt: number; lastAt: number }>();
-  private snapshots = new Map<string, Map<string, { rank: number; count: number }>>();
 
   async recordSearch(term: string, now: number): Promise<void> {
     if (!term || term.trim().length === 0) return;
@@ -133,50 +139,54 @@ export class MemoryHotSearchStore implements IHotSearchStore {
       .slice(0, safeLimit);
   }
 
-  async ensureTodaySnapshot(): Promise<void> {
-    const date = formatDateKey(Date.now());
-    const start = new Date(date + "T00:00:00").getTime();
-    const end = start + 86400000;
-    const dayTerms = Array.from(this.termDict.entries())
-      .filter(([, v]) => v.lastAt >= start && v.lastAt < end)
-      .sort((a, b) => b[1].count - a[1].count || b[1].lastAt - a[1].lastAt)
-      .map(([term, v], index) => ({ term, rank: index + 1, count: v.count }));
-    const map = new Map<string, { rank: number; count: number }>();
-    dayTerms.forEach((t) => map.set(t.term, { rank: t.rank, count: t.count }));
-    this.snapshots.set(date, map);
-  }
-
+  /**
+   * 日历：近 N 天每天词数与 top3（实时聚合 termDict，不依赖快照）
+   */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     const safeDays = Math.min(Math.max(1, days), 90);
+    // 按北京时间分桶：day -> terms
+    const dayMap = new Map<string, Array<{ term: string; count: number; lastAt: number }>>();
+    for (const [term, v] of this.termDict.entries()) {
+      const day = formatDateKey(v.lastAt);
+      const list = dayMap.get(day) ?? [];
+      list.push({ term, count: v.count, lastAt: v.lastAt });
+      dayMap.set(day, list);
+    }
     const out: DaySnapshot[] = [];
     for (let i = safeDays - 1; i >= 0; i--) {
       const date = formatDateKey(Date.now() - i * 86400000);
-      const map = this.snapshots.get(date);
-      if (!map || map.size === 0) {
+      const list = dayMap.get(date);
+      if (!list || list.length === 0) {
         out.push({ date, count: 0, top: [] });
         continue;
       }
-      const top = Array.from(map.entries())
-        .sort((a, b) => a[1].rank - b[1].rank)
+      const top = list
+        .slice()
+        .sort((a, b) => b.count - a.count || b.lastAt - a.lastAt)
         .slice(0, 3)
-        .map(([term]) => term);
-      out.push({ date, count: map.size, top });
+        .map((t) => t.term);
+      out.push({ date, count: list.length, top });
     }
     return out;
   }
 
   async getDayItems(date: string): Promise<DayTerm[]> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
-    const map = this.snapshots.get(date);
-    if (!map) return [];
-    return Array.from(map.entries())
-      .map(([term, v]) => ({ term, rank: v.rank, count: v.count }))
-      .sort((a, b) => a.rank - b.rank);
+    const start = beijingDayStart(date);
+    const end = start + 86400000;
+    const items: DayTerm[] = [];
+    for (const [term, v] of this.termDict.entries()) {
+      if (v.lastAt >= start && v.lastAt < end) {
+        items.push({ term, rank: 0, count: v.count });
+      }
+    }
+    items.sort((a, b) => b.count - a.count);
+    items.forEach((item, index) => (item.rank = index + 1));
+    return items;
   }
 
   close(): void {
     this.memoryStore.clear();
     this.termDict.clear();
-    this.snapshots.clear();
   }
 }
