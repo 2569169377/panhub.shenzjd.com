@@ -1,5 +1,5 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync, copyFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loggers } from "../utils/logger";
 
@@ -83,10 +83,83 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     if (existsSync(this.dbPath)) {
       const buffer = readFileSync(this.dbPath);
       this.db = new SQL.Database(buffer);
+      // 启动自愈：检测 db 损坏（旧版 fire-and-forget 写盘可能产生半写文件），
+      // 能 REINDEX 修复就修复，修不好则备份坏库 + 空库重建（词库由日志 seed 回填）
+      this.repairIfCorrupt(SQL);
     } else {
       this.db = new SQL.Database();
     }
 
+    // 建表（init 与损坏重建共用同一套表结构）
+    this.ensureTables();
+
+    // 迁移 JSON 数据
+    this.migrateFromJson();
+    // 从日志初始化词库（仅词库为空时执行，纯新增不影响热榜）
+    this.seedSearchTermsFromLogs();
+
+    this.saveToDiskAtomic();
+    console.log("[SqliteHotSearchStore] ✅ SQLite (sql.js) 存储已初始化");
+  }
+
+  /**
+   * 启动自愈：检测 db 文件完整性
+   * - PRAGMA quick_check 返回非 "ok" → 索引/页损坏（旧版异步写盘半写导致）
+   * - 优先 REINDEX 修复（可救回绝大多数"索引错乱"型损坏）
+   * - REINDEX 失败 → 备份坏库为 *.corrupt-{ts}，用空库重建（词库稍后由 seedSearchTermsFromLogs 回填）
+   */
+  private repairIfCorrupt(SQL: any): void {
+    try {
+      const check = this.db.exec("PRAGMA quick_check");
+      const quickCheckResult = check?.[0]?.values?.[0]?.[0] as string | undefined;
+      // quick_check 正常返回单行 "ok"
+      if (quickCheckResult === "ok") return;
+
+      console.warn(
+        `[SqliteHotSearchStore] ⚠️ 检测到 db 完整性异常（${quickCheckResult ?? "unknown"}），尝试 REINDEX 修复`
+      );
+
+      // 1) 尝试 REINDEX 重建所有索引（对索引错乱型损坏有效）
+      try {
+        this.db.run("REINDEX");
+        const recheck = this.db.exec("PRAGMA quick_check");
+        if (recheck?.[0]?.values?.[0]?.[0] === "ok") {
+          console.log("[SqliteHotSearchStore] ✅ REINDEX 修复成功");
+          this.saveToDiskAtomic();
+          return;
+        }
+      } catch (e) {
+        console.warn("[SqliteHotSearchStore] ⚠️ REINDEX 修复失败:", e instanceof Error ? e.message : String(e));
+      }
+
+      // 2) REINDEX 无效 → 备份坏库后重建空库（数据由日志 seed 回填）
+      this.backupAndRebuild(SQL);
+    } catch (e) {
+      // quick_check 本身都跑不起来（文件严重损坏 / 无法解析）→ 直接重建
+      console.warn("[SqliteHotSearchStore] ⚠️ db 严重损坏，无法执行完整性检查，直接重建:", e instanceof Error ? e.message : String(e));
+      this.backupAndRebuild(SQL);
+    }
+  }
+
+  /** 备份损坏 db 文件并新建空库（数据后续由日志 seed / 实时搜索重建） */
+  private backupAndRebuild(SQL: any): void {
+    try {
+      const backupPath = `${this.dbPath}.corrupt-${Date.now()}`;
+      copyFileSync(this.dbPath, backupPath);
+      console.warn(`[SqliteHotSearchStore] ⚠️ 已备份损坏库到 ${backupPath}，重建空库`);
+    } catch (e) {
+      console.warn("[SqliteHotSearchStore] ⚠️ 备份损坏库失败:", e instanceof Error ? e.message : String(e));
+    }
+    try {
+      this.db?.close();
+    } catch {}
+    this.db = new SQL.Database();
+    // 空库也需要建表（沿用 init 的表结构）
+    this.ensureTables();
+  }
+
+  /** 建表（init 与 损坏重建共用） */
+  private ensureTables(): void {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS hot_searches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,8 +171,6 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     `);
     this.db.run("CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)");
-
-    // 全量搜索词库（联想补全 + 智能化原料，不清理）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS search_terms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,8 +182,6 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     `);
     this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)");
-
-    // 每日榜单快照（飙升榜计算基础，懒生成）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS rank_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,14 +193,6 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       )
     `);
     this.db.run("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON rank_snapshots(snap_date)");
-
-    // 迁移 JSON 数据
-    this.migrateFromJson();
-    // 从日志初始化词库（仅词库为空时执行，纯新增不影响热榜）
-    this.seedSearchTermsFromLogs();
-
-    this.saveToDiskAtomic();
-    console.log("[SqliteHotSearchStore] ✅ SQLite (sql.js) 存储已初始化");
   }
 
   private migrateFromJson(): void {
