@@ -60,21 +60,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref } from "vue";
 
 interface Props {
   /** 公众号二维码图片地址 */
   qrSrc?: string;
   /** 图片 alt 文本 */
   qrAlt?: string;
-  /** localStorage 中记忆的 key（按域名/项目区分避免污染） */
-  storageKey?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   qrSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/wp/1782738963299-5wrchz.jpg",
   qrAlt: "公众号二维码",
-  storageKey: "panhub:wechat-guide:dismissed",
 });
 
 // 默认 jpg；如果加载失败自动尝试 png，避免单一格式限制
@@ -94,31 +91,16 @@ function onImgError(e: Event) {
 }
 
 function dismiss() {
+  // 仅当前渲染消失，不做持久化：刷新后卡片重新出现
   visible.value = false;
   dismissed.value = true;
-  try {
-    localStorage.setItem(props.storageKey, "1");
-  } catch {}
 }
 
 function reopen() {
   visible.value = true;
   dismissed.value = false;
-  try {
-    localStorage.removeItem(props.storageKey);
-  } catch {}
 }
-
-onMounted(() => {
-  try {
-    if (localStorage.getItem(props.storageKey) === "1") {
-      visible.value = false;
-      dismissed.value = true;
-    }
-  } catch {}
-});
 </script>
-
 <style scoped>
 .wechat-guide {
   position: fixed;
