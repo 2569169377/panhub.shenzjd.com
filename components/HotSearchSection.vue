@@ -72,10 +72,6 @@ async function init() {
   await fetchHotSearches();
 }
 
-async function refresh() {
-  await fetchHotSearches();
-}
-
 function getTerms(): string[] {
   return searches.value.map((s) => s.term);
 }
@@ -152,7 +148,8 @@ onBeforeUnmount(() => {
   destroyTagCloud();
 });
 
-defineExpose({ init, refresh });
+// 热搜词云仅在页面挂载时拉取一次（随机展示无时效性语义，无需手动刷新）
+defineExpose({ init });
 </script>
 
 <style scoped>

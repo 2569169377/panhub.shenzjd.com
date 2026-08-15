@@ -359,7 +359,6 @@ async function fullReset() {
   // 刷新页面以恢复初始状态（包括豆瓣电影）
   await nextTick();
   if (doubanHotRef.value) await doubanHotRef.value.init();
-  if (hotSearchRef.value) await hotSearchRef.value.refresh();
 }
 
 // 平台信息
