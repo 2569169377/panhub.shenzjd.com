@@ -18,10 +18,10 @@ services:
       - HOST=0.0.0.0
       # 可选：设置日志级别
       - LOG_LEVEL=info
-      # 限流可信代理开关：仅当服务前置了 Cloudflare / 可信反代时才设为 "1"，
-      # 此时限流按 CF-Connecting-IP / X-Forwarded-For 取真实客户端 IP；
-      # Docker 直连公网时保持默认（不设），限流基于 TCP socket 地址（不可伪造）。
-      # - TRUST_PROXY=1
+      # 限流可信代理开关：生产域名经 Cloudflare 代理（橙云），CF 注入的
+      # CF-Connecting-IP 不可伪造，必须开启才能按真实客户端 IP 限流
+      # （否则限流会按 CF 边缘节点 IP 聚合，误伤同地区所有用户）。
+      - TRUST_PROXY=1
     # 健康检查
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
