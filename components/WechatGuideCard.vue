@@ -98,7 +98,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   qrSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/wp/1782738963299-5wrchz.jpg",
   qrAlt: "公众号二维码",
-  appreciationSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260815-095440-uc4a.png",
+  appreciationSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260815-100157-net7.png",
   appreciationAlt: "赞赏码",
 });
 
