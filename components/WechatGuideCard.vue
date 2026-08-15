@@ -35,10 +35,32 @@
             height="120"
             loading="lazy"
             decoding="async"
+            data-kind="qr"
             @error="onImgError" />
         </div>
 
         <p class="wechat-guide__hint">关注获取最新更新</p>
+
+        <!-- 赞赏码 -->
+        <div class="wechat-guide__divider" aria-hidden="true"></div>
+        <span class="wechat-guide__app-title">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+          赞赏支持
+        </span>
+        <div class="wechat-guide__qr wechat-guide__qr--app">
+          <img
+            :src="appreciationSrc"
+            alt="赞赏码"
+            width="120"
+            height="120"
+            loading="lazy"
+            decoding="async"
+            data-kind="app"
+            @error="onImgError" />
+        </div>
+        <p class="wechat-guide__hint">扫码支持一下</p>
       </aside>
     </Transition>
 
@@ -65,28 +87,35 @@ import { ref } from "vue";
 interface Props {
   /** 公众号二维码图片地址 */
   qrSrc?: string;
-  /** 图片 alt 文本 */
+  /** 公众号二维码 alt 文本 */
   qrAlt?: string;
+  /** 赞赏码图片地址 */
+  appreciationSrc?: string;
+  /** 赞赏码 alt 文本 */
+  appreciationAlt?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   qrSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/wp/1782738963299-5wrchz.jpg",
   qrAlt: "公众号二维码",
+  appreciationSrc: "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260815-095440-uc4a.png",
+  appreciationAlt: "赞赏码",
 });
 
-// 默认 jpg；如果加载失败自动尝试 png，避免单一格式限制
-const fallbackSrc = ref<string | null>(null);
+// 图片加载失败时自动尝试 jpg -> png 回退（各图独立，最多一次）
+const fallbackSrc = ref<Record<string, string | null>>({ qr: null, app: null });
 
 const visible = ref(true);
 const dismissed = ref(false);
 
 function onImgError(e: Event) {
   const img = e.target as HTMLImageElement;
-  // 只尝试一次回退（jpg -> png），避免循环
-  if (!fallbackSrc.value && !img.dataset.retried) {
+  const kind = (img.dataset.kind || "qr") as "qr" | "app";
+  const baseSrc = kind === "qr" ? props.qrSrc : props.appreciationSrc;
+  if (!fallbackSrc.value[kind] && !img.dataset.retried) {
     img.dataset.retried = "1";
-    fallbackSrc.value = props.qrSrc.replace(/\.jpg$/i, ".png");
-    img.src = fallbackSrc.value;
+    fallbackSrc.value[kind] = baseSrc.replace(/\.jpg$/i, ".png");
+    img.src = fallbackSrc.value[kind]!;
   }
 }
 
@@ -193,6 +222,36 @@ function reopen() {
   line-height: 1.4;
 }
 
+/* 分隔线 */
+.wechat-guide__divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-medium), transparent);
+  opacity: 0.6;
+  margin: 2px 0;
+}
+
+/* 赞赏区块标题 */
+.wechat-guide__app-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--secondary);
+  letter-spacing: 0.5px;
+}
+
+.wechat-guide__app-title svg {
+  color: var(--secondary);
+}
+
+/* 赞赏码（略小于公众号码，主次分明） */
+.wechat-guide__qr--app {
+  width: 92px;
+  height: 92px;
+}
+
 /* 召回小红点 */
 .wechat-reopen {
   position: fixed;
@@ -277,6 +336,11 @@ function reopen() {
   .wechat-guide__qr {
     width: 92px;
     height: 92px;
+  }
+
+  .wechat-guide__qr--app {
+    width: 80px;
+    height: 80px;
   }
 }
 
