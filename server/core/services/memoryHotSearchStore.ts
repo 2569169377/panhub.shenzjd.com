@@ -6,7 +6,7 @@ import { loggers } from "../utils/logger";
  * λ=1.0 → 半衰期约 17 小时；score = score × e^(-λ×间隔天数) + 1
  */
 const LAMBDA = 1.0;
-const HOT_WINDOW_DAYS = 3;
+const HOT_WINDOW_DAYS = 1;
 const HOT_WINDOW_MS = HOT_WINDOW_DAYS * 86400000;
 
 function decayScore(score: number, lastSearched: number, now: number): number {

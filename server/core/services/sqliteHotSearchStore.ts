@@ -12,8 +12,8 @@ const DEFAULT_DB_PATH = "./data/hot-searches.db";
  * λ=1.0 → 半衰期约 17 小时，保证"近期热度"快速体现，旧词自然退场，新词有上升通道
  */
 const LAMBDA = 1.0;
-/** 热搜只展示最近 N 天内有搜索记录的词（配合 λ=1.0，3 天后热度基本归零） */
-const HOT_WINDOW_DAYS = 3;
+/** 热搜只展示最近 1 天内有搜索记录的词（配合 λ=1.0，1 天后残热约 37%，贴近"今日热门"语义） */
+const HOT_WINDOW_DAYS = 1;
 
 /** 固定北京时间（UTC+8）日期键 YYYY-MM-DD，不依赖宿主时区（Docker/CF 为 UTC 也能对齐用户感知的"今日"） */
 function formatDateKey(ts: number): string {
