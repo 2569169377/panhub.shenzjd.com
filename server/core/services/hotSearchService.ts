@@ -76,6 +76,12 @@ export class HotSearchService {
     return items;
   }
 
+  /** 今日热搜词池随机抽样（首页词云展示用） */
+  async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
+    await this.waitForInit();
+    return this.store.getRandomHotSearches(limit);
+  }
+
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
     return this.store.clearHotSearches();

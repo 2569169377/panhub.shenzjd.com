@@ -104,4 +104,30 @@ describe("SqliteHotSearchStore", () => {
     expect(stats.total).toBe(2);
     expect(stats.topTerms).toHaveLength(2);
   });
+
+  it("getRandomHotSearches should only return today's terms", async () => {
+    const now = Date.now();
+    await store.recordSearch("今日词1", now);
+    await store.recordSearch("今日词2", now);
+    await store.recordSearch("今日词3", now);
+    // 昨天的词：仍在 search_terms 词库中，但 last_at 不在今日窗口内
+    await store.recordSearch("昨日词", now - 2 * 86400000);
+
+    const items = await store.getRandomHotSearches(10);
+    const terms = items.map((i: any) => i.term);
+    expect(items.length).toBeGreaterThan(0);
+    expect(terms).not.toContain("昨日词");
+  });
+
+  it("getRandomHotSearches should respect limit and return compatible shape", async () => {
+    const now = Date.now();
+    for (let i = 0; i < 8; i++) {
+      await store.recordSearch(`随机词${i}`, now);
+    }
+    const items = await store.getRandomHotSearches(3);
+    expect(items).toHaveLength(3);
+    expect(items[0].term).toBeDefined();
+    expect(items[0].rank).toBe(1);
+    expect(typeof items[0].displayScore).toBe("number");
+  });
 });

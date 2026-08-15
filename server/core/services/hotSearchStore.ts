@@ -14,6 +14,14 @@ export interface IHotSearchStore {
   getHotSearches(limit: number): Promise<HotSearchItem[]>;
 
   /**
+   * 获取今日热搜词池的随机样本（首页词云用）
+   * 数据源为全量词库 search_terms，按北京时间今日 0 点过滤，随机取 limit 条。
+   * 理由：网盘搜索为超长尾需求，同词搜索人数极少，热度排名无统计意义，
+   * 随机展示今日真实被搜过的词，保证每次刷新都有新鲜感。
+   */
+  getRandomHotSearches(limit: number): Promise<HotSearchItem[]>;
+
+  /**
    * 清理超出限制的旧记录
    */
   cleanupOldEntries(maxEntries: number): Promise<void>;

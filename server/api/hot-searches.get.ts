@@ -10,7 +10,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: "limit 参数无效，范围 1-100" });
   }
 
-  const hotSearches = await service.getHotSearches(limit);
+  // 首页词云：随机取今日真实被搜过的词（超长尾场景下热度排名无统计意义，随机保证新鲜感）
+  const hotSearches = await service.getRandomHotSearches(limit);
 
   const maxScore = hotSearches.length > 0 ? (hotSearches[0].displayScore ?? hotSearches[0].score) : 1;
 

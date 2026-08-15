@@ -6,7 +6,7 @@ import { loggers } from "../utils/logger";
 
 const MAX_ENTRIES = 30;
 const DEFAULT_DB_DIR = "./data";
-const DEFAULT_DB_PATH = "./data/hot-searches.db";
+const DEFAULT_DB_PATH = process.env.HOT_SEARCH_DB_PATH || "./data/hot-searches.db";
 /**
  * 热度衰减系数（/天）：score = score × e^(-λ×间隔天数) + 1
  * λ=1.0 → 半衰期约 17 小时，保证"近期热度"快速体现，旧词自然退场，新词有上升通道
@@ -285,6 +285,42 @@ export class SqliteHotSearchStore implements IHotSearchStore {
         displayScore: Math.round(obj.decayed_score * 100) / 100,
       };
     });
+  }
+
+  /**
+   * 今日热搜词池随机抽样（首页词云展示用）
+   * - 数据源：search_terms 全量词库（不清理，日均 1000~3000 词）
+   * - 过滤：北京时间今日 0 点之后有搜索记录的词（保证"今天真实有人搜过"）
+   * - 排序：RANDOM()，每次请求结果不同
+   */
+  async getRandomHotSearches(limit: number): Promise<HotSearchItem[]> {
+    await this.waitForInit();
+    const dayStart = beijingDayStart(formatDateKey(Date.now()));
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const result = this.db.exec(
+      `SELECT term, count, first_at, last_at FROM search_terms
+       WHERE last_at >= ?
+       ORDER BY RANDOM()
+       LIMIT ?`,
+      [dayStart, safeLimit]
+    );
+    if (!result.length) return [];
+    const cols = result[0].columns;
+    const out: HotSearchItem[] = [];
+    for (const row of result[0].values) {
+      const obj: any = {};
+      cols.forEach((col: string, i: number) => (obj[col] = row[i]));
+      if (isForbidden(obj.term)) continue;
+      out.push({
+        term: obj.term,
+        score: obj.count,
+        lastSearched: obj.last_at,
+        createdAt: obj.first_at,
+        rank: out.length + 1,
+        displayScore: obj.count,
+      });
+    }
+    return out;
   }
 
   cleanupOldEntries(maxEntries: number): void {

@@ -84,6 +84,31 @@ export class MemoryHotSearchStore implements IHotSearchStore {
       .slice(0, limit);
   }
 
+  /**
+   * 今日热搜词池随机抽样（首页词云展示用）
+   * 与 SQLite 版语义一致：北京时间今日 0 点后搜索过的词，Fisher-Yates 洗牌取前 limit 条
+   */
+  async getRandomHotSearches(limit: number): Promise<HotSearchItem[]> {
+    const dayStart = beijingDayStart(formatDateKey(Date.now()));
+    const pool = Array.from(this.termDict.entries())
+      .filter(([term, v]) => v.lastAt >= dayStart)
+      .map(([term, v]) => ({ term, count: v.count, firstAt: v.firstAt, lastAt: v.lastAt }));
+    // Fisher-Yates 洗牌
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    return pool.slice(0, safeLimit).map((p, index) => ({
+      term: p.term,
+      score: p.count,
+      lastSearched: p.lastAt,
+      createdAt: p.firstAt,
+      rank: index + 1,
+      displayScore: p.count,
+    }));
+  }
+
   async cleanupOldEntries(maxEntries: number): Promise<void> {
     const now = Date.now();
     const cutoff = now - HOT_WINDOW_MS;

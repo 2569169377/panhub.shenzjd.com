@@ -1,20 +1,32 @@
 /**
- * 热搜功能测试
- * 测试 JSON 文件持久化
+ * 热搜功能测试（service 层）
+ * 使用独立测试库（HOT_SEARCH_DB_PATH 环境变量），绝不污染 data/hot-searches.db（线上数据副本）
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getOrCreateHotSearchService, resetHotSearchService } from "../../server/core/services/hotSearchService";
+import { rmSync } from "fs";
+import type { HotSearchService } from "../../server/core/services/hotSearchService";
 
-describe("HotSearchService (JSON file store)", () => {
-  const service = getOrCreateHotSearchService();
+const TEST_DB_PATH = "./data-test/hot-search-service.db";
+
+describe("HotSearchService (SQLite store, isolated db)", () => {
+  let service: HotSearchService;
+  let resetHotSearchService: () => void;
 
   beforeAll(async () => {
+    process.env.HOT_SEARCH_DB_PATH = TEST_DB_PATH;
+    const mod = await import("../../server/core/services/hotSearchService");
+    resetHotSearchService = mod.resetHotSearchService;
+    service = mod.getOrCreateHotSearchService();
     await service.clearHotSearches();
   });
 
   afterAll(() => {
     resetHotSearchService();
+    delete process.env.HOT_SEARCH_DB_PATH;
+    try {
+      rmSync(TEST_DB_PATH, { force: true });
+    } catch {}
   });
 
   it("应该能够记录搜索词", async () => {
@@ -119,14 +131,13 @@ describe("HotSearchService (JSON file store)", () => {
     expect(typeof size).toBe("number");
     expect(size).toBeGreaterThanOrEqual(0);
   });
-});
 
-describe("HotSearch API Endpoints", () => {
-  it("API 端点应该返回正确的数据结构", async () => {
-    // 伪代码，实际需要启动服务器
-    // const response = await fetch('/api/hot-searches');
-    // const data = await response.json();
-    // expect(data.code).toBe(0);
-    // expect(data.data.hotSearches).toBeInstanceOf(Array);
+  it("应该返回今日随机热搜词（service 层转发冒烟）", async () => {
+    const searches = await service.getRandomHotSearches(10);
+    expect(searches.length).toBeLessThanOrEqual(10);
+    for (const s of searches) {
+      expect(typeof s.term).toBe("string");
+      expect(s.term.length).toBeGreaterThan(0);
+    }
   });
 });
