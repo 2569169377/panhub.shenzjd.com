@@ -102,6 +102,9 @@
       <NuxtPage />
     </main>
 
+    <!-- 公众号引导卡片（全局浮卡，仿 ParseShort） -->
+    <WechatGuideCard />
+
     <!-- 设置抽屉 -->
     <ClientOnly>
       <SettingsDrawer
