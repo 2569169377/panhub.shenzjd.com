@@ -72,6 +72,7 @@ jobs:
               --name "$CONTAINER" \
               --restart unless-stopped \
               -p 5253:4000 \
+              -e TRUST_PROXY=1 \
               -v /opt/1panel/apps/openresty/openresty/www/sites/panhub.shenzjd.com/index:/app/data \
               "$IMAGE"
 
