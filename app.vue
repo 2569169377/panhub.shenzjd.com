@@ -102,8 +102,10 @@
       <NuxtPage />
     </main>
 
-    <!-- 公众号引导卡片（全局浮卡，仿 ParseShort） -->
-    <WechatGuideCard />
+    <!-- 公众号 + 赞赏码悬浮浮窗（@wu529778790/floating-qr，客户端挂载） -->
+    <ClientOnly>
+      <FloatingQrHost />
+    </ClientOnly>
 
     <!-- 设置抽屉 -->
     <ClientOnly>
