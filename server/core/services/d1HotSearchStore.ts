@@ -27,7 +27,7 @@ export interface D1PreparedStatementLike {
 export interface D1DatabaseLike {
   prepare(sql: string): D1PreparedStatementLike;
   exec(sql: string): Promise<{ success: boolean; meta?: any }>;
-  batch?(statements: D1PreparedStatementLike[]): Promise<any[]>;
+  batch(statements: D1PreparedStatementLike[]): Promise<any[]>;
 }
 
 const MAX_ENTRIES = 30;
@@ -69,27 +69,32 @@ export class D1HotSearchStore implements IHotSearchStore {
   }
 
   private async init(): Promise<void> {
-    // D1 exec 支持多语句 DDL（与 sqlite 建表 SQL 一致）
-    await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS hot_searches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        term TEXT NOT NULL UNIQUE,
-        score INTEGER NOT NULL DEFAULT 1,
-        last_searched_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC);
-      CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC);
-      CREATE TABLE IF NOT EXISTS search_terms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        term TEXT NOT NULL UNIQUE,
-        count INTEGER NOT NULL DEFAULT 1,
-        first_at INTEGER NOT NULL,
-        last_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC);
-    `);
+    // 注意：真实 D1 的 exec() 不支持多语句字符串（会报 incomplete input），
+    // 建表/索引必须用 batch() 逐条执行（batch 内事务性执行，支持 DDL）
+    await this.db.batch([
+      this.db.prepare(
+        `CREATE TABLE IF NOT EXISTS hot_searches (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          term TEXT NOT NULL UNIQUE,
+          score INTEGER NOT NULL DEFAULT 1,
+          last_searched_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )`
+      ),
+      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)"),
+      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)"),
+      this.db.prepare(
+        `CREATE TABLE IF NOT EXISTS search_terms (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          term TEXT NOT NULL UNIQUE,
+          count INTEGER NOT NULL DEFAULT 1,
+          first_at INTEGER NOT NULL,
+          last_at INTEGER NOT NULL
+        )`
+      ),
+      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)"),
+      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)"),
+    ]);
     console.log("[D1HotSearchStore] ✅ D1 存储已就绪");
   }
 

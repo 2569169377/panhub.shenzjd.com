@@ -32,26 +32,40 @@ class D1Mock implements D1DatabaseLike {
   }
 
   prepare(sql: string): D1PreparedStatementLike {
-    const stmt = this.db.prepare(sql);
+    // 惰性 prepare：node:sqlite 的 prepare 会立即校验 schema（如 CREATE INDEX
+    // 在表未创建时直接报错），而真实 D1 的 prepare 是惰性的、batch 内按顺序
+    // 执行时才校验。故这里延迟到 all/first/run 时再真正 prepare。
+    const db = this.db;
     let bound: unknown[] = [];
     const self: D1PreparedStatementLike = {
       bind(...values: unknown[]): D1PreparedStatementLike {
         bound = values;
         return self;
       },
-      async all() {
+      all: async () => {
+        const stmt = db.prepare(sql);
         return { results: stmt.all(...bound), success: true };
       },
-      async first() {
+      first: async () => {
+        const stmt = db.prepare(sql);
         const row = stmt.get(...bound);
         return row ?? null;
       },
-      async run() {
+      run: async () => {
+        const stmt = db.prepare(sql);
         stmt.run(...bound);
         return { success: true };
       },
     };
     return self;
+  }
+
+  async batch(statements: D1PreparedStatementLike[]): Promise<any[]> {
+    const results = [];
+    for (const stmt of statements) {
+      results.push(await stmt.run());
+    }
+    return results;
   }
 }
 
