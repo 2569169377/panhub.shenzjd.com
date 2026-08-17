@@ -70,6 +70,10 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wu529778790/panhub.shenzjd.com)
 
+点击按钮后 Cloudflare 会自动：克隆仓库到你的 GitHub 账号 → 创建 D1 数据库并绑定（热搜持久化）→ 配置 Workers Builds（每次 push 自动构建部署）。
+
+> **部署配置**：在 Cloudflare 配置页将 **Build command** 设为 `npm run build:cf`（deploy command 会自动检测为 `npx wrangler deploy`）。部署完成后可在 Cloudflare Dashboard 的 **Workers Builds** 中关联仓库生产分支，实现 push 即自动更新。
+
 ### 方式三：Docker 部署
 
 ```bash
@@ -133,16 +137,17 @@ npm build
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `LOG_LEVEL` | `info` | 日志级别（debug/info/warn/error），支持白名单校验 |
-| `NITRO_PRESET` | auto-detect | 部署预设（vercel/cloudflare/docker） |
+| `NITRO_PRESET` | auto-detect | 部署预设（vercel/cloudflare/node-server） |
 | `PORT` | `4000` | 服务端口 |
 | `SEARCH_PASSWORD` | 空 | 非空时启用密码门，搜索时需输入密码（5 次失败锁定 5 分钟） |
+| `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` | 空 | **Docker 侧**通过 D1 REST 与 Worker 共享热搜数据（需自行创建 D1 Edit 权限的 API Token） |
 
 ### 部署差异说明
 
 | 特性 | Docker/Node | CF Workers / Vercel |
 |------|-------------|---------------------|
 | 进程内缓存 | ✅ 持久 | ❌ 每个 isolate 独立 |
-| 热搜数据持久化 | ✅ SQLite | ❌ 仅内存（重启丢失） |
+| 热搜数据持久化 | ✅ SQLite / D1 | ✅ D1（Worker 内置） |
 | 插件健康状态 | ✅ 持久 | ❌ 每次冷启动重置 |
 | 链接有效性检测 | ✅ 持久缓存 | ✅（探活缓存按实例独立） |
 

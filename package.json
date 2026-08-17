@@ -18,6 +18,7 @@
   "homepage": "https://github.com/wu529778790/panhub.shenzjd.com#readme",
   "scripts": {
     "build": "nuxt build",
+    "build:cf": "NITRO_PRESET=cloudflare_module nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
