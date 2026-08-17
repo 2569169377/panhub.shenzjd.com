@@ -7,7 +7,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { rmSync } from "fs";
 import type { HotSearchService } from "../../server/core/services/hotSearchService";
 
-const TEST_DB_PATH = "./data-test/hot-search-service.db";
+// 独立目录，避免与 sqliteHotSearch.test.ts 共用 ./data-test（其 afterAll 会递归删除该目录，
+// vitest 并行执行时会把本测试的 db 一起删掉导致偶发失败）
+const TEST_DB_PATH = "./data-test-service/hot-search-service.db";
 
 describe("HotSearchService (SQLite store, isolated db)", () => {
   let service: HotSearchService;

@@ -163,7 +163,7 @@ npm build
 - **HTML 解析**：Cheerio（TG 频道 + 插件）
 - **HTTP 客户端**：ofetch
 - **并发控制**：p-limit
-- **数据库**：sql.js（SQLite WASM）
+- **数据库**：node:sqlite（Node 内置 SQLite）
 - **测试框架**：Vitest
 
 ### 核心模块
@@ -262,7 +262,7 @@ npm test:coverage
 - [Nitro](https://nitro.unjs.io/) - Web 服务器工具包
 - [Cheerio](https://cheerio.js.org/) - HTML 解析器
 - [p-limit](https://github.com/sindresorhus/p-limit) - 并发控制
-- [sql.js](https://github.com/sql-js/sql.js/) - SQLite WASM
+- [node:sqlite](https://nodejs.org/api/sqlite.html) - Node 内置 SQLite
 - [Vitest](https://vitest.dev/) - 测试框架
 
 ---

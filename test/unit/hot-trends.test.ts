@@ -118,16 +118,16 @@ describe("SqliteHotSearchStore 日历实时聚合", () => {
     store = new SqliteHotSearchStore(TEST_DB_PATH);
     await store.waitForInit();
 
-    const result = store.db.exec("SELECT term FROM search_terms ORDER BY term ASC");
-    const terms = result[0].values.map((row: any[]) => row[0]);
+    const result = store.db.prepare("SELECT term FROM search_terms ORDER BY term ASC").all();
+    const terms = result.map((row: any) => row.term);
     expect(terms).toEqual(["慕尼黑", "慕尼黑 战争边缘"]);
 
     // 再次实例化不应重复导入（幂等）
     store.close();
     store = new SqliteHotSearchStore(TEST_DB_PATH);
     await store.waitForInit();
-    const again = store.db.exec("SELECT COUNT(*) as c FROM search_terms");
-    expect(again[0].values[0][0]).toBe(2);
+    const again = store.db.prepare("SELECT COUNT(*) as c FROM search_terms").get() as any;
+    expect(again.c).toBe(2);
 
     rmSync(logFile, { force: true });
   });

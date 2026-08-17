@@ -33,14 +33,12 @@
     "nuxt": "^4.0.3",
     "ofetch": "^1.4.1",
     "p-limit": "^7.2.0",
-    "sql.js": "^1.14.1",
     "TagCloud": "^2.5.0",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1",
     "wx-auth-sdk": "^1.2.8"
   },
   "devDependencies": {
-    "@types/sql.js": "^1.4.11",
     "@vitest/coverage-v8": "^2.1.0",
     "vitest": "^2.1.9"
   },
