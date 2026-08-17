@@ -12,3 +12,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "panhub-hot-searches"
 database_id = "b767a695-5d2a-42c1-bf4e-95324af18246"
+
+# 环境变量（与线上 Docker 保持一致；D1_* 为 Docker REST 专用，Worker 无需设置）
+[vars]
+LOG_LEVEL = "info"
