@@ -47,9 +47,38 @@ function hasD1Binding(): boolean {
   return !!(process.env as any).DB;
 }
 
+/**
+ * 尝试创建 D1 REST 存储（Docker / 任意 Node 环境侧，读写与 Worker 同一份 D1 数据）。
+ * - 显式 HOT_SEARCH_STORE=d1rest 强制启用
+ * - 或自动检测到 D1_API_TOKEN / D1_ACCOUNT_ID / D1_DATABASE_ID 配置时启用
+ */
+async function tryCreateD1RestStore(): Promise<IHotSearchStore | null> {
+  try {
+    const { createD1RestHotSearchStore } = await import("./d1RestHotSearchStore");
+    const store = createD1RestHotSearchStore();
+    await (store as any)["waitForInit"]?.();
+    return store;
+  } catch (err) {
+    console.log(
+      "[HotSearchService] D1 REST 存储不可用:",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/** 是否具备 D1 REST 连接配置 */
+function hasD1RestConfig(): boolean {
+  return !!(
+    process.env.D1_API_TOKEN &&
+    process.env.D1_ACCOUNT_ID &&
+    process.env.D1_DATABASE_ID
+  );
+}
+
 export class HotSearchService {
   private store: IHotSearchStore;
-  private storeType: "sqlite" | "memory" | "d1";
+  private storeType: "sqlite" | "memory" | "d1" | "d1rest";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
 
@@ -61,9 +90,11 @@ export class HotSearchService {
   }
 
   private async initializeWithFallback(): Promise<void> {
-    // 显式指定 > 环境自动检测 > sqlite > memory 的回退链
-    const forced = process.env.HOT_SEARCH_STORE; // "d1" | "sqlite" | "memory"
+    // 显式指定 > 环境自动检测 > 回退链（d1 → d1rest → sqlite → memory）
+    const forced = process.env.HOT_SEARCH_STORE; // "d1" | "d1rest" | "sqlite" | "memory"
     const wantD1 = forced === "d1" || (!forced && hasD1Binding());
+    const wantD1Rest =
+      forced === "d1rest" || (!forced && !hasD1Binding() && hasD1RestConfig());
     const wantSqlite = forced === "sqlite" || !forced;
 
     if (wantD1) {
@@ -72,6 +103,16 @@ export class HotSearchService {
         this.store = d1Store;
         this.storeType = "d1";
         console.log("[HotSearchService] ✅ 使用 D1 存储模式");
+        return;
+      }
+    }
+
+    if (wantD1Rest) {
+      const d1RestStore = await tryCreateD1RestStore();
+      if (d1RestStore) {
+        this.store = d1RestStore;
+        this.storeType = "d1rest";
+        console.log("[HotSearchService] ✅ 使用 D1 REST 存储模式（共享 Worker 数据）");
         return;
       }
     }
@@ -168,7 +209,7 @@ export class HotSearchService {
     return 0;
   }
 
-  getStoreType(): "sqlite" | "memory" | "d1" {
+  getStoreType(): "sqlite" | "memory" | "d1" | "d1rest" {
     return this.storeType;
   }
 
