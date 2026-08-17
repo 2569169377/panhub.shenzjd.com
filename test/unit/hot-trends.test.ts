@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { randomUUID } from "node:crypto";
 
 const TEST_DB_DIR = "./data-test-terms";
-const TEST_DB_PATH = "./data-test-terms/test-terms.db";
 
 /** 北京时间（UTC+8）日期键，与实现保持一致 */
 function dateKey(ts: number): string {
@@ -14,6 +13,7 @@ function dateKey(ts: number): string {
 
 describe("SqliteHotSearchStore 日历实时聚合", () => {
   let store: any;
+  let dbPath: string;
 
   beforeAll(async () => {
     if (!existsSync(TEST_DB_DIR)) {
@@ -22,19 +22,23 @@ describe("SqliteHotSearchStore 日历实时聚合", () => {
   });
 
   afterAll(() => {
-    if (store) store.close();
-    if (existsSync(TEST_DB_DIR)) {
-      rmSync(TEST_DB_DIR, { recursive: true, force: true });
+    if (store) {
+      try { store.close(); } catch {}
     }
+    // 尽力清理；删除失败（如沙箱防护拦截）时忽略，data-test* 已 gitignore
+    try { rmSync(TEST_DB_DIR, { recursive: true, force: true }); } catch {}
   });
 
   beforeEach(async () => {
-    if (store) store.close();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { force: true });
+    if (store) {
+      try { store.close(); } catch {}
     }
+    // 每个测试用独立子目录 + UUID db 文件：天然隔离且无并发竞争；
+    // db 与测试 log 同目录共存（seed 逻辑只扫 db 同目录 log），目录间互不可见；
+    // 不做任何删除操作（避免沙箱防护拦截 rmSync），data-test* 已 gitignore
+    dbPath = `${TEST_DB_DIR}/t-${randomUUID()}/test.db`;
     const { SqliteHotSearchStore } = await import("../../server/core/services/sqliteHotSearchStore");
-    store = new SqliteHotSearchStore(TEST_DB_PATH);
+    store = new SqliteHotSearchStore(dbPath);
     await store.waitForInit();
   });
 
@@ -99,10 +103,9 @@ describe("SqliteHotSearchStore 日历实时聚合", () => {
   });
 
   it("从日志初始化词库（幂等）", async () => {
-    const logFile = resolve(TEST_DB_DIR, "seed-test.log");
-    writeFileSync(
-      logFile,
-      [
+    // 日志与 db 放同一目录（本测试独立子目录），seed 逻辑只扫 db 同目录 log
+    const logFile = dbPath.replace(/test\.db$/, "seed-test.log");
+    writeFileSync(logFile, [
         `[2026-08-09T14:27:48.589Z] [INFO] [HotSearch] 新词出现 {`,
         `  "term": "慕尼黑 战争边缘"`,
         `}`,
@@ -115,7 +118,7 @@ describe("SqliteHotSearchStore 日历实时聚合", () => {
 
     store.close();
     const { SqliteHotSearchStore } = await import("../../server/core/services/sqliteHotSearchStore");
-    store = new SqliteHotSearchStore(TEST_DB_PATH);
+    store = new SqliteHotSearchStore(dbPath);
     await store.waitForInit();
 
     const result = store.db.prepare("SELECT term FROM search_terms ORDER BY term ASC").all();
@@ -124,12 +127,12 @@ describe("SqliteHotSearchStore 日历实时聚合", () => {
 
     // 再次实例化不应重复导入（幂等）
     store.close();
-    store = new SqliteHotSearchStore(TEST_DB_PATH);
+    store = new SqliteHotSearchStore(dbPath);
     await store.waitForInit();
     const again = store.db.prepare("SELECT COUNT(*) as c FROM search_terms").get() as any;
     expect(again.c).toBe(2);
 
-    rmSync(logFile, { force: true });
+    try { rmSync(logFile, { force: true }); } catch {}
   });
 });
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { randomUUID } from "node:crypto";
 
 const TEST_DB_DIR = "./data-test";
-const TEST_DB_PATH = "./data-test/test-hot-search.db";
 
 describe("SqliteHotSearchStore", () => {
   let store: any;
@@ -14,19 +14,21 @@ describe("SqliteHotSearchStore", () => {
   });
 
   afterAll(() => {
-    if (store) store.close();
-    if (existsSync(TEST_DB_DIR)) {
-      rmSync(TEST_DB_DIR, { recursive: true, force: true });
+    if (store) {
+      try { store.close(); } catch {}
     }
+    // 尽力清理；删除失败（如沙箱防护拦截）时忽略，data-test* 已 gitignore
+    try { rmSync(TEST_DB_DIR, { recursive: true, force: true }); } catch {}
   });
 
   beforeEach(async () => {
-    if (store) store.close();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { force: true });
+    if (store) {
+      try { store.close(); } catch {}
     }
+    // 每个测试用独立子目录 + UUID db 文件：天然隔离且无并发竞争；
+    // 不做任何删除操作（避免沙箱防护拦截 rmSync），data-test* 已 gitignore
     const { SqliteHotSearchStore } = await import("../../server/core/services/sqliteHotSearchStore");
-    store = new SqliteHotSearchStore(TEST_DB_PATH);
+    store = new SqliteHotSearchStore(`${TEST_DB_DIR}/t-${randomUUID()}/test.db`);
     await (store as any).waitForInit();
   });
 
