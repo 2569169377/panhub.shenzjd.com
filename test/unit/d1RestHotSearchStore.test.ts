@@ -1,7 +1,7 @@
 /**
  * D1RestDatabase 单元测试（Docker 侧 D1 共享存储）
  *
- * mock globalThis.fetch 模拟 D1 REST API（columns+rows 响应格式），
+ * mock globalThis.fetch 模拟 D1 REST API（行对象数组响应 + {batch:[...]} 请求格式），
  * 验证：批量 DDL 请求、recordSearch 的 SQL 分支、行映射、错误处理。
  */
 
@@ -18,10 +18,11 @@ const OPTS = {
 /** 模拟 fetch 响应对象（含 json() 方法） */
 const resp = (body: unknown) => ({ ok: true, json: async () => body });
 
-function d1Resp(columns: string[] = [], rows: unknown[][] = []) {
+/** 行对象数组响应（官方格式：result[i].results 直接是行对象） */
+function d1Resp(rows: any[] = []) {
   return resp({
     success: true,
-    result: [{ results: [{ columns, rows }], success: true, meta: {} }],
+    result: [{ results: rows, success: true, meta: {} }],
   });
 }
 
@@ -29,10 +30,10 @@ function d1Err(message: string) {
   return resp({ success: false, errors: [{ message }], result: [] });
 }
 
-/** 解析 fetch mock 第 n 次调用的请求体（batch 数组） */
+/** 解析 fetch mock 第 n 次调用的请求体 → 统一为查询数组（兼容 {batch:[...]} 与单对象） */
 function bodyOf(mock: ReturnType<typeof vi.fn>, n: number): Array<{ sql: string; params?: unknown[] }> {
-  const body = mock.mock.calls[n][1].body;
-  return JSON.parse(body);
+  const body = JSON.parse(mock.mock.calls[n][1].body);
+  return Array.isArray(body) ? body : Array.isArray(body.batch) ? body.batch : [body];
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -100,13 +101,18 @@ describe("D1RestDatabase", () => {
     store.close();
   });
 
-  it("getHotSearches 正确映射 columns+rows", async () => {
+  it("getHotSearches 正确映射行对象响应", async () => {
     fetchMock.mockResolvedValueOnce(d1Resp()); // init
     fetchMock.mockResolvedValueOnce(
-      d1Resp(
-        ["term", "score", "last_searched_at", "created_at", "decayed_score"],
-        [["电影", 5, 1786000000000, 1785000000000, 4.2]]
-      )
+      d1Resp([
+        {
+          term: "电影",
+          score: 5,
+          last_searched_at: 1786000000000,
+          created_at: 1785000000000,
+          decayed_score: 4.2,
+        },
+      ])
     );
 
     const store = createD1RestHotSearchStore({ ...OPTS, fetchImpl: fetchMock as any });

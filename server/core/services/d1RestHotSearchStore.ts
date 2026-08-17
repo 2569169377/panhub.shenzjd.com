@@ -33,7 +33,8 @@ interface D1RestQueryRequest {
 }
 
 interface D1RestQueryResult {
-  results?: Array<{ columns?: string[]; rows?: unknown[][] }>;
+  /** 行对象数组（键=列名），官方格式直接可用 */
+  results?: any[];
   success?: boolean;
   meta?: { changes?: number; last_row_id?: number };
 }
@@ -76,13 +77,16 @@ export class D1RestDatabase implements D1DatabaseLike {
   private async runQuery(reqs: D1RestQueryRequest[]): Promise<D1RestQueryResult[]> {
     const { accountId, databaseId, apiToken, baseUrl, fetchImpl } = this.opts;
     const url = `${baseUrl}/accounts/${accountId}/d1/database/${databaseId}/query`;
+    // 官方格式：单条 {sql, params}；多条 {batch: [{sql, params}, ...]}
+    // （裸数组会报 "Expected object, received array"）
+    const body = reqs.length === 1 ? reqs[0] : { batch: reqs };
     const res = await fetchImpl(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(reqs),
+      body: JSON.stringify(body),
     });
     const json = (await res.json()) as D1RestResponse;
     if (!json.success) {
@@ -92,17 +96,9 @@ export class D1RestDatabase implements D1DatabaseLike {
     return json.result ?? [];
   }
 
-  /** D1 REST 返回的 rows（二维数组）+ columns 映射为对象数组 */
+  /** D1 REST 响应 result[i].results 已是行对象数组（键=列名），直接透传 */
   private toObjects(meta: D1RestQueryResult): any[] {
-    const item = meta?.results?.[0];
-    if (!item) return [];
-    const cols = item.columns ?? [];
-    const rows = item.rows ?? [];
-    return rows.map((row) => {
-      const obj: Record<string, unknown> = {};
-      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
-      return obj;
-    });
+    return meta?.results ?? [];
   }
 
   prepare(sql: string): D1PreparedStatementLike {
