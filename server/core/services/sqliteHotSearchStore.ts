@@ -2,6 +2,7 @@ import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapsh
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { loggers } from "../utils/logger";
+import { normalize, isForbidden, formatDateKey, beijingDayStart } from "./hotSearchUtils";
 
 // node:sqlite 不在 module.builtinModules 列表（Node 新内置模块漏注册），vite/vite-node 剥掉
 // node: 前缀后会当成 npm 包 "sqlite" 解析失败；用 createRequire 走 Node CJS loader 原生解析，
@@ -19,38 +20,6 @@ const DEFAULT_DB_PATH = process.env.HOT_SEARCH_DB_PATH || "./data/hot-searches.d
 const LAMBDA = 1.0;
 /** 热搜只展示最近 1 天内有搜索记录的词（配合 λ=1.0，1 天后残热约 37%，贴近"今日热门"语义） */
 const HOT_WINDOW_DAYS = 1;
-
-/** 固定北京时间（UTC+8）日期键 YYYY-MM-DD，不依赖宿主时区（Docker/CF 为 UTC 也能对齐用户感知的"今日"） */
-function formatDateKey(ts: number): string {
-  const d = new Date(ts + 8 * 3600 * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-}
-
-/** 北京时间 0 点对应的 epoch ms（入参 YYYY-MM-DD） */
-function beijingDayStart(dateStr: string): number {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return Date.UTC(y, m - 1, d) - 8 * 3600 * 1000;
-}
-
-function isForbidden(term: string): boolean {
-  const forbiddenPatterns = [
-    /政治|暴力|色情|赌博|毒品/i,
-    /fuck|shit|bitch/i,
-  ];
-  return forbiddenPatterns.some((pattern) => pattern.test(term));
-}
-
-function normalize(term: string): string | null {
-  let t = term.trim();
-  if (!t) return null;
-  if (/^https?:\/\//i.test(t)) return null;
-  if (t.length > 20) return null;
-  t = t.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (ch) =>
-    String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
-  );
-  return t || null;
-}
 
 /**
  * SQLite 热搜存储实现（node:sqlite 内置模块版本）

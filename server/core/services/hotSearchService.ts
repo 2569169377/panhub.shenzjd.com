@@ -22,9 +22,34 @@ async function tryCreateSqliteStore(): Promise<IHotSearchStore | null> {
   }
 }
 
+/**
+ * 尝试创建 D1 存储（Cloudflare Workers 环境）。
+ * - 显式 HOT_SEARCH_STORE=d1 强制启用
+ * - 或自动检测到 D1 binding（process.env.DB）时启用
+ */
+async function tryCreateD1Store(): Promise<IHotSearchStore | null> {
+  try {
+    const { D1HotSearchStore } = await import("./d1HotSearchStore");
+    const store = new D1HotSearchStore();
+    await (store as any)["waitForInit"]?.();
+    return store;
+  } catch (err) {
+    console.log(
+      "[HotSearchService] D1 存储不可用:",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/** 当前环境是否具备 D1 binding（Nitro cloudflare preset 注入到 process.env.DB） */
+function hasD1Binding(): boolean {
+  return !!(process.env as any).DB;
+}
+
 export class HotSearchService {
   private store: IHotSearchStore;
-  private storeType: "sqlite" | "memory";
+  private storeType: "sqlite" | "memory" | "d1";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
 
@@ -36,14 +61,32 @@ export class HotSearchService {
   }
 
   private async initializeWithFallback(): Promise<void> {
-    const sqliteStore = await tryCreateSqliteStore();
-    if (sqliteStore) {
-      this.store = sqliteStore;
-      this.storeType = "sqlite";
-      console.log("[HotSearchService] ✅ 使用 SQLite 存储模式");
-    } else {
-      console.log("[HotSearchService] ⚠️ SQLite 不可用，使用内存存储模式");
+    // 显式指定 > 环境自动检测 > sqlite > memory 的回退链
+    const forced = process.env.HOT_SEARCH_STORE; // "d1" | "sqlite" | "memory"
+    const wantD1 = forced === "d1" || (!forced && hasD1Binding());
+    const wantSqlite = forced === "sqlite" || !forced;
+
+    if (wantD1) {
+      const d1Store = await tryCreateD1Store();
+      if (d1Store) {
+        this.store = d1Store;
+        this.storeType = "d1";
+        console.log("[HotSearchService] ✅ 使用 D1 存储模式");
+        return;
+      }
     }
+
+    if (wantSqlite) {
+      const sqliteStore = await tryCreateSqliteStore();
+      if (sqliteStore) {
+        this.store = sqliteStore;
+        this.storeType = "sqlite";
+        console.log("[HotSearchService] ✅ 使用 SQLite 存储模式");
+        return;
+      }
+    }
+
+    console.log("[HotSearchService] ⚠️ 持久化存储不可用，使用内存存储模式");
   }
 
   private async waitForInit(): Promise<void> {
@@ -125,7 +168,7 @@ export class HotSearchService {
     return 0;
   }
 
-  getStoreType(): "sqlite" | "memory" {
+  getStoreType(): "sqlite" | "memory" | "d1" {
     return this.storeType;
   }
 
