@@ -28,21 +28,21 @@ export default defineEventHandler(async (event) => {
   if (limiter.isBlocked(ip)) {
     throw createError({
       statusCode: 429,
-      statusMessage: "too many failed attempts, try again later",
+      message: "too many failed attempts, try again later",
     });
   }
 
   const body = await readBody<{ password?: string }>(event);
   const input = (body?.password ?? "").trim();
   if (!input) {
-    throw createError({ statusCode: 400, statusMessage: "password required" });
+    throw createError({ statusCode: 400, message: "password required" });
   }
 
   const a = hash(input);
   const b = hash(password);
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
     limiter.recordFailure(ip);
-    throw createError({ statusCode: 401, statusMessage: "invalid password" });
+    throw createError({ statusCode: 401, message: "invalid password" });
   }
 
   limiter.recordSuccess(ip);

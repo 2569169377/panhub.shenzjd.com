@@ -32,7 +32,7 @@ export default defineEventHandler(async (event) => {
   if (!semaphore.tryAcquire()) {
     return sendError(
       event,
-      createError({ statusCode: 503, statusMessage: "服务器繁忙，请稍后重试" })
+      createError({ statusCode: 503, message: "服务器繁忙，请稍后重试" })
     );
   }
   try {
@@ -51,13 +51,13 @@ async function executeSearch(event: any) {
   if (!kw) {
     return sendError(
       event,
-      createError({ statusCode: 400, statusMessage: "kw is required" })
+      createError({ statusCode: 400, message: "kw is required" })
     );
   }
   if (kw.length > 200) {
     return sendError(
       event,
-      createError({ statusCode: 400, statusMessage: "kw too long (max 200)" })
+      createError({ statusCode: 400, message: "kw too long (max 200)" })
     );
   }
 
@@ -73,7 +73,7 @@ async function executeSearch(event: any) {
           event,
           createError({
             statusCode: 400,
-            statusMessage: "invalid ext json",
+            message: "invalid ext json",
           })
         );
       }

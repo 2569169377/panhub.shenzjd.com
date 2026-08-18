@@ -9,23 +9,23 @@ export default defineEventHandler(async (event) => {
   const url = decodeURIComponent(raw);
 
   if (!url || !url.startsWith("https://")) {
-    throw createError({ statusCode: 400, statusMessage: "Invalid url" });
+    throw createError({ statusCode: 400, message: "Invalid url" });
   }
 
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw createError({ statusCode: 400, statusMessage: "Invalid url" });
+    throw createError({ statusCode: 400, message: "Invalid url" });
   }
 
   if (!ALLOWED_HOSTS.test(parsed.hostname)) {
-    throw createError({ statusCode: 403, statusMessage: "Host not allowed" });
+    throw createError({ statusCode: 403, message: "Host not allowed" });
   }
 
   // 防止 SSRF 绕过：URL 中不得包含用户信息段或非标准端口
   if (parsed.username || parsed.password || parsed.port) {
-    throw createError({ statusCode: 403, statusMessage: "Host not allowed" });
+    throw createError({ statusCode: 403, message: "Host not allowed" });
   }
 
   try {
@@ -51,7 +51,7 @@ export default defineEventHandler(async (event) => {
   } catch (error: any) {
     throw createError({
       statusCode: 503,
-      statusMessage: "Image fetch timeout",
+      message: "Image fetch timeout",
     });
   }
 });
