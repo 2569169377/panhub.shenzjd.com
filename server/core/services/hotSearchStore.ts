@@ -5,8 +5,12 @@
 export interface IHotSearchStore {
   /**
    * 记录搜索词（增加分数）
+   * @param term  搜索词
+   * @param now   搜索时间戳（epoch ms）
+   * @param delta 热度/计数增量，默认 1；批量聚合场景传入窗口内累计次数，
+   *              一次写入合并 N 次搜索（score 衰减后 +delta、count +delta）
    */
-  recordSearch(term: string, now: number): Promise<void>;
+  recordSearch(term: string, now: number, delta?: number): Promise<void>;
 
   /**
    * 获取热搜列表

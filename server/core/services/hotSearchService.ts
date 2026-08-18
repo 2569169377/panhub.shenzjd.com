@@ -1,6 +1,22 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { MemoryHotSearchStore } from "./memoryHotSearchStore";
 import { loggers } from "../utils/logger";
+import { normalize, isForbidden } from "./hotSearchUtils";
+
+/**
+ * 写聚合缓冲配置
+ * - FLUSH_MAX_PENDING：缓冲内不同词数达到该值立即落盘（请求内同步，Worker 可靠）
+ * - FLUSH_INTERVAL_MS：兜底定时落盘（Node/Docker 可靠；Worker 空闲回收时可能丢失未落盘增量，
+ *   热搜为尽力而为数据，可接受）
+ */
+const FLUSH_MAX_PENDING = 100;
+const FLUSH_INTERVAL_MS = 3000;
+
+/** 单个词的待落盘增量（同词多次搜索合并为一次 delta 写入） */
+interface PendingTerm {
+  delta: number;
+  lastAt: number;
+}
 
 let sharedMemoryStore: MemoryHotSearchStore | null = null;
 
@@ -81,6 +97,10 @@ export class HotSearchService {
   private storeType: "sqlite" | "memory" | "d1" | "d1rest";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
+  /** 待落盘增量缓冲（同词多次搜索合并） */
+  private pending = new Map<string, PendingTerm>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushing: Promise<void> | null = null;
 
   constructor() {
     const memoryStore = getOrCreateSharedMemoryStore();
@@ -138,9 +158,75 @@ export class HotSearchService {
   }
 
   async recordSearch(term: string): Promise<void> {
-    await this.waitForInit();
+    // 写路径：先规范化 + 过滤，累积进内存缓冲，达到阈值或定时器批量落盘。
+    // 不保证写后立即可读（读为随机词云/榜单，实时性要求低）。
+    const normalized = normalize(term);
+    if (!normalized) return;
+    if (isForbidden(normalized)) return;
+
     const now = Date.now();
-    await this.store.recordSearch(term, now);
+    const cur = this.pending.get(normalized);
+    if (cur) {
+      cur.delta += 1;
+      cur.lastAt = now;
+    } else {
+      this.pending.set(normalized, { delta: 1, lastAt: now });
+    }
+
+    if (this.pending.size >= FLUSH_MAX_PENDING) {
+      await this.flush();
+    } else {
+      this.scheduleFlush();
+    }
+  }
+
+  /**
+   * 将缓冲中的增量批量落盘到 store（同词合并为一次 delta 写入）。
+   * 并发安全：flush 进行中时复用同一 Promise；期间新的 recordSearch 进入新的缓冲。
+   */
+  async flush(): Promise<void> {
+    if (this.flushing) return this.flushing;
+    if (this.pending.size === 0) return;
+
+    const snapshot = this.pending;
+    this.pending = new Map();
+    this.clearFlushTimer();
+
+    this.flushing = (async () => {
+      await this.waitForInit();
+      for (const [term, p] of snapshot) {
+        await this.store.recordSearch(term, p.lastAt, p.delta);
+      }
+    })()
+      .catch((err) => {
+        console.log(
+          "[HotSearchService] flush 失败:",
+          err instanceof Error ? err.message : err
+        );
+      })
+      .finally(() => {
+        this.flushing = null;
+      });
+
+    return this.flushing;
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flush();
+    }, FLUSH_INTERVAL_MS);
+    // Node 下 unref，避免定时器阻止进程退出；CF Worker 无此方法则忽略
+    const t = this.flushTimer as unknown as { unref?: () => void };
+    t.unref?.();
+  }
+
+  private clearFlushTimer(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
   }
 
   async getHotSearches(limit: number = 30): Promise<HotSearchItem[]> {
@@ -167,12 +253,18 @@ export class HotSearchService {
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
+    // 等当前 flush 完成，避免清空后仍在写的 flush 把旧数据写回
+    if (this.flushing) await this.flushing;
+    // 丢弃未落盘增量后清空，避免清空后缓冲又写回旧数据
+    this.pending.clear();
+    this.clearFlushTimer();
     await this.waitForInit();
     return this.store.clearHotSearches();
   }
 
   async deleteHotSearch(term: string): Promise<{ success: boolean; message: string }> {
-    await this.waitForInit();
+    // 先落盘缓冲（含待删词的增量），再删除，避免删除后缓冲复活该词
+    await this.flush();
     return this.store.deleteHotSearch(term);
   }
 
@@ -214,6 +306,8 @@ export class HotSearchService {
   }
 
   close(): void {
+    this.clearFlushTimer();
+    this.pending.clear();
     this.store.close();
   }
 }

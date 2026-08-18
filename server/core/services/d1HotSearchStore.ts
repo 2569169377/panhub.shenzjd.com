@@ -108,11 +108,12 @@ export class D1HotSearchStore implements IHotSearchStore {
     }
   }
 
-  async recordSearch(term: string, now: number): Promise<void> {
+  async recordSearch(term: string, now: number, delta = 1): Promise<void> {
     await this.waitForInit();
     const normalized = normalize(term);
     if (!normalized) return;
     if (isForbidden(normalized)) return;
+    const d = Math.max(1, delta);
 
     const existing = await this.db
       .prepare("SELECT score, last_searched_at FROM hot_searches WHERE term = ?")
@@ -123,7 +124,7 @@ export class D1HotSearchStore implements IHotSearchStore {
       const prevScore = existing.score as number;
       const prevTime = existing.last_searched_at as number;
       const elapsedDays = (now - prevTime) / 86400000;
-      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + 1;
+      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + d;
       await this.db
         .prepare("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?")
         .bind(newScore, now, normalized)
@@ -131,8 +132,8 @@ export class D1HotSearchStore implements IHotSearchStore {
       loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       await this.db
-        .prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)")
-        .bind(normalized, now, now)
+        .prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)")
+        .bind(normalized, d, now, now)
         .run();
       loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
@@ -143,13 +144,13 @@ export class D1HotSearchStore implements IHotSearchStore {
       .first();
     if (termRow) {
       await this.db
-        .prepare("UPDATE search_terms SET count = count + 1, last_at = ? WHERE term = ?")
-        .bind(now, normalized)
+        .prepare("UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?")
+        .bind(d, now, normalized)
         .run();
     } else {
       await this.db
-        .prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, 1, ?, ?)")
-        .bind(normalized, now, now)
+        .prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)")
+        .bind(normalized, d, now, now)
         .run();
     }
 

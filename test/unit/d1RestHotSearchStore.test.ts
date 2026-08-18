@@ -92,7 +92,12 @@ describe("D1RestDatabase", () => {
       for (const r of reqs) {
         if (r.sql.includes("INSERT INTO hot_searches")) {
           insertFound = true;
-          paramsOk = r.params?.[0] === "测试新词" && r.params?.[1] === now;
+          // 新词默认 delta=1：term, score(=delta), last_searched_at, created_at
+          paramsOk =
+            r.params?.[0] === "测试新词" &&
+            r.params?.[1] === 1 &&
+            r.params?.[2] === now &&
+            r.params?.[3] === now;
         }
       }
     }
@@ -138,6 +143,7 @@ describe("D1RestDatabase", () => {
   });
 
   it("D1HotSearchStore 可注入 REST 适配器（类型/契约兼容）", () => {
+    fetchMock.mockResolvedValue(d1Resp()); // 构造函数触发 init 的 batch fetch
     const db = new D1RestDatabase({ ...OPTS, fetchImpl: fetchMock as any });
     const store = new D1HotSearchStore(db as any);
     expect(store).toBeInstanceOf(D1HotSearchStore);

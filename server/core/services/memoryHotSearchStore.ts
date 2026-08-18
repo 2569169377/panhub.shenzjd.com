@@ -35,20 +35,21 @@ export class MemoryHotSearchStore implements IHotSearchStore {
   private memoryStore = new Map<string, HotSearchItem>();
   private termDict = new Map<string, { count: number; firstAt: number; lastAt: number }>();
 
-  async recordSearch(term: string, now: number): Promise<void> {
+  async recordSearch(term: string, now: number, delta = 1): Promise<void> {
     if (!term || term.trim().length === 0) return;
+    const d = Math.max(1, delta);
 
     const existing = this.memoryStore.get(term);
     if (existing) {
-      // 指数加权：旧热度先按间隔衰减，再 +1，避免历史累计分数永久霸榜
-      existing.score = decayScore(existing.score, existing.lastSearched, now) + 1;
+      // 指数加权：旧热度先按间隔衰减，再 +d，避免历史累计分数永久霸榜
+      existing.score = decayScore(existing.score, existing.lastSearched, now) + d;
       existing.lastSearched = now;
       // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
       loggers.hotSearch.info("搜索词", { term, isNew: false });
     } else {
       this.memoryStore.set(term, {
         term,
-        score: 1,
+        score: d,
         lastSearched: now,
         createdAt: now,
       });
@@ -59,10 +60,10 @@ export class MemoryHotSearchStore implements IHotSearchStore {
     // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
     const dict = this.termDict.get(term);
     if (dict) {
-      dict.count += 1;
+      dict.count += d;
       dict.lastAt = now;
     } else {
-      this.termDict.set(term, { count: 1, firstAt: now, lastAt: now });
+      this.termDict.set(term, { count: d, firstAt: now, lastAt: now });
     }
   }
 

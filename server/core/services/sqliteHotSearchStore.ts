@@ -163,24 +163,25 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     if (this.initPromise) await this.initPromise;
   }
 
-  async recordSearch(term: string, now: number): Promise<void> {
+  async recordSearch(term: string, now: number, delta = 1): Promise<void> {
     await this.waitForInit();
     const normalized = normalize(term);
     if (!normalized) return;
     if (isForbidden(normalized)) return;
+    const d = Math.max(1, delta);
 
     const existing = this.db.prepare("SELECT score, last_searched_at FROM hot_searches WHERE term = ?").get(normalized) as any;
     if (existing) {
       const prevScore = existing.score as number;
       const prevTime = existing.last_searched_at as number;
-      // 指数加权：旧热度先按间隔衰减，再 +1，避免历史累计分数永久霸榜
+      // 指数加权：旧热度先按间隔衰减，再 +d，避免历史累计分数永久霸榜
       const elapsedDays = (now - prevTime) / 86400000;
-      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + 1;
+      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + d;
       this.db.prepare("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?").run(newScore, now, normalized);
       // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
       loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
-      this.db.prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, 1, ?, ?)").run(normalized, now, now);
+      this.db.prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)").run(normalized, d, now, now);
       // 搜索流水日志：新词首次出现（驱动热搜产品观察的关键信号）
       loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
@@ -188,9 +189,9 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
     const termRow = this.db.prepare("SELECT count FROM search_terms WHERE term = ?").get(normalized) as any;
     if (termRow) {
-      this.db.prepare("UPDATE search_terms SET count = count + 1, last_at = ? WHERE term = ?").run(now, normalized);
+      this.db.prepare("UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?").run(d, now, normalized);
     } else {
-      this.db.prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, 1, ?, ?)").run(normalized, now, now);
+      this.db.prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)").run(normalized, d, now, now);
     }
 
     this.cleanupOldEntries(MAX_ENTRIES);
