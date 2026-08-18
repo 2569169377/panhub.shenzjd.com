@@ -33,7 +33,12 @@ export async function fetchTgChannelPosts(
 
     let html = "";
     try {
-      html = await ofetch<string>(url, { headers: { "user-agent": ua }, signal: options.signal });
+      // 主站超时 4s：比外层 withTimeout(5s) 更早放弃慢响应，提升搜索展示速度
+      html = await ofetch<string>(url, {
+        headers: { "user-agent": ua },
+        signal: options.signal,
+        timeout: 4000,
+      });
     } catch (e: any) {
       logger.debug?.(`TG fetch failed for ${url}: ${e?.message || e}`);
     }
@@ -44,7 +49,12 @@ export async function fetchTgChannelPosts(
         : `https://r.jina.ai/https://t.me/s/${encodeURIComponent(channel)}`;
 
       try {
-        html = await ofetch<string>(mirrorUrl, { headers: { "user-agent": ua }, signal: options.signal });
+        // 镜像（r.jina.ai）只给 3s：保结果的同时不拖慢整体响应
+        html = await ofetch<string>(mirrorUrl, {
+          headers: { "user-agent": ua },
+          signal: options.signal,
+          timeout: 3000,
+        });
       } catch (e: any) {
         logger.debug?.(`TG mirror fetch failed for ${mirrorUrl}: ${e?.message || e}`);
       }
