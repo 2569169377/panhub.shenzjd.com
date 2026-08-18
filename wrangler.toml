@@ -7,16 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 directory = ".output/public"
 binding = "ASSETS"
 
-# 热搜数据存储（D1HotSearchStore 通过 process.env.DB 读取）
-[[d1_databases]]
-binding = "DB"
-database_name = "panhub-hot-searches"
-database_id = "b767a695-5d2a-42c1-bf4e-95324af18246"
-
-# 环境变量（与线上 Docker 保持一致；D1_* 为 Docker REST 专用，Worker 无需设置）
+# 环境变量（与线上 Docker 保持一致）
 [vars]
 LOG_LEVEL = "info"
-# 热搜存储迁移到 Turso（D1 免费档配额吃紧后启用）：
-# 设置 HOT_SEARCH_STORE=turso + TURSO_URL 后，Worker 自动走 turso 模式（优先于 D1）。
-# TURSO_URL 为敏感配置，建议用 `wrangler secret put TURSO_URL` / `wrangler secret put TURSO_AUTH_TOKEN` 注入，
+# 热搜存储已迁移到 Turso（2026-08-18，D1 已删除）：
+# Worker 通过 `wrangler secret put TURSO_URL` / `wrangler secret put TURSO_AUTH_TOKEN` 注入连接信息，
+# Docker 侧在服务器 .env 配置同样的 TURSO_URL / TURSO_AUTH_TOKEN。
 # 不要写死在本文件。迁移数据先跑: TURSO_URL=... TURSO_AUTH_TOKEN=... node scripts/migrate-to-turso.mjs
