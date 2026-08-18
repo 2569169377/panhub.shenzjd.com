@@ -39,34 +39,9 @@ async function tryCreateSqliteStore(): Promise<IHotSearchStore | null> {
 }
 
 /**
- * 尝试创建 D1 存储（Cloudflare Workers 环境）。
- * - 显式 HOT_SEARCH_STORE=d1 强制启用
- * - 或自动检测到 D1 binding（process.env.DB）时启用
- */
-async function tryCreateD1Store(): Promise<IHotSearchStore | null> {
-  try {
-    const { D1HotSearchStore } = await import("./d1HotSearchStore");
-    const store = new D1HotSearchStore();
-    await (store as any)["waitForInit"]?.();
-    return store;
-  } catch (err) {
-    console.log(
-      "[HotSearchService] D1 存储不可用:",
-      err instanceof Error ? err.message : err
-    );
-    return null;
-  }
-}
-
-/** 当前环境是否具备 D1 binding（Nitro cloudflare preset 注入到 process.env.DB） */
-function hasD1Binding(): boolean {
-  return !!(process.env as any).DB;
-}
-
-/**
  * 尝试创建 Turso 存储（libSQL HTTP 驱动，Worker/Docker 通用）。
  * - 显式 HOT_SEARCH_STORE=turso 强制启用
- * - 或自动检测到 TURSO_URL 配置时启用（优先于 D1，作为迁移目标）
+ * - 或自动检测到 TURSO_URL 配置时启用（生产推荐，热搜持久化）
  */
 async function tryCreateTursoStore(): Promise<IHotSearchStore | null> {
   try {
@@ -88,38 +63,9 @@ function hasTursoConfig(): boolean {
   return !!process.env.TURSO_URL;
 }
 
-/**
- * 尝试创建 D1 REST 存储（Docker / 任意 Node 环境侧，读写与 Worker 同一份 D1 数据）。
- * - 显式 HOT_SEARCH_STORE=d1rest 强制启用
- * - 或自动检测到 D1_API_TOKEN / D1_ACCOUNT_ID / D1_DATABASE_ID 配置时启用
- */
-async function tryCreateD1RestStore(): Promise<IHotSearchStore | null> {
-  try {
-    const { createD1RestHotSearchStore } = await import("./d1RestHotSearchStore");
-    const store = createD1RestHotSearchStore();
-    await (store as any)["waitForInit"]?.();
-    return store;
-  } catch (err) {
-    console.log(
-      "[HotSearchService] D1 REST 存储不可用:",
-      err instanceof Error ? err.message : err
-    );
-    return null;
-  }
-}
-
-/** 是否具备 D1 REST 连接配置 */
-function hasD1RestConfig(): boolean {
-  return !!(
-    process.env.D1_API_TOKEN &&
-    process.env.D1_ACCOUNT_ID &&
-    process.env.D1_DATABASE_ID
-  );
-}
-
 export class HotSearchService {
   private store: IHotSearchStore;
-  private storeType: "sqlite" | "memory" | "d1" | "d1rest" | "turso";
+  private storeType: "sqlite" | "memory" | "turso";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
   /** 待落盘增量缓冲（同词多次搜索合并） */
@@ -135,12 +81,9 @@ export class HotSearchService {
   }
 
   private async initializeWithFallback(): Promise<void> {
-    // 显式指定 > 环境自动检测 > 回退链（turso → d1 → d1rest → sqlite → memory）
-    const forced = process.env.HOT_SEARCH_STORE; // "turso" | "d1" | "d1rest" | "sqlite" | "memory"
+    // 显式指定 > 环境自动检测 > 回退链（turso → sqlite → memory）
+    const forced = process.env.HOT_SEARCH_STORE; // "turso" | "sqlite" | "memory"
     const wantTurso = forced === "turso" || (!forced && hasTursoConfig());
-    const wantD1 = forced === "d1" || (!forced && hasD1Binding());
-    const wantD1Rest =
-      forced === "d1rest" || (!forced && !hasD1Binding() && hasD1RestConfig());
     const wantSqlite = forced === "sqlite" || !forced;
 
     if (wantTurso) {
@@ -149,26 +92,6 @@ export class HotSearchService {
         this.store = tursoStore;
         this.storeType = "turso";
         console.log("[HotSearchService] ✅ 使用 Turso 存储模式");
-        return;
-      }
-    }
-
-    if (wantD1) {
-      const d1Store = await tryCreateD1Store();
-      if (d1Store) {
-        this.store = d1Store;
-        this.storeType = "d1";
-        console.log("[HotSearchService] ✅ 使用 D1 存储模式");
-        return;
-      }
-    }
-
-    if (wantD1Rest) {
-      const d1RestStore = await tryCreateD1RestStore();
-      if (d1RestStore) {
-        this.store = d1RestStore;
-        this.storeType = "d1rest";
-        console.log("[HotSearchService] ✅ 使用 D1 REST 存储模式（共享 Worker 数据）");
         return;
       }
     }

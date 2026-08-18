@@ -1,19 +1,6 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 
-/**
- * 与 SQLite 版保持一致的 EWMA 热度衰减：
- * λ=1.0 → 半衰期约 17 小时；score = score × e^(-λ×间隔天数) + 1
- */
-const LAMBDA = 1.0;
-const HOT_WINDOW_DAYS = 1;
-const HOT_WINDOW_MS = HOT_WINDOW_DAYS * 86400000;
-
-function decayScore(score: number, lastSearched: number, now: number): number {
-  const elapsedDays = (now - lastSearched) / 86400000;
-  return score * Math.exp(-LAMBDA * elapsedDays);
-}
-
 /** 固定北京时间（UTC+8）日期键，不依赖宿主时区 */
 function formatDateKey(ts: number): string {
   const d = new Date(ts + 8 * 3600 * 1000);
@@ -28,61 +15,47 @@ function beijingDayStart(dateStr: string): number {
 }
 
 /**
- * 内存热搜存储实现
- * 用于 JSON 文件不可用时的降级方案（Vercel/CF 无持久化文件系统）
+ * 内存热搜存储实现（降级兜底）
+ * 用于持久化存储（Turso/SQLite）不可用时的降级方案（Vercel/CF 无持久化文件系统且未配 Turso）。
+ * 一表化（2026-08-18）：只维护词库 termDict 单结构（对应 search_terms），无热榜双写。
  */
 export class MemoryHotSearchStore implements IHotSearchStore {
-  private memoryStore = new Map<string, HotSearchItem>();
   private termDict = new Map<string, { count: number; firstAt: number; lastAt: number }>();
 
   async recordSearch(term: string, now: number, delta = 1): Promise<void> {
     if (!term || term.trim().length === 0) return;
     const d = Math.max(1, delta);
 
-    const existing = this.memoryStore.get(term);
-    if (existing) {
-      // 指数加权：旧热度先按间隔衰减，再 +d，避免历史累计分数永久霸榜
-      existing.score = decayScore(existing.score, existing.lastSearched, now) + d;
-      existing.lastSearched = now;
-      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
-      loggers.hotSearch.info("搜索词", { term, isNew: false });
-    } else {
-      this.memoryStore.set(term, {
-        term,
-        score: d,
-        lastSearched: now,
-        createdAt: now,
-      });
-      // 搜索流水日志：新词首次出现（与 SQLite 版保持一致）
-      loggers.hotSearch.info("搜索词", { term, isNew: true });
-    }
-
-    // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
+    // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 词云数据源）
     const dict = this.termDict.get(term);
     if (dict) {
       dict.count += d;
       dict.lastAt = now;
+      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
+      loggers.hotSearch.info("搜索词", { term, isNew: false });
     } else {
       this.termDict.set(term, { count: d, firstAt: now, lastAt: now });
+      // 搜索流水日志：新词首次出现（与 SQLite 版保持一致）
+      loggers.hotSearch.info("搜索词", { term, isNew: true });
     }
   }
 
+  /**
+   * 获取热搜列表（按搜索次数降序；与 SQLite/Turso 语义一致：count 当 score）
+   * 无生产调用方，保留接口兼容
+   */
   async getHotSearches(limit: number): Promise<HotSearchItem[]> {
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_MS;
-    return Array.from(this.memoryStore.values())
-      .filter((item) => item.lastSearched >= cutoff)
-      .map((item) => ({
-        ...item,
-        displayScore: Math.round(decayScore(item.score, item.lastSearched, now) * 100) / 100,
-      }))
-      .sort((a, b) => {
-        const aScore = a.displayScore ?? 0;
-        const bScore = b.displayScore ?? 0;
-        if (aScore !== bScore) return bScore - aScore;
-        return b.lastSearched - a.lastSearched;
-      })
-      .slice(0, limit);
+    return Array.from(this.termDict.entries())
+      .sort((a, b) => b[1].count - a[1].count || b[1].lastAt - a[1].lastAt)
+      .slice(0, Math.min(Math.max(1, limit), 100))
+      .map(([term, v], index) => ({
+        term,
+        score: v.count,
+        lastSearched: v.lastAt,
+        createdAt: v.firstAt,
+        rank: index + 1,
+        displayScore: v.count,
+      }));
   }
 
   /**
@@ -111,37 +84,16 @@ export class MemoryHotSearchStore implements IHotSearchStore {
   }
 
   async cleanupOldEntries(maxEntries: number): Promise<void> {
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_MS;
-
-    // 先清理超过窗口期未搜索的旧词
-    for (const [term, item] of this.memoryStore) {
-      if (item.lastSearched < cutoff) {
-        this.memoryStore.delete(term);
-      }
-    }
-
-    const entries = Array.from(this.memoryStore.entries()).sort((a, b) => {
-      const aScore = a[1].score ?? 0;
-      const bScore = b[1].score ?? 0;
-      if (aScore !== bScore) return bScore - aScore;
-      return b[1].lastSearched - a[1].lastSearched;
-    });
-
-    if (entries.length > maxEntries) {
-      entries.slice(maxEntries).forEach(([term]) => {
-        this.memoryStore.delete(term);
-      });
-    }
+    // 词库是全量数据（对应 search_terms，不清理），no-op 保持接口兼容
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
-    this.memoryStore.clear();
+    this.termDict.clear();
     return { success: true, message: "热搜记录已清除" };
   }
 
   async deleteHotSearch(term: string): Promise<{ success: boolean; message: string }> {
-    const deleted = this.memoryStore.delete(term);
+    const deleted = this.termDict.delete(term);
     if (deleted) {
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
@@ -151,7 +103,7 @@ export class MemoryHotSearchStore implements IHotSearchStore {
   async getStats(): Promise<HotSearchStats> {
     const items = await this.getHotSearches(10);
     return {
-      total: this.memoryStore.size,
+      total: this.termDict.size,
       topTerms: items,
     };
   }
@@ -212,7 +164,6 @@ export class MemoryHotSearchStore implements IHotSearchStore {
   }
 
   close(): void {
-    this.memoryStore.clear();
     this.termDict.clear();
   }
 }

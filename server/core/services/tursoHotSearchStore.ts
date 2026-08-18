@@ -6,7 +6,7 @@ import { normalize, isForbidden, formatDateKey, beijingDayStart } from "./hotSea
 /**
  * Turso 热搜存储实现（libSQL / SQLite fork，HTTP 驱动）
  *
- * 与 SqliteHotSearchStore / D1HotSearchStore 语义完全对齐（同一套 SQL + 共享工具函数），
+ * 与 SqliteHotSearchStore 语义完全对齐（同一套 SQL + 共享工具函数），
  * 供迁移到 Turso 使用：Worker 与 Docker 两侧都通过 @libsql/client 走 HTTP 读写同一份数据。
  * 相比 D1 免费档（5M 行读/天、100K 行写/天），Turso Free 提供 5 亿行读/月、1000 万行写/月，
  * 且超额为软限制（继续运行、按量计费），不会直接失败。
