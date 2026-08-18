@@ -21,9 +21,6 @@ ENV NODE_ENV=production
 ENV PORT=4000
 ENV HOST=0.0.0.0
 ENV NITRO_LOG_LEVEL=info
-# 进程级内存上限（与 docker-compose 的 deploy.resources.limits.memory 对齐，
-# 避免 GC 滞后时 Node 默认 heap 吃光整机内存导致宿主机卡死）
-ENV NODE_OPTIONS=--max-old-space-size=768
 
 EXPOSE 4000
 
