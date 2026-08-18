@@ -17,11 +17,11 @@
       </button>
     </header>
 
-    <!-- 日历热力图 -->
+    <!-- 日历（单色，不显示热度深浅） -->
     <section class="panel calendar-panel">
       <div class="panel-head">
         <h2 class="panel-title">搜索日历</h2>
-        <span class="panel-hint">最近 {{ days.length }} 天 · 颜色越深当天搜索词越多</span>
+        <span class="panel-hint">最近 {{ days.length }} 天 · 数字为当天搜索词数</span>
       </div>
 
       <ClientOnly>
@@ -47,7 +47,6 @@
               :key="d.date"
               class="cal-cell"
               :class="[
-                `cal-cell--${level(d.count)}`,
                 { 'cal-cell--active': selected === d.date },
                 { 'cal-cell--future': d.date > todayKey },
               ]"
@@ -79,12 +78,6 @@
           <div class="panel-loading"><div class="spinner"></div><span>加载中…</span></div>
         </template>
       </ClientOnly>
-
-      <div class="calendar-legend">
-        <span class="legend-item legend-item--0">少</span>
-        <span v-for="i in 4" :key="i" class="legend-item" :class="`legend-item--${i}`" />
-        <span class="legend-item">多</span>
-      </div>
     </section>
 
     <!-- 当日词云 -->
@@ -281,17 +274,6 @@ function quickSearch(term: string) {
 }
 
 /* ---------- 日历渲染辅助 ---------- */
-
-/** 按词数分 5 档（0-4），映射颜色深浅 */
-function level(count: number): number {
-  if (count <= 0) return 0;
-  const max = Math.max(...days.value.map((d) => d.count), 1);
-  const ratio = count / max;
-  if (ratio > 0.75) return 4;
-  if (ratio > 0.5) return 3;
-  if (ratio > 0.25) return 2;
-  return 1;
-}
 
 function dayOfMonth(date: string): string {
   return String(Number(date.split("-")[2]));
@@ -555,42 +537,6 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.cal-cell--0 {
-  background: var(--bg-secondary);
-}
-
-.cal-cell--1 {
-  background: rgba(15, 118, 110, 0.18);
-  border-color: rgba(15, 118, 110, 0.3);
-}
-
-.cal-cell--2 {
-  background: rgba(15, 118, 110, 0.38);
-  border-color: rgba(15, 118, 110, 0.45);
-}
-
-.cal-cell--3 {
-  background: rgba(15, 118, 110, 0.62);
-  border-color: rgba(15, 118, 110, 0.7);
-}
-
-.cal-cell--4 {
-  background: rgba(15, 118, 110, 0.88);
-  border-color: #0f766e;
-}
-
-.cal-cell--1 .cal-cell__day,
-.cal-cell--2 .cal-cell__day,
-.cal-cell--3 .cal-cell__day,
-.cal-cell--4 .cal-cell__day {
-  color: #fff;
-  font-weight: 700;
-}
-
-.cal-cell--0 .cal-cell__day {
-  color: var(--text-tertiary);
-}
-
 .cal-cell__day {
   font-size: 13px;
   color: var(--text-primary);
@@ -598,46 +544,12 @@ onMounted(() => {
 
 .cal-cell__count {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.cal-cell--0 .cal-cell__count {
-  color: transparent;
-}
-
-/* 图例 */
-.calendar-legend {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 14px;
-}
-
-.legend-item {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  font-size: 10px;
   color: var(--text-tertiary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-weight: 600;
 }
 
-.legend-item--1 { background: rgba(15, 118, 110, 0.18); }
-.legend-item--2 { background: rgba(15, 118, 110, 0.38); }
-.legend-item--3 { background: rgba(15, 118, 110, 0.62); }
-.legend-item--4 { background: rgba(15, 118, 110, 0.88); }
-
-.legend-item:first-child,
-.legend-item:last-child {
-  width: auto;
-  background: transparent;
-  border: none;
-  padding: 0 4px;
+.cal-cell--future .cal-cell__count {
+  color: transparent;
 }
 
 /* 词云 */
