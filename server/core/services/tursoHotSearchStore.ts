@@ -90,13 +90,13 @@ export class TursoHotSearchStore implements IHotSearchStore {
         "UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?",
         [d, now, normalized]
       );
-      loggers.hotSearch.debug("搜索词", { term: normalized, isNew: false });
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       await this.client.execute(
         "INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)",
         [normalized, d, now, now]
       );
-      loggers.hotSearch.debug("搜索词", { term: normalized, isNew: true });
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
   }
 
