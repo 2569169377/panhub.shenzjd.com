@@ -62,7 +62,7 @@ async function importTable(table, columns, rows) {
 }
 
 async function main() {
-  // 1. 建表（与 TursoHotSearchStore / SqliteHotSearchStore 保持一致；
+  // 1. 建表（与 TursoHotSearchStore 保持一致；
   //    hot_searches 表已废弃（2026-08-18），只迁 search_terms）
   await client.batch([
     `CREATE TABLE IF NOT EXISTS search_terms (

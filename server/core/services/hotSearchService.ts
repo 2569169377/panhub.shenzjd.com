@@ -1,5 +1,4 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
-import { MemoryHotSearchStore } from "./memoryHotSearchStore";
 import { loggers } from "../utils/logger";
 import { normalize, isForbidden } from "./hotSearchUtils";
 
@@ -18,55 +17,15 @@ interface PendingTerm {
   lastAt: number;
 }
 
-let sharedMemoryStore: MemoryHotSearchStore | null = null;
-
-function getOrCreateSharedMemoryStore(): MemoryHotSearchStore {
-  if (!sharedMemoryStore) {
-    sharedMemoryStore = new MemoryHotSearchStore();
-  }
-  return sharedMemoryStore;
-}
-
-async function tryCreateSqliteStore(): Promise<IHotSearchStore | null> {
-  try {
-    const { SqliteHotSearchStore } = await import("./sqliteHotSearchStore");
-    const store = new SqliteHotSearchStore();
-    await (store as any)["waitForInit"]?.();
-    return store;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * 尝试创建 Turso 存储（libSQL HTTP 驱动，Worker/Docker 通用）。
- * - 显式 HOT_SEARCH_STORE=turso 强制启用
- * - 或自动检测到 TURSO_URL 配置时启用（生产推荐，热搜持久化）
+ * 热搜存储：唯一真源 Turso（libSQL，HTTP 驱动，Worker/Docker/本地通用）。
+ * 无回退链：未配置 TURSO_URL 时热搜功能不可用（明确报错，不静默降级）。
  */
-async function tryCreateTursoStore(): Promise<IHotSearchStore | null> {
-  try {
-    const { createTursoHotSearchStore } = await import("./tursoHotSearchStore");
-    const store = createTursoHotSearchStore();
-    await (store as any)["waitForInit"]?.();
-    return store;
-  } catch (err) {
-    console.log(
-      "[HotSearchService] Turso 存储不可用:",
-      err instanceof Error ? err.message : err
-    );
-    return null;
-  }
-}
-
-/** 是否具备 Turso 连接配置（TURSO_URL） */
-function hasTursoConfig(): boolean {
-  return !!process.env.TURSO_URL;
-}
-
 export class HotSearchService {
-  private store: IHotSearchStore;
-  private storeType: "sqlite" | "memory" | "turso";
+  private store: IHotSearchStore | null = null;
+  private storeType: "turso" | "unavailable" = "unavailable";
   private initPromise: Promise<void> | null = null;
+  private initFailedLogged = false;
   private summaryLogged = false;
   /** 待落盘增量缓冲（同词多次搜索合并） */
   private pending = new Map<string, PendingTerm>();
@@ -74,39 +33,26 @@ export class HotSearchService {
   private flushing: Promise<void> | null = null;
 
   constructor() {
-    const memoryStore = getOrCreateSharedMemoryStore();
-    this.store = memoryStore;
-    this.storeType = "memory";
-    this.initPromise = this.initializeWithFallback();
+    this.initPromise = this.initialize();
   }
 
-  private async initializeWithFallback(): Promise<void> {
-    // 显式指定 > 环境自动检测 > 回退链（turso → sqlite → memory）
-    const forced = process.env.HOT_SEARCH_STORE; // "turso" | "sqlite" | "memory"
-    const wantTurso = forced === "turso" || (!forced && hasTursoConfig());
-    const wantSqlite = forced === "sqlite" || !forced;
-
-    if (wantTurso) {
-      const tursoStore = await tryCreateTursoStore();
-      if (tursoStore) {
-        this.store = tursoStore;
-        this.storeType = "turso";
-        console.log("[HotSearchService] ✅ 使用 Turso 存储模式");
-        return;
-      }
+  private async initialize(): Promise<void> {
+    try {
+      const { createTursoHotSearchStore } = await import("./tursoHotSearchStore");
+      const store = createTursoHotSearchStore();
+      await (store as any)["waitForInit"]?.();
+      this.store = store;
+      this.storeType = "turso";
+      console.log("[HotSearchService] ✅ 使用 Turso 存储模式");
+    } catch (err) {
+      console.log(
+        "[HotSearchService] ❌ Turso 初始化失败:",
+        err instanceof Error ? err.message : err
+      );
+      console.log(
+        "[HotSearchService] 热搜功能不可用。请配置 TURSO_URL / TURSO_AUTH_TOKEN（Worker 用 wrangler secret，Docker 用 .env）"
+      );
     }
-
-    if (wantSqlite) {
-      const sqliteStore = await tryCreateSqliteStore();
-      if (sqliteStore) {
-        this.store = sqliteStore;
-        this.storeType = "sqlite";
-        console.log("[HotSearchService] ✅ 使用 SQLite 存储模式");
-        return;
-      }
-    }
-
-    console.log("[HotSearchService] ⚠️ 持久化存储不可用，使用内存存储模式");
   }
 
   private async waitForInit(): Promise<void> {
@@ -114,6 +60,18 @@ export class HotSearchService {
       await this.initPromise;
       this.initPromise = null;
     }
+    if (!this.store && !this.initFailedLogged) {
+      this.initFailedLogged = true;
+      console.log("[HotSearchService] ⚠️ 热搜存储未就绪（TURSO_URL 未配置），相关接口将返回错误");
+    }
+  }
+
+  /** 获取可用 store；未配置 Turso 时抛错（调用方转 500，前端提示配置） */
+  private requireStore(): IHotSearchStore {
+    if (!this.store) {
+      throw new Error("热搜存储未配置：请设置环境变量 TURSO_URL / TURSO_AUTH_TOKEN");
+    }
+    return this.store;
   }
 
   async recordSearch(term: string): Promise<void> {
@@ -153,8 +111,10 @@ export class HotSearchService {
 
     this.flushing = (async () => {
       await this.waitForInit();
+      const store = this.store;
+      if (!store) return; // 未配置 Turso：静默丢弃缓冲（热搜尽力而为），错误已在 waitForInit 记录一次
       for (const [term, p] of snapshot) {
-        await this.store.recordSearch(term, p.lastAt, p.delta);
+        await store.recordSearch(term, p.lastAt, p.delta);
       }
     })()
       .catch((err) => {
@@ -190,7 +150,7 @@ export class HotSearchService {
 
   async getHotSearches(limit: number = 30): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    const items = await this.store.getHotSearches(limit);
+    const items = await this.requireStore().getHotSearches(limit);
     // 启动后首次读取时输出榜单摘要，便于线上观测（只打一次，避免刷日志）
     if (!this.summaryLogged) {
       this.summaryLogged = true;
@@ -208,7 +168,7 @@ export class HotSearchService {
   /** 今日热搜词池随机抽样（首页词云展示用） */
   async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    return this.store.getRandomHotSearches(limit);
+    return this.requireStore().getRandomHotSearches(limit);
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
@@ -218,18 +178,18 @@ export class HotSearchService {
     this.pending.clear();
     this.clearFlushTimer();
     await this.waitForInit();
-    return this.store.clearHotSearches();
+    return this.requireStore().clearHotSearches();
   }
 
   async deleteHotSearch(term: string): Promise<{ success: boolean; message: string }> {
     // 先落盘缓冲（含待删词的增量），再删除，避免删除后缓冲复活该词
     await this.flush();
-    return this.store.deleteHotSearch(term);
+    return this.requireStore().deleteHotSearch(term);
   }
 
   async getStats(): Promise<{ total: number; topTerms: HotSearchItem[]; mode: string }> {
     await this.waitForInit();
-    const stats = await this.store.getStats();
+    const stats = await this.requireStore().getStats();
     return {
       ...stats,
       mode: this.storeType,
@@ -238,36 +198,27 @@ export class HotSearchService {
 
   async getTopTerms(limit: number): Promise<TopTerm[]> {
     await this.waitForInit();
-    return this.store.getTopTerms(limit);
+    return this.requireStore().getTopTerms(limit);
   }
 
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
-    return this.store.getCalendar(days);
+    return this.requireStore().getCalendar(days);
   }
 
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
-    return this.store.getDayItems(date);
+    return this.requireStore().getDayItems(date);
   }
 
-  getDatabaseSize(): number {
-    if (this.storeType === "sqlite") {
-      try {
-        return (this.store as any).getDbSize?.() ?? 0;
-      } catch { return 0; }
-    }
-    return 0;
-  }
-
-  getStoreType(): "sqlite" | "memory" | "d1" | "d1rest" | "turso" {
+  getStoreType(): "turso" | "unavailable" {
     return this.storeType;
   }
 
   close(): void {
     this.clearFlushTimer();
     this.pending.clear();
-    this.store.close();
+    this.store?.close();
   }
 }
 

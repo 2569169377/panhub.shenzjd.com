@@ -1,7 +1,6 @@
 /**
  * 热搜存储共享工具函数
- * 被 SqliteHotSearchStore / TursoHotSearchStore 共用，保证各存储的
- * 词条规范化、敏感词过滤、北京时间日期语义完全一致。
+ * 供 TursoHotSearchStore 使用，保证词条规范化、敏感词过滤、北京时间日期语义一致。
  */
 
 /** 敏感词过滤（热搜榜单/词库落库前拦截） */

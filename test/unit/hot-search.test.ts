@@ -1,25 +1,22 @@
 /**
  * 热搜功能测试（service 层）
- * 使用独立测试库（HOT_SEARCH_DB_PATH 环境变量），绝不污染 data/hot-searches.db（线上数据副本）
+ * 使用本地 libSQL 内存库（TURSO_URL=file::memory:，无网络、无凭据），
+ * 不污染线上 Turso 数据。
  *
  * 语义说明：写路径为「内存聚合 + 异步批量落盘」，读路径直接读 store（写读分离）。
  * 因此测试在「写」后显式 await service.flush() 再「读」，模拟增量落盘后的读取。
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { rmSync } from "fs";
 import type { HotSearchService } from "../../server/core/services/hotSearchService";
 
-// 独立目录，避免与 sqliteHotSearch.test.ts 共用 ./data-test（其 afterAll 会递归删除该目录，
-// vitest 并行执行时会把本测试的 db 一起删掉导致偶发失败）
-const TEST_DB_PATH = "./data-test-service/hot-search-service.db";
-
-describe("HotSearchService (SQLite store, isolated db)", () => {
+describe("HotSearchService (Turso store, local file::memory:)", () => {
   let service: HotSearchService;
   let resetHotSearchService: () => void;
 
   beforeAll(async () => {
-    process.env.HOT_SEARCH_DB_PATH = TEST_DB_PATH;
+    process.env.TURSO_URL = "file::memory:";
+    delete process.env.TURSO_AUTH_TOKEN;
     const mod = await import("../../server/core/services/hotSearchService");
     resetHotSearchService = mod.resetHotSearchService;
     service = mod.getOrCreateHotSearchService();
@@ -28,10 +25,7 @@ describe("HotSearchService (SQLite store, isolated db)", () => {
 
   afterAll(() => {
     resetHotSearchService();
-    delete process.env.HOT_SEARCH_DB_PATH;
-    try {
-      rmSync(TEST_DB_PATH, { force: true });
-    } catch {}
+    delete process.env.TURSO_URL;
   });
 
   it("应该能够记录搜索词（flush 后可见）", async () => {
@@ -84,6 +78,7 @@ describe("HotSearchService (SQLite store, isolated db)", () => {
     const stats = await service.getStats();
     expect(stats.total).toBeGreaterThan(0);
     expect(stats.topTerms).toBeInstanceOf(Array);
+    expect(stats.mode).toBe("turso");
   });
 
   it("应该过滤违规词", async () => {
@@ -144,12 +139,6 @@ describe("HotSearchService (SQLite store, isolated db)", () => {
 
     const searches = await service.getHotSearches(100);
     expect(searches.length).toBe(0);
-  });
-
-  it("应该返回文件大小（或 0）", async () => {
-    const size = service.getDatabaseSize();
-    expect(typeof size).toBe("number");
-    expect(size).toBeGreaterThanOrEqual(0);
   });
 
   it("应该返回今日随机热搜词（service 层转发冒烟）", async () => {

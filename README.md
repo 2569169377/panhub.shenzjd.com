@@ -40,7 +40,7 @@
 ### 🔥 热门搜索
 
 - **实时热搜**：展示其他用户搜索词，点击即可搜索
-- **数据持久化**：Turso（libSQL，Worker/Vercel/Docker 通用）+ SQLite 降级（Docker/本地）+ 内存兜底（Serverless 未配库时）
+- **数据持久化**：Turso（libSQL，Worker/Docker/本地统一存储，唯一真源）
 - **搜索统计**：实时展示热搜榜使用次数
 
 ### 🎨 用户体验
@@ -74,9 +74,7 @@
 
 > **部署配置**：在 Cloudflare 配置页将 **Build command** 设为 `npm run build:cf`（deploy command 会自动检测为 `npx wrangler deploy`）。部署完成后可在 Cloudflare Dashboard 的 **Workers Builds** 中关联仓库生产分支，实现 push 即自动更新。
 
-#### 热搜持久化（可选但推荐）
-
-热搜数据默认存 Turso（libSQL，免费档 5 亿行读/月、1000 万行写/月）。配置两步即可启用：
+**热搜功能依赖 Turso，必须配置**：热搜数据统一存 Turso（libSQL，免费档 5 亿行读/月、1000 万行写/月）。配置两步即可启用：
 
 1. 到 [turso.tech](https://turso.tech) 注册并创建数据库，拿到 URL 和 Token
 2. 在 Worker 设置中添加两个 Secret（Dashboard → Workers → 你的 Worker → Settings → Variables and Secrets）：
@@ -86,7 +84,7 @@
 | `TURSO_URL` | `libsql://<db>-<org>.turso.io` |
 | `TURSO_AUTH_TOKEN` | Turso 控制台生成的 Token |
 
-**不配置也能跑**：未配 Turso 时热搜会降级为内存存储，站点功能完整可用，但热搜数据不持久化（Worker 冷启动/多实例间会丢失）。Vercel / Docker 部署同理。
+> 未配置时站点搜索等核心功能正常，但热搜接口会返回明确错误（不静默降级）。本地开发 / Docker 部署在 `.env` 中配置同样的两个变量即可。
 
 ### 方式三：Docker 部署
 
@@ -154,14 +152,14 @@ npm build
 | `NITRO_PRESET` | auto-detect | 部署预设（vercel/cloudflare/node-server） |
 | `PORT` | `4000` | 服务端口 |
 | `SEARCH_PASSWORD` | 空 | 非空时启用密码门，搜索时需输入密码（5 次失败锁定 5 分钟） |
-| `TURSO_URL` / `TURSO_AUTH_TOKEN` | 空 | 热搜持久化（Turso libSQL）。配置后自动启用；未配置时降级内存存储（热搜不持久化） |
+| `TURSO_URL` / `TURSO_AUTH_TOKEN` | 空 | 热搜存储（Turso libSQL，必配）。未配置时热搜功能不可用（接口报错，不降级） |
 
 ### 部署差异说明
 
 | 特性 | Docker/Node | CF Workers / Vercel |
 |------|-------------|---------------------|
 | 进程内缓存 | ✅ 持久 | ❌ 每个 isolate 独立 |
-| 热搜数据持久化 | ✅ SQLite / Turso | ✅ Turso（需配 `TURSO_URL`；未配则内存降级） |
+| 热搜数据持久化 | ✅ Turso | ✅ Turso（需配 `TURSO_URL`，未配则热搜不可用） |
 | 插件健康状态 | ✅ 持久 | ❌ 每次冷启动重置 |
 | 链接有效性检测 | ✅ 持久缓存 | ✅（探活缓存按实例独立） |
 
@@ -182,7 +180,7 @@ npm build
 - **HTML 解析**：Cheerio（TG 频道 + 插件）
 - **HTTP 客户端**：ofetch
 - **并发控制**：p-limit
-- **数据库**：Turso（libSQL，热搜持久化，HTTP 驱动跨部署通用）+ node:sqlite（Node 内置 SQLite，Docker/本地降级）
+- **数据库**：Turso（libSQL，热搜持久化，HTTP 驱动跨部署通用）
 - **测试框架**：Vitest
 
 ### 核心模块
