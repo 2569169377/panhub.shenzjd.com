@@ -68,10 +68,17 @@ jobs:
             sudo chmod 777 "$DATA_DIR"
 
             echo "=== 启动新容器 ==="
+            # 资源上限（与 Dockerfile 的 NODE_OPTIONS=--max-old-space-size=768 对齐）：
+            # 防单容器吃光整机内存/CPU 导致宿主机卡死（OOM 只杀容器，restart 自动拉起）
+            # 日志轮转：防 json-file 无限增长写满磁盘（热搜每词日志的高频场景）
             sudo docker run -d \
               --name "$CONTAINER" \
               --restart unless-stopped \
               -p 5253:4000 \
+              --memory 1g \
+              --cpus "1.0" \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
               -e TRUST_PROXY=1 \
               --env-file /opt/1panel/apps/openresty/openresty/www/sites/panhub.shenzjd.com/index/.env \
               -v /opt/1panel/apps/openresty/openresty/www/sites/panhub.shenzjd.com/index:/app/data \
