@@ -14,11 +14,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: "days 参数无效，范围 1-90" });
   }
 
+  if (!(await service.isReady())) {
+    // 未配置 Turso：返回空日历（页面表现为无热搜历史），不报错
+    return {
+      code: 0,
+      message: "success",
+      data: { days: [], configured: false },
+    };
+  }
+
   const daysData = await service.getCalendar(days);
 
   return {
     code: 0,
     message: "success",
-    data: { days: daysData },
+    data: { days: daysData, configured: true },
   };
 });

@@ -14,6 +14,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: "date 参数无效，需为 YYYY-MM-DD" });
   }
 
+  if (!(await service.isReady())) {
+    // 未配置 Turso：返回空词单（页面表现为无数据），不报错
+    return {
+      code: 0,
+      message: "success",
+      data: { date, total: 0, items: [], configured: false },
+    };
+  }
+
   const items = await service.getDayItems(date);
 
   return {
@@ -23,6 +32,7 @@ export default defineEventHandler(async (event) => {
       date,
       total: items.length,
       items,
+      configured: true,
     },
   };
 });

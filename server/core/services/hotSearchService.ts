@@ -74,6 +74,15 @@ export class HotSearchService {
     return this.store;
   }
 
+  /**
+   * 热搜存储是否已就绪（Turso 已配置且初始化成功）。
+   * 未配置时各 GET 接口返回空数据（不报错），页面表现为"没有热搜"。
+   */
+  async isReady(): Promise<boolean> {
+    await this.waitForInit();
+    return !!this.store;
+  }
+
   async recordSearch(term: string): Promise<void> {
     // 写路径：先规范化 + 过滤，累积进内存缓冲，达到阈值或定时器批量落盘。
     // 不保证写后立即可读（读为随机词云/榜单，实时性要求低）。
