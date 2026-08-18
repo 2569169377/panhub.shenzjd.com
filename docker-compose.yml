@@ -1,27 +1,38 @@
-version: '3.8'
-
 services:
   panhub:
     build: .
     container_name: panhub
     restart: unless-stopped
     ports:
+      # 若服务器公网直连（无 CF/nginx 前置），请改绑 127.0.0.1:4000:4000 并用防火墙
+      # 只放行 CF 回源 IP；否则 TRUST_PROXY=1 下攻击者可伪造 XFF 头绕过 IP 限流
       - "4000:4000"
-    volumes:
-      # 持久化热搜 JSON 数据
-      - ./data:/app/data
-      # 如果需要持久化日志（可选）
-      # - ./logs:/app/logs
+    env_file:
+      # 读取服务器 .env（TURSO_URL / TURSO_AUTH_TOKEN / SEARCH_PASSWORD 等）。
+      # .env 已被 .gitignore 与 .dockerignore 排除，不进入 git 和镜像。
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=4000
       - HOST=0.0.0.0
-      # 可选：设置日志级别
       - LOG_LEVEL=info
-      # 限流可信代理开关：生产域名经 Cloudflare 代理（橙云），CF 注入的
-      # CF-Connecting-IP 不可伪造，必须开启才能按真实客户端 IP 限流
-      # （否则限流会按 CF 边缘节点 IP 聚合，误伤同地区所有用户）。
+      # 生产域名经 Cloudflare 代理（橙云），CF 注入的 CF-Connecting-IP 不可伪造，
+      # 必须开启才能按真实客户端 IP 限流（否则限流按 CF 边缘节点 IP 聚合误伤同地区用户）。
+      # 前提：4000 端口只接受 CF/nginx 转发，不能公网直连。
       - TRUST_PROXY=1
+    # 资源上限：防止单容器吃光整机内存/CPU 导致宿主机卡死。
+    # 超限时 OOM 只杀本容器（restart 拉起），不会拖垮整机。
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+    # 日志轮转：防止 json-file 无限增长写满磁盘（每词一条热搜日志的高频场景尤其重要）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # 健康检查
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
