@@ -7,6 +7,6 @@ export function requireSearchAuth(event: H3Event): void {
   const password = (config.searchPassword as string) || "";
   if (!password.trim()) return;
   if (!isUnlocked(event, password)) {
-    throw createError({ statusCode: 401, message: "search locked" });
+    throw createError({ statusCode: 401, statusMessage: "search locked" });
   }
 }

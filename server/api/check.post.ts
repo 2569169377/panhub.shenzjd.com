@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
       event,
       createError({
         statusCode: 400,
-        message:
+        statusMessage:
           "items array [{url, password?}] or links array (non-empty strings) required",
       })
     );
