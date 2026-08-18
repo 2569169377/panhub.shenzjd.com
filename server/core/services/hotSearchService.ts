@@ -64,6 +64,31 @@ function hasD1Binding(): boolean {
 }
 
 /**
+ * 尝试创建 Turso 存储（libSQL HTTP 驱动，Worker/Docker 通用）。
+ * - 显式 HOT_SEARCH_STORE=turso 强制启用
+ * - 或自动检测到 TURSO_URL 配置时启用（优先于 D1，作为迁移目标）
+ */
+async function tryCreateTursoStore(): Promise<IHotSearchStore | null> {
+  try {
+    const { createTursoHotSearchStore } = await import("./tursoHotSearchStore");
+    const store = createTursoHotSearchStore();
+    await (store as any)["waitForInit"]?.();
+    return store;
+  } catch (err) {
+    console.log(
+      "[HotSearchService] Turso 存储不可用:",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/** 是否具备 Turso 连接配置（TURSO_URL） */
+function hasTursoConfig(): boolean {
+  return !!process.env.TURSO_URL;
+}
+
+/**
  * 尝试创建 D1 REST 存储（Docker / 任意 Node 环境侧，读写与 Worker 同一份 D1 数据）。
  * - 显式 HOT_SEARCH_STORE=d1rest 强制启用
  * - 或自动检测到 D1_API_TOKEN / D1_ACCOUNT_ID / D1_DATABASE_ID 配置时启用
@@ -94,7 +119,7 @@ function hasD1RestConfig(): boolean {
 
 export class HotSearchService {
   private store: IHotSearchStore;
-  private storeType: "sqlite" | "memory" | "d1" | "d1rest";
+  private storeType: "sqlite" | "memory" | "d1" | "d1rest" | "turso";
   private initPromise: Promise<void> | null = null;
   private summaryLogged = false;
   /** 待落盘增量缓冲（同词多次搜索合并） */
@@ -110,12 +135,23 @@ export class HotSearchService {
   }
 
   private async initializeWithFallback(): Promise<void> {
-    // 显式指定 > 环境自动检测 > 回退链（d1 → d1rest → sqlite → memory）
-    const forced = process.env.HOT_SEARCH_STORE; // "d1" | "d1rest" | "sqlite" | "memory"
+    // 显式指定 > 环境自动检测 > 回退链（turso → d1 → d1rest → sqlite → memory）
+    const forced = process.env.HOT_SEARCH_STORE; // "turso" | "d1" | "d1rest" | "sqlite" | "memory"
+    const wantTurso = forced === "turso" || (!forced && hasTursoConfig());
     const wantD1 = forced === "d1" || (!forced && hasD1Binding());
     const wantD1Rest =
       forced === "d1rest" || (!forced && !hasD1Binding() && hasD1RestConfig());
     const wantSqlite = forced === "sqlite" || !forced;
+
+    if (wantTurso) {
+      const tursoStore = await tryCreateTursoStore();
+      if (tursoStore) {
+        this.store = tursoStore;
+        this.storeType = "turso";
+        console.log("[HotSearchService] ✅ 使用 Turso 存储模式");
+        return;
+      }
+    }
 
     if (wantD1) {
       const d1Store = await tryCreateD1Store();
@@ -301,7 +337,7 @@ export class HotSearchService {
     return 0;
   }
 
-  getStoreType(): "sqlite" | "memory" | "d1" | "d1rest" {
+  getStoreType(): "sqlite" | "memory" | "d1" | "d1rest" | "turso" {
     return this.storeType;
   }
 
