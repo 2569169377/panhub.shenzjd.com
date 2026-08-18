@@ -66,6 +66,17 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fwu529778790%2Fpanhub.shenzjd.com&project-name=panhub&repository-name=panhub.shenzjd.com)
 
+点击按钮后 Vercel 会自动：克隆仓库到你的 GitHub 账号 → 检测 Nuxt 框架并配置构建（`npm run build`，Vercel 自动使用 vercel preset）→ 部署。无需手动配置构建命令。
+
+**热搜功能依赖 Turso，必须配置**：部署完成后到 Vercel 项目 **Settings → Environment Variables** 添加：
+
+| 名称 | 值 |
+|------|-----|
+| `TURSO_URL` | `libsql://<db>-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | Turso 控制台生成的 Token |
+
+添加后**重新部署一次**（Deployments → Redeploy）即生效。未配置时站点搜索等核心功能正常，热搜接口返回空数据（不报错）。
+
 ### 方式二：Cloudflare Workers 一键部署
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wu529778790/panhub.shenzjd.com)
@@ -84,7 +95,7 @@
 | `TURSO_URL` | `libsql://<db>-<org>.turso.io` |
 | `TURSO_AUTH_TOKEN` | Turso 控制台生成的 Token |
 
-> 未配置时站点搜索等核心功能正常，但热搜接口会返回明确错误（不静默降级）。本地开发 / Docker 部署在 `.env` 中配置同样的两个变量即可。
+> 未配置时站点搜索等核心功能正常，热搜接口返回空数据（不报错，页面表现为无热搜）。本地开发 / Docker 部署在 `.env` 中配置同样的两个变量即可。
 
 ### 方式三：Docker 部署
 
