@@ -7,6 +7,7 @@
 
 import { ofetch } from "ofetch";
 import { load } from "cheerio";
+import { createClient, type Client } from "@libsql/client";
 import { DOUBAN_HOT_SOURCES, type DoubanHotSourceConfig } from "../../../config/doubanHot";
 import { MemoryCache } from "../cache/memoryCache";
 
@@ -46,6 +47,81 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const PAGE_SIZE = 20;
 
 const allItemsCache = new MemoryCache<DoubanHotItem[]>({ maxSize: 30 });
+
+/**
+ * 豆瓣缓存持久化到 Turso（2026-08-18）：
+ * CF Worker 冷启动会丢内存缓存，导致每次冷启动都重新爬豆瓣（最慢 20s+）。
+ * 用 Turso 存 JSON（跨部署共享、冷启动不丢、24h 过期自动刷新）。
+ * 未配置 TURSO_URL 时自动回退纯内存缓存（不崩）。
+ */
+let tursoClient: Client | null = null;
+let tursoCacheReady: Promise<void> | null = null;
+
+function getTursoCacheClient(): Client | null {
+  if (!process.env.TURSO_URL) return null;
+  if (!tursoClient) {
+    try {
+      tursoClient = createClient({
+        url: process.env.TURSO_URL,
+        authToken: process.env.TURSO_AUTH_TOKEN || undefined,
+      });
+    } catch {
+      return null;
+    }
+  }
+  return tursoClient;
+}
+
+/** 初始化缓存表（幂等，懒执行一次） */
+function ensureTursoCacheTable(): Promise<void> {
+  if (!tursoCacheReady) {
+    tursoCacheReady = (async () => {
+      const c = getTursoCacheClient();
+      if (!c) return;
+      try {
+        await c.execute(
+          `CREATE TABLE IF NOT EXISTS douban_cache (
+            cache_key TEXT PRIMARY KEY,
+            data_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          )`
+        );
+      } catch {}
+    })();
+  }
+  return tursoCacheReady;
+}
+
+/** 从 Turso 读缓存（未命中/过期返回 null） */
+async function getPersistedCache(key: string): Promise<DoubanHotItem[] | null> {
+  const c = getTursoCacheClient();
+  if (!c) return null;
+  try {
+    await ensureTursoCacheTable();
+    const row = (await c.execute(
+      "SELECT data_json, updated_at FROM douban_cache WHERE cache_key = ?",
+      [key]
+    )).rows[0];
+    if (!row) return null;
+    if (Date.now() - Number(row.updated_at) > CACHE_TTL_MS) return null;
+    return JSON.parse(row.data_json as string) as DoubanHotItem[];
+  } catch {
+    return null;
+  }
+}
+
+/** 写 Turso 缓存（失败静默，不影响主流程） */
+async function setPersistedCache(key: string, items: DoubanHotItem[]): Promise<void> {
+  const c = getTursoCacheClient();
+  if (!c) return;
+  try {
+    await ensureTursoCacheTable();
+    await c.execute(
+      "INSERT OR REPLACE INTO douban_cache (cache_key, data_json, updated_at) VALUES (?, ?, ?)",
+      [key, JSON.stringify(items), Date.now()]
+    );
+  } catch {}
+}
 
 /** 将豆瓣 API 返回的 item 转为 DoubanHotItem */
 function mapItem(raw: DoubanApiItem, index: number): DoubanHotItem {
@@ -101,12 +177,16 @@ async function fetchTopList(typeId: number, limit = 50): Promise<DoubanHotItem[]
 
 /**
  * Top250 专用爬虫（该分类不支持 JSON API，需爬 HTML）
+ * 注意：CF Worker 冷启动后内存缓存丢失，爬虫耗时直接影响首屏。
+ * 页数/sleep 需克制：4 页（100 条）够翻页展示，间隔 500ms 防封且快。
  */
 async function scrapeTop250(): Promise<DoubanHotItem[]> {
   const allItems: DoubanHotItem[] = [];
   const UA_LOCAL = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15";
+  const PAGE_COUNT = 4;
+  const PAGE_SLEEP_MS = 500;
 
-  for (let page = 0; page < 10; page++) {
+  for (let page = 0; page < PAGE_COUNT; page++) {
     const start = page * 25;
     const url = start === 0
       ? "https://movie.douban.com/top250"
@@ -115,7 +195,7 @@ async function scrapeTop250(): Promise<DoubanHotItem[]> {
     try {
       const html = await ofetch<string>(url, {
         headers: { "user-agent": UA_LOCAL },
-        timeout: 10000,
+        timeout: 5000,
       });
       const $ = load(html);
 
@@ -141,7 +221,7 @@ async function scrapeTop250(): Promise<DoubanHotItem[]> {
         });
       });
 
-      if (page < 9) await new Promise((r) => setTimeout(r, 1500));
+      if (page < PAGE_COUNT - 1) await new Promise((r) => setTimeout(r, PAGE_SLEEP_MS));
     } catch {
       if (page >= 1 && allItems.length === 0) break;
     }
@@ -150,21 +230,32 @@ async function scrapeTop250(): Promise<DoubanHotItem[]> {
   return allItems;
 }
 
-/** 获取指定分类的全部数据（带缓存） */
+/** 获取指定分类的全部数据（带缓存：内存 → Turso → 豆瓣） */
 async function fetchAllItems(categoryId: string): Promise<DoubanHotItem[]> {
   const cacheKey = `douban-api:${categoryId}`;
+
+  // 1. 内存缓存（热启动秒回）
   const cached = allItemsCache.get(cacheKey);
   if (cached.hit && cached.value) return cached.value;
+
+  // 2. Turso 持久化缓存（冷启动不丢，跨部署共享）
+  const persisted = await getPersistedCache(cacheKey);
+  if (persisted) {
+    allItemsCache.set(cacheKey, persisted, CACHE_TTL_MS);
+    return persisted;
+  }
 
   const config = DOUBAN_HOT_SOURCES.find((s) => s.id === categoryId);
   if (!config) return [];
 
-  // Top250 不支持 JSON API，用独立爬虫
+  // 3. 拉取豆瓣（Top250 不支持 JSON API，用独立爬虫）
   const items = config.typeId === -1
     ? await scrapeTop250()
     : await fetchTopList(config.typeId);
   if (items.length > 0) {
     allItemsCache.set(cacheKey, items, CACHE_TTL_MS);
+    // await 写入 Turso：Worker 响应后 isolate 会被回收，fire-and-forget 会导致写入丢失
+    await setPersistedCache(cacheKey, items);
   }
   return items;
 }
