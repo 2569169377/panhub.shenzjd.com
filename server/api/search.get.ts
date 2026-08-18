@@ -22,10 +22,27 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 import { requireSearchAuth } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
 import { getOrCreateSearchService } from "../core/services";
+import { getSearchSemaphore } from "../core/utils/searchSemaphore";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
   requireSearchAuth(event);
+  // 全局并发信号量：同时进行的搜索数超限立即 503（不排队、不拖慢已开始的请求）
+  const semaphore = getSearchSemaphore();
+  if (!semaphore.tryAcquire()) {
+    return sendError(
+      event,
+      createError({ statusCode: 503, statusMessage: "服务器繁忙，请稍后重试" })
+    );
+  }
+  try {
+    return await executeSearch(event);
+  } finally {
+    semaphore.release();
+  }
+});
+
+async function executeSearch(event: any) {
   const config = useRuntimeConfig();
   const service = getOrCreateSearchService(config);
   const q = getQuery(event);
@@ -108,4 +125,4 @@ export default defineEventHandler(async (event) => {
   }
 
   return resp;
-});
+}

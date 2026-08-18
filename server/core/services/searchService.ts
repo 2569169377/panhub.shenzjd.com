@@ -87,11 +87,17 @@ export class SearchService {
   private static readonly TG_DEEP_CHANNEL_LIMIT = 160;
   private static readonly TG_DEEP_SEARCH_TRIGGER = 3;
   private static readonly PLUGIN_VARIANT_TRIGGER = 5;
+  /** 客户端可传的最大搜索并发（默认并发 4 不受影响，只防恶意放大扇出） */
+  private static readonly MAX_CLIENT_CONCURRENCY = 6;
+  /** 全局上游请求并发池：所有搜索请求共享，防止多请求合计扇出打爆服务器 */
+  private static readonly GLOBAL_UPSTREAM_CONCURRENCY = 16;
 
   private options: SearchServiceOptions;
   private pluginManager: PluginManager;
   private cache: UnifiedCache;
   private healthChecker: PluginHealthChecker;
+  /** 全局上游并发池实例（双层 p-limit：先全局池，后请求级并发） */
+  private globalUpstreamLimit: ReturnType<typeof pLimit>;
 
   constructor(options: SearchServiceOptions, pluginManager: PluginManager) {
     this.options = options;
@@ -105,6 +111,7 @@ export class SearchService {
     );
 
     this.healthChecker = createPluginHealthChecker();
+    this.globalUpstreamLimit = pLimit(SearchService.GLOBAL_UPSTREAM_CONCURRENCY);
   }
 
   getPluginManager() {
@@ -162,7 +169,7 @@ export class SearchService {
       channels && channels.length > 0 ? channels : this.options.defaultChannels;
     const effConcurrency =
       concurrency && concurrency > 0
-        ? concurrency
+        ? Math.min(concurrency, SearchService.MAX_CLIENT_CONCURRENCY)
         : this.options.defaultConcurrency;
     const effResultType =
       !resultType || resultType === "merge" ? "merged_by_type" : resultType;
@@ -305,11 +312,15 @@ export class SearchService {
 
     const { fetchTgChannelPosts } = await import("./tg");
     const requestedTimeout = Number((ext as any)?.__plugin_timeout_ms) || 0;
-    const timeoutMs = Math.max(
-      3000,
-      requestedTimeout > 0
-        ? requestedTimeout
-        : this.options.pluginTimeoutMs || 0
+    // 客户端可传超时上限 10s：默认 5s 不受影响，只防恶意放大请求挂起时间
+    const timeoutMs = Math.min(
+      10000,
+      Math.max(
+        3000,
+        requestedTimeout > 0
+          ? requestedTimeout
+          : this.options.pluginTimeoutMs || 0
+      )
     );
     const concurrency = Math.max(
       2,
@@ -435,11 +446,15 @@ export class SearchService {
     }
 
     const requestedTimeout = Number((ext as any)?.__plugin_timeout_ms) || 0;
-    const timeoutMs = Math.max(
-      3000,
-      requestedTimeout > 0
-        ? requestedTimeout
-        : this.options.pluginTimeoutMs || 0
+    // 客户端可传超时上限 10s：默认 5s 不受影响，只防恶意放大请求挂起时间
+    const timeoutMs = Math.min(
+      10000,
+      Math.max(
+        3000,
+        requestedTimeout > 0
+          ? requestedTimeout
+          : this.options.pluginTimeoutMs || 0
+      )
     );
 
     const pluginPromises = available.map((plugin) => async () => {
@@ -635,8 +650,13 @@ export class SearchService {
     limit: number,
     signal?: AbortSignal
   ): Promise<T[]> {
-    const limitFn = pLimit(limit);
-    const limitedTasks = tasks.map((task) => limitFn(task));
+    // 双层并发：先全局池（所有搜索共享 16 并发，防多请求合计扇出打爆服务器），
+    // 再请求级 limit（本请求内最多 limit 并发，防止单请求独占全局池）。
+    // 低峰单请求时全局池空闲，并行度 = limit，展示速度不受影响。
+    const requestLimit = pLimit(limit);
+    const limitedTasks = tasks.map((task) =>
+      this.globalUpstreamLimit(() => requestLimit(task))
+    );
     const results = await Promise.all(limitedTasks);
     // 客户端断开后，后续调用方应检查 signal，这里返回已有结果
     return results;
