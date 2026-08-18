@@ -31,13 +31,6 @@ export interface D1DatabaseLike {
 }
 
 const MAX_ENTRIES = 30;
-/**
- * 热度衰减系数（/天）：score = score × e^(-λ×间隔天数) + 1
- * λ=1.0 → 半衰期约 17 小时（与 sqlite 实现一致）
- */
-const LAMBDA = 1.0;
-/** 热搜只展示最近 1 天内有搜索记录的词 */
-const HOT_WINDOW_DAYS = 1;
 /** D1 单查询返回行数保守上限（sitemap 取词上限 1000，卡线通过；如需更大需分页） */
 const D1_ROW_LIMIT = 1000;
 
@@ -73,17 +66,6 @@ export class D1HotSearchStore implements IHotSearchStore {
     // 建表/索引必须用 batch() 逐条执行（batch 内事务性执行，支持 DDL）
     await this.db.batch([
       this.db.prepare(
-        `CREATE TABLE IF NOT EXISTS hot_searches (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          term TEXT NOT NULL UNIQUE,
-          score INTEGER NOT NULL DEFAULT 1,
-          last_searched_at INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        )`
-      ),
-      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)"),
-      this.db.prepare("CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)"),
-      this.db.prepare(
         `CREATE TABLE IF NOT EXISTS search_terms (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           term TEXT NOT NULL UNIQUE,
@@ -95,6 +77,8 @@ export class D1HotSearchStore implements IHotSearchStore {
       this.db.prepare("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)"),
       this.db.prepare("CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)"),
     ]);
+    // hot_searches 表已废弃（2026-08-18）：生产 API 全部只读 search_terms，
+    // 热搜写入只落 search_terms 一张表（原双表每次搜索写 2 行 → 1 行，省一半写入配额）
     console.log("[D1HotSearchStore] ✅ D1 存储已就绪");
   }
 
@@ -115,29 +99,7 @@ export class D1HotSearchStore implements IHotSearchStore {
     if (isForbidden(normalized)) return;
     const d = Math.max(1, delta);
 
-    const existing = await this.db
-      .prepare("SELECT score, last_searched_at FROM hot_searches WHERE term = ?")
-      .bind(normalized)
-      .first();
-
-    if (existing) {
-      const prevScore = existing.score as number;
-      const prevTime = existing.last_searched_at as number;
-      const elapsedDays = (now - prevTime) / 86400000;
-      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + d;
-      await this.db
-        .prepare("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?")
-        .bind(newScore, now, normalized)
-        .run();
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
-    } else {
-      await this.db
-        .prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)")
-        .bind(normalized, d, now, now)
-        .run();
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
-    }
-
+    // 全量词库表：每次搜索 count + d、更新 last_at（hot_searches 表已废弃，只写这一张）
     const termRow = await this.db
       .prepare("SELECT count FROM search_terms WHERE term = ?")
       .bind(normalized)
@@ -147,39 +109,38 @@ export class D1HotSearchStore implements IHotSearchStore {
         .prepare("UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?")
         .bind(d, now, normalized)
         .run();
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       await this.db
         .prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)")
         .bind(normalized, d, now, now)
         .run();
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
-
-    await this.cleanupOldEntries(MAX_ENTRIES);
   }
 
+  /**
+   * 获取热搜列表（按搜索次数降序；hot_searches 表已废弃，从 search_terms 聚合）
+   * 无生产调用方，保留接口语义：count 当 score，last_at 当 lastSearched
+   */
   async getHotSearches(limit: number): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
     const safeLimit = Math.min(Math.max(1, limit), MAX_ENTRIES);
     const rows = await this.db
       .prepare(
-        `SELECT term, score, last_searched_at, created_at,
-          score * exp(-${LAMBDA} * ((${now} - last_searched_at) / 86400000.0)) as decayed_score
-         FROM hot_searches
-         WHERE last_searched_at >= ${cutoff}
-         ORDER BY decayed_score DESC, last_searched_at DESC
+        `SELECT term, count, first_at, last_at FROM search_terms
+         ORDER BY count DESC, last_at DESC
          LIMIT ${safeLimit}`
       )
       .all();
 
     return rows.results.map((obj, index) => ({
       term: obj.term,
-      score: obj.score,
-      lastSearched: obj.last_searched_at,
-      createdAt: obj.created_at,
+      score: obj.count,
+      lastSearched: obj.last_at,
+      createdAt: obj.first_at,
       rank: index + 1,
-      displayScore: Math.round(obj.decayed_score * 100) / 100,
+      displayScore: obj.count,
     }));
   }
 
@@ -212,36 +173,23 @@ export class D1HotSearchStore implements IHotSearchStore {
   }
 
   async cleanupOldEntries(maxEntries: number): Promise<void> {
-    await this.waitForInit();
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
-    await this.db
-      .prepare("DELETE FROM hot_searches WHERE last_searched_at < ?")
-      .bind(cutoff)
-      .run();
-    await this.db
-      .prepare(
-        `DELETE FROM hot_searches WHERE id NOT IN (
-          SELECT id FROM hot_searches ORDER BY score DESC, last_searched_at DESC LIMIT ${Math.max(1, maxEntries)}
-        )`
-      )
-      .run();
+    // hot_searches 表已废弃，search_terms 是全量词库（不清理），此处 no-op 保持接口兼容
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
-    await this.db.prepare("DELETE FROM hot_searches").run();
+    await this.db.prepare("DELETE FROM search_terms").run();
     return { success: true, message: "热搜记录已清除" };
   }
 
   async deleteHotSearch(term: string): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
     const before = await this.db
-      .prepare("SELECT COUNT(*) as c FROM hot_searches WHERE term = ?")
+      .prepare("SELECT COUNT(*) as c FROM search_terms WHERE term = ?")
       .bind(term)
       .first();
     const had = (before?.c ?? 0) as number;
-    await this.db.prepare("DELETE FROM hot_searches WHERE term = ?").bind(term).run();
+    await this.db.prepare("DELETE FROM search_terms WHERE term = ?").bind(term).run();
     if (had > 0) {
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
@@ -250,7 +198,7 @@ export class D1HotSearchStore implements IHotSearchStore {
 
   async getStats(): Promise<HotSearchStats> {
     await this.waitForInit();
-    const row = await this.db.prepare("SELECT COUNT(*) as c FROM hot_searches").first();
+    const row = await this.db.prepare("SELECT COUNT(*) as c FROM search_terms").first();
     const total = (row?.c ?? 0) as number;
     const topTerms = await this.getHotSearches(10);
     return { total, topTerms };

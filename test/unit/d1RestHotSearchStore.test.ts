@@ -62,37 +62,31 @@ describe("D1RestDatabase", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const reqs = bodyOf(fetchMock, 0);
     expect(Array.isArray(reqs)).toBe(true);
-    expect(reqs.length).toBe(6); // 2 张表 + 4 个索引
-    expect(reqs[0].sql).toContain("CREATE TABLE IF NOT EXISTS hot_searches");
-    expect(reqs[3].sql).toContain("CREATE TABLE IF NOT EXISTS search_terms");
+    expect(reqs.length).toBe(3); // search_terms 1 张表 + 2 个索引（hot_searches 已废弃）
+    expect(reqs[0].sql).toContain("CREATE TABLE IF NOT EXISTS search_terms");
     store.close();
   });
 
   it("recordSearch 新词走 INSERT 分支并带参数", async () => {
-    // 顺序：init batch → SELECT hot_searches(空) → INSERT hot_searches
-    //      → SELECT search_terms(空) → INSERT search_terms → DELETE 过期 → DELETE 截断
+    // 顺序：init batch → SELECT search_terms(空) → INSERT search_terms（hot_searches 已废弃，单表写入）
     fetchMock.mockResolvedValueOnce(d1Resp()); // init
-    fetchMock.mockResolvedValueOnce(d1Resp()); // SELECT hot_searches → 空（新词）
-    fetchMock.mockResolvedValueOnce(d1Resp()); // INSERT hot_searches
-    fetchMock.mockResolvedValueOnce(d1Resp()); // SELECT search_terms → 空
+    fetchMock.mockResolvedValueOnce(d1Resp()); // SELECT search_terms → 空（新词）
     fetchMock.mockResolvedValueOnce(d1Resp()); // INSERT search_terms
-    fetchMock.mockResolvedValueOnce(d1Resp()); // DELETE 过期词
-    fetchMock.mockResolvedValueOnce(d1Resp()); // DELETE 截断
 
     const store = createD1RestHotSearchStore({ ...OPTS, fetchImpl: fetchMock as any });
     await sleep(20);
     const now = Date.now();
     await store.recordSearch("测试新词", now);
 
-    // 找到 INSERT hot_searches 请求并验证参数
+    // 找到 INSERT search_terms 请求并验证参数
     let insertFound = false;
     let paramsOk = false;
     for (let i = 1; i < fetchMock.mock.calls.length; i++) {
       const reqs = bodyOf(fetchMock, i);
       for (const r of reqs) {
-        if (r.sql.includes("INSERT INTO hot_searches")) {
+        if (r.sql.includes("INSERT INTO search_terms")) {
           insertFound = true;
-          // 新词默认 delta=1：term, score(=delta), last_searched_at, created_at
+          // 新词默认 delta=1：term, count(=delta), first_at, last_at
           paramsOk =
             r.params?.[0] === "测试新词" &&
             r.params?.[1] === 1 &&
@@ -112,10 +106,9 @@ describe("D1RestDatabase", () => {
       d1Resp([
         {
           term: "电影",
-          score: 5,
-          last_searched_at: 1786000000000,
-          created_at: 1785000000000,
-          decayed_score: 4.2,
+          count: 5,
+          first_at: 1785000000000,
+          last_at: 1786000000000,
         },
       ])
     );
@@ -127,7 +120,7 @@ describe("D1RestDatabase", () => {
     expect(items).toHaveLength(1);
     expect(items[0].term).toBe("电影");
     expect(items[0].score).toBe(5);
-    expect(items[0].displayScore).toBeCloseTo(4.2);
+    expect(items[0].displayScore).toBe(5);
     expect(items[0].rank).toBe(1);
     store.close();
   });

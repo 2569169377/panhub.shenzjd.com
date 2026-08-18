@@ -53,24 +53,14 @@ function dumpTable(name) {
   return { stmts, count: rows.length };
 }
 
-const hot = dumpTable("hot_searches");
 const terms = dumpTable("search_terms");
 
 const lines = [
-  "-- PanHub 热搜数据 D1 迁移导出（INSERT OR IGNORE，幂等可重复执行）",
+  "-- PanHub 热搜数据导出（INSERT OR IGNORE，幂等可重复执行）",
   `-- 来源: ${DB_PATH}`,
   `-- 生成时间: ${new Date().toISOString()}`,
   "",
-  "-- 表结构（与 sqliteHotSearchStore / D1HotSearchStore 保持一致）",
-  "CREATE TABLE IF NOT EXISTS hot_searches (",
-  "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
-  "  term TEXT NOT NULL UNIQUE,",
-  "  score INTEGER NOT NULL DEFAULT 1,",
-  "  last_searched_at INTEGER NOT NULL,",
-  "  created_at INTEGER NOT NULL",
-  ");",
-  "CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC);",
-  "CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC);",
+  "-- 表结构（与 sqliteHotSearchStore / D1HotSearchStore 保持一致；hot_searches 已废弃）",
   "CREATE TABLE IF NOT EXISTS search_terms (",
   "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
   "  term TEXT NOT NULL UNIQUE,",
@@ -81,9 +71,6 @@ const lines = [
   "CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC);",
   "CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC);",
   "",
-  `-- hot_searches: ${hot.count} 条`,
-  ...hot.stmts,
-  "",
   `-- search_terms: ${terms.count} 条`,
   ...terms.stmts,
   "",
@@ -93,7 +80,6 @@ writeFileSync(OUT_PATH, lines.join("\n"), "utf-8");
 db.close();
 
 console.log(`✅ 导出完成: ${OUT_PATH}`);
-console.log(`   hot_searches: ${hot.count} 条`);
 console.log(`   search_terms: ${terms.count} 条`);
 console.log("");
 console.log("下一步（需 wrangler login）:");

@@ -66,13 +66,15 @@ describe("TursoHotSearchStore", () => {
   });
 
   it("recordSearch 分数随时间指数衰减", async () => {
+    // hot_searches 表已废弃（2026-08-18），getHotSearches 改从 search_terms 聚合：
+    // score = count 直接累计，不再指数衰减
     const t0 = Date.now();
     await store.recordSearch("衰减词", t0);
-    await store.recordSearch("衰减词", t0 + 86400000); // 1 天后再搜
+    await store.recordSearch("衰减词", t0 + 86400000); // 1 天后再搜：count +1
 
     const hot = await store.getHotSearches(10);
     const item = hot.find((s) => s.term === "衰减词");
-    expect(item?.score).toBeCloseTo(1 + Math.exp(-1), 3);
+    expect(item?.score).toBe(2);
   });
 
   it("过滤非法词条（URL/敏感词/空串/超长）", async () => {
@@ -168,31 +170,33 @@ describe("TursoHotSearchStore", () => {
     expect(miss.success).toBe(false);
   });
 
-  it("clearHotSearches 清空热搜表（保留词库）", async () => {
+  it("clearHotSearches 清空词库表（search_terms）", async () => {
     const now = Date.now();
     await store.recordSearch("清空词", now);
 
     const res = await store.clearHotSearches();
     expect(res.success).toBe(true);
     expect((await store.getHotSearches(10)).length).toBe(0);
+    // 词库表也被清空（hot_searches 已废弃，唯一数据表）
     expect((await store.getTopTerms(10)).length).toBe(0);
   });
 
-  it("cleanupOldEntries 截断到 maxEntries 且清理过期词", async () => {
+  it("cleanupOldEntries 为 no-op（search_terms 全量词库不清理）", async () => {
     const now = Date.now();
     for (let i = 0; i < 35; i++) {
       await store.recordSearch(`词${i}`, now);
     }
     const hot = await store.getHotSearches(100);
-    expect(hot.length).toBe(30); // 默认 MAX_ENTRIES
+    expect(hot.length).toBe(30); // getHotSearches 内部 cap 到 MAX_ENTRIES
 
+    // 旧词不会被 cleanup 删除（search_terms 是全量词库）
     const oldStore = new TursoHotSearchStore("file::memory:");
     await (oldStore as any).waitForInit();
     await oldStore.recordSearch("旧词", now - 3 * 86400000);
     await oldStore.recordSearch("新词", now);
     await oldStore.cleanupOldEntries(30);
     const list = await oldStore.getHotSearches(100);
-    expect(list.map((s) => s.term)).toEqual(["新词"]);
+    expect(list.map((s) => s.term).sort()).toEqual(["新词", "旧词"]);
     oldStore.close();
   });
 });

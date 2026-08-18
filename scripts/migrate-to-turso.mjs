@@ -62,17 +62,9 @@ async function importTable(table, columns, rows) {
 }
 
 async function main() {
-  // 1. 建表（与 TursoHotSearchStore / SqliteHotSearchStore 保持一致）
+  // 1. 建表（与 TursoHotSearchStore / SqliteHotSearchStore 保持一致；
+  //    hot_searches 表已废弃（2026-08-18），只迁 search_terms）
   await client.batch([
-    `CREATE TABLE IF NOT EXISTS hot_searches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      term TEXT NOT NULL UNIQUE,
-      score INTEGER NOT NULL DEFAULT 1,
-      last_searched_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )`,
-    "CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)",
     `CREATE TABLE IF NOT EXISTS search_terms (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       term TEXT NOT NULL UNIQUE,
@@ -85,21 +77,13 @@ async function main() {
   ]);
   console.log("✅ 表结构已就绪");
 
-  // 2. 读取源数据
-  const hotRows = src
-    .prepare("SELECT term, score, last_searched_at, created_at FROM hot_searches")
-    .all();
+  // 2. 读取源数据（只读 search_terms）
   const termRows = src
     .prepare("SELECT term, count, first_at, last_at FROM search_terms")
     .all();
-  console.log(`   源数据: hot_searches ${hotRows.length} 条, search_terms ${termRows.length} 条`);
+  console.log(`   源数据: search_terms ${termRows.length} 条`);
 
   // 3. 批量导入（幂等）
-  const hotInserted = await importTable(
-    "hot_searches",
-    ["term", "score", "last_searched_at", "created_at"],
-    hotRows
-  );
   const termsInserted = await importTable(
     "search_terms",
     ["term", "count", "first_at", "last_at"],
@@ -107,7 +91,6 @@ async function main() {
   );
 
   console.log("✅ 迁移完成");
-  console.log(`   hot_searches: ${hotRows.length} 条（新插入 ${hotInserted}）`);
   console.log(`   search_terms: ${termRows.length} 条（新插入 ${termsInserted}）`);
   console.log("");
   console.log("下一步：配置 TURSO_URL / TURSO_AUTH_TOKEN 到服务器 .env 与 Worker 环境变量，重启服务。");

@@ -13,13 +13,6 @@ const sqliteModule = () => require("node:" + "sqlite") as { DatabaseSync: any };
 const MAX_ENTRIES = 30;
 const DEFAULT_DB_DIR = "./data";
 const DEFAULT_DB_PATH = process.env.HOT_SEARCH_DB_PATH || "./data/hot-searches.db";
-/**
- * 热度衰减系数（/天）：score = score × e^(-λ×间隔天数) + 1
- * λ=1.0 → 半衰期约 17 小时，保证"近期热度"快速体现，旧词自然退场，新词有上升通道
- */
-const LAMBDA = 1.0;
-/** 热搜只展示最近 1 天内有搜索记录的词（配合 λ=1.0，1 天后残热约 37%，贴近"今日热门"语义） */
-const HOT_WINDOW_DAYS = 1;
 
 /**
  * SQLite 热搜存储实现（node:sqlite 内置模块版本）
@@ -63,19 +56,6 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     this.db = new DatabaseSync(this.dbPath);
 
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS hot_searches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        term TEXT NOT NULL UNIQUE,
-        score INTEGER NOT NULL DEFAULT 1,
-        last_searched_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      )
-    `);
-    this.db.exec("CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)");
-    this.db.exec("CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)");
-
-    // 全量搜索词库（联想补全 + 智能化原料，不清理）
-    this.db.exec(`
       CREATE TABLE IF NOT EXISTS search_terms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         term TEXT NOT NULL UNIQUE,
@@ -84,6 +64,8 @@ export class SqliteHotSearchStore implements IHotSearchStore {
         last_at INTEGER NOT NULL
       )
     `);
+    // hot_searches 表已废弃（2026-08-18）：生产 API 全部只读 search_terms，
+    // 热搜写入只落 search_terms 一张表（原双表每次搜索写 2 行 → 1 行，省一半写入配额）
     // 每日榜单快照（飙升榜计算基础，懒生成）已随飙升榜删除（1fc0f21），
     // 日历数据改为实时聚合 search_terms，不再需要快照表
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)");
@@ -107,14 +89,15 @@ export class SqliteHotSearchStore implements IHotSearchStore {
       const data = JSON.parse(raw);
       if (!data?.items?.length) return;
 
-      const row = this.db.prepare("SELECT COUNT(*) as c FROM hot_searches").get() as any;
+      const row = this.db.prepare("SELECT COUNT(*) as c FROM search_terms").get() as any;
       if ((row?.c ?? 0) > 0) return;
 
-      const stmt = this.db.prepare("INSERT OR IGNORE INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)");
+      // JSON 热榜数据 → search_terms（score→count、lastSearched→last_at、createdAt→first_at）
+      const stmt = this.db.prepare("INSERT OR IGNORE INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)");
       for (const item of data.items) {
         const normalized = normalize(item.term);
         if (normalized && !isForbidden(normalized)) {
-          stmt.run(normalized, item.score || 1, item.lastSearched || Date.now(), item.createdAt || Date.now());
+          stmt.run(normalized, item.score || 1, item.createdAt || Date.now(), item.lastSearched || Date.now());
         }
       }
       console.log(`[SqliteHotSearchStore] ✅ 从 JSON 迁移了 ${data.items.length} 条数据`);
@@ -170,53 +153,39 @@ export class SqliteHotSearchStore implements IHotSearchStore {
     if (isForbidden(normalized)) return;
     const d = Math.max(1, delta);
 
-    const existing = this.db.prepare("SELECT score, last_searched_at FROM hot_searches WHERE term = ?").get(normalized) as any;
-    if (existing) {
-      const prevScore = existing.score as number;
-      const prevTime = existing.last_searched_at as number;
-      // 指数加权：旧热度先按间隔衰减，再 +d，避免历史累计分数永久霸榜
-      const elapsedDays = (now - prevTime) / 86400000;
-      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + d;
-      this.db.prepare("UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?").run(newScore, now, normalized);
-      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
-    } else {
-      this.db.prepare("INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)").run(normalized, d, now, now);
-      // 搜索流水日志：新词首次出现（驱动热搜产品观察的关键信号）
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
-    }
-
-    // 词库表：全量搜索词 + 计数（联想补全 / 飙升 / 未来智能化）
+    // 全量词库表：每次搜索 count + d、更新 last_at（hot_searches 表已废弃，只写这一张）
     const termRow = this.db.prepare("SELECT count FROM search_terms WHERE term = ?").get(normalized) as any;
     if (termRow) {
       this.db.prepare("UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?").run(d, now, normalized);
+      // 搜索流水日志：每次搜索都记录（isNew=false 表示历史词）
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       this.db.prepare("INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)").run(normalized, d, now, now);
+      // 搜索流水日志：新词首次出现（驱动热搜产品观察的关键信号）
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
-
-    this.cleanupOldEntries(MAX_ENTRIES);
   }
 
+  /**
+   * 获取热搜列表（按搜索次数降序；hot_searches 表已废弃，从 search_terms 聚合）
+   * 无生产调用方，保留接口语义：count 当 score，last_at 当 lastSearched
+   */
   async getHotSearches(limit: number): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
-    const rows = this.db.prepare(`
-      SELECT term, score, last_searched_at, created_at,
-        score * exp(-${LAMBDA} * ((${now} - last_searched_at) / 86400000.0)) as decayed_score
-      FROM hot_searches
-      WHERE last_searched_at >= ${cutoff}
-      ORDER BY decayed_score DESC, last_searched_at DESC
-      LIMIT ${Math.min(limit, MAX_ENTRIES)}
-    `).all() as any[];
+    const safeLimit = Math.min(Math.max(1, limit), MAX_ENTRIES);
+    const rows = this.db.prepare(
+      `SELECT term, count, first_at, last_at FROM search_terms
+       ORDER BY count DESC, last_at DESC
+       LIMIT ?`
+    ).all(safeLimit) as any[];
 
     return rows.map((obj, index) => ({
       term: obj.term,
-      score: obj.score,
-      lastSearched: obj.last_searched_at,
-      createdAt: obj.created_at,
+      score: obj.count,
+      lastSearched: obj.last_at,
+      createdAt: obj.first_at,
       rank: index + 1,
-      displayScore: Math.round(obj.decayed_score * 100) / 100,
+      displayScore: obj.count,
     }));
   }
 
@@ -253,31 +222,20 @@ export class SqliteHotSearchStore implements IHotSearchStore {
   }
 
   cleanupOldEntries(maxEntries: number): void {
-    // 清理超过 HOT_WINDOW_DAYS 天未搜索的旧词，释放空间
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
-    this.db.prepare(`
-      DELETE FROM hot_searches WHERE last_searched_at < ?
-    `).run(cutoff);
-    // 保留最多 maxEntries 条记录
-    this.db.prepare(`
-      DELETE FROM hot_searches WHERE id NOT IN (
-        SELECT id FROM hot_searches ORDER BY score DESC, last_searched_at DESC LIMIT ?
-      )
-    `).run(maxEntries);
+    // hot_searches 表已废弃，search_terms 是全量词库（不清理），此处 no-op 保持接口兼容
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
-    this.db.exec("DELETE FROM hot_searches");
+    this.db.exec("DELETE FROM search_terms");
     return { success: true, message: "热搜记录已清除" };
   }
 
   async deleteHotSearch(term: string): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
-    const before = this.db.prepare("SELECT COUNT(*) as c FROM hot_searches WHERE term = ?").get(term) as any;
+    const before = this.db.prepare("SELECT COUNT(*) as c FROM search_terms WHERE term = ?").get(term) as any;
     const had = before?.c ?? 0;
-    this.db.prepare("DELETE FROM hot_searches WHERE term = ?").run(term);
+    this.db.prepare("DELETE FROM search_terms WHERE term = ?").run(term);
     if (had > 0) {
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
@@ -286,7 +244,7 @@ export class SqliteHotSearchStore implements IHotSearchStore {
 
   async getStats(): Promise<HotSearchStats> {
     await this.waitForInit();
-    const row = this.db.prepare("SELECT COUNT(*) as c FROM hot_searches").get() as any;
+    const row = this.db.prepare("SELECT COUNT(*) as c FROM search_terms").get() as any;
     const total = row?.c ?? 0;
     const topTerms = await this.getHotSearches(10);
     return { total, topTerms };

@@ -15,8 +15,6 @@ import { normalize, isForbidden, formatDateKey, beijingDayStart } from "./hotSea
  *   TURSO_URL           libsql://xxx.turso.io（或 file: 本地库，测试用）
  *   TURSO_AUTH_TOKEN    Turso 数据库 auth token
  */
-const LAMBDA = 1.0;
-const HOT_WINDOW_DAYS = 1;
 const MAX_ENTRIES = 30;
 
 export class TursoHotSearchStore implements IHotSearchStore {
@@ -48,15 +46,6 @@ export class TursoHotSearchStore implements IHotSearchStore {
 
   private async init(): Promise<void> {
     await this.client.batch([
-      `CREATE TABLE IF NOT EXISTS hot_searches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        term TEXT NOT NULL UNIQUE,
-        score INTEGER NOT NULL DEFAULT 1,
-        last_searched_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      )`,
-      "CREATE INDEX IF NOT EXISTS idx_score ON hot_searches(score DESC)",
-      "CREATE INDEX IF NOT EXISTS idx_last_searched ON hot_searches(last_searched_at DESC)",
       `CREATE TABLE IF NOT EXISTS search_terms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         term TEXT NOT NULL UNIQUE,
@@ -67,6 +56,8 @@ export class TursoHotSearchStore implements IHotSearchStore {
       "CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)",
       "CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)",
     ]);
+    // hot_searches 表已废弃（2026-08-18）：生产 API 全部只读 search_terms，
+    // 热搜写入只落 search_terms 一张表（原双表每次搜索写 2 行 → 1 行，省一半写入配额）
     console.log("[TursoHotSearchStore] ✅ Turso 存储已就绪");
   }
 
@@ -87,31 +78,7 @@ export class TursoHotSearchStore implements IHotSearchStore {
     if (isForbidden(normalized)) return;
     const d = Math.max(1, delta);
 
-    const existing = (
-      await this.client.execute(
-        "SELECT score, last_searched_at FROM hot_searches WHERE term = ?",
-        [normalized]
-      )
-    ).rows[0];
-
-    if (existing) {
-      const prevScore = existing.score as number;
-      const prevTime = existing.last_searched_at as number;
-      const elapsedDays = (now - prevTime) / 86400000;
-      const newScore = prevScore * Math.exp(-LAMBDA * elapsedDays) + d;
-      await this.client.execute(
-        "UPDATE hot_searches SET score = ?, last_searched_at = ? WHERE term = ?",
-        [newScore, now, normalized]
-      );
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
-    } else {
-      await this.client.execute(
-        "INSERT INTO hot_searches (term, score, last_searched_at, created_at) VALUES (?, ?, ?, ?)",
-        [normalized, d, now, now]
-      );
-      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
-    }
-
+    // 全量词库表：每次搜索 count + d、更新 last_at（hot_searches 表已废弃，只写这一张）
     const termRow = (
       await this.client.execute(
         "SELECT count FROM search_terms WHERE term = ?",
@@ -123,39 +90,39 @@ export class TursoHotSearchStore implements IHotSearchStore {
         "UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?",
         [d, now, normalized]
       );
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: false });
     } else {
       await this.client.execute(
         "INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)",
         [normalized, d, now, now]
       );
+      loggers.hotSearch.info("搜索词", { term: normalized, isNew: true });
     }
-
-    await this.cleanupOldEntries(MAX_ENTRIES);
   }
 
+  /**
+   * 获取热搜列表（按搜索次数降序；hot_searches 表已废弃，从 search_terms 聚合）
+   * 无生产调用方，保留接口语义：count 当 score，last_at 当 lastSearched
+   */
   async getHotSearches(limit: number): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
     const safeLimit = Math.min(Math.max(1, limit), MAX_ENTRIES);
     const rows = (
       await this.client.execute(
-        `SELECT term, score, last_searched_at, created_at,
-          score * exp(-${LAMBDA} * ((${now} - last_searched_at) / 86400000.0)) as decayed_score
-         FROM hot_searches
-         WHERE last_searched_at >= ${cutoff}
-         ORDER BY decayed_score DESC, last_searched_at DESC
-         LIMIT ${safeLimit}`
+        `SELECT term, count, first_at, last_at FROM search_terms
+         ORDER BY count DESC, last_at DESC
+         LIMIT ?`,
+        [safeLimit]
       )
     ).rows;
 
     return rows.map((obj, index) => ({
       term: obj.term as string,
-      score: obj.score as number,
-      lastSearched: obj.last_searched_at as number,
-      createdAt: obj.created_at as number,
+      score: obj.count as number,
+      lastSearched: obj.last_at as number,
+      createdAt: obj.first_at as number,
       rank: index + 1,
-      displayScore: Math.round((obj.decayed_score as number) * 100) / 100,
+      displayScore: obj.count as number,
     }));
   }
 
@@ -189,24 +156,12 @@ export class TursoHotSearchStore implements IHotSearchStore {
   }
 
   async cleanupOldEntries(maxEntries: number): Promise<void> {
-    await this.waitForInit();
-    const now = Date.now();
-    const cutoff = now - HOT_WINDOW_DAYS * 86400000;
-    await this.client.execute(
-      "DELETE FROM hot_searches WHERE last_searched_at < ?",
-      [cutoff]
-    );
-    await this.client.execute(
-      `DELETE FROM hot_searches WHERE id NOT IN (
-        SELECT id FROM hot_searches ORDER BY score DESC, last_searched_at DESC LIMIT ?
-      )`,
-      [Math.max(1, maxEntries)]
-    );
+    // hot_searches 表已废弃，search_terms 是全量词库（不清理），此处 no-op 保持接口兼容
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
-    await this.client.execute("DELETE FROM hot_searches");
+    await this.client.execute("DELETE FROM search_terms");
     return { success: true, message: "热搜记录已清除" };
   }
 
@@ -214,12 +169,12 @@ export class TursoHotSearchStore implements IHotSearchStore {
     await this.waitForInit();
     const before = (
       await this.client.execute(
-        "SELECT COUNT(*) as c FROM hot_searches WHERE term = ?",
+        "SELECT COUNT(*) as c FROM search_terms WHERE term = ?",
         [term]
       )
     ).rows[0];
     const had = (before?.c ?? 0) as number;
-    await this.client.execute("DELETE FROM hot_searches WHERE term = ?", [term]);
+    await this.client.execute("DELETE FROM search_terms WHERE term = ?", [term]);
     if (had > 0) {
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
@@ -229,7 +184,7 @@ export class TursoHotSearchStore implements IHotSearchStore {
   async getStats(): Promise<HotSearchStats> {
     await this.waitForInit();
     const row = (
-      await this.client.execute("SELECT COUNT(*) as c FROM hot_searches")
+      await this.client.execute("SELECT COUNT(*) as c FROM search_terms")
     ).rows[0];
     const total = (row?.c ?? 0) as number;
     const topTerms = await this.getHotSearches(10);
