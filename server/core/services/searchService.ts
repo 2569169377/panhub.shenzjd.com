@@ -365,7 +365,13 @@ export class SearchService {
     );
 
     let results = shallowResults;
+    // 深搜开关（前端分批请求时通过 ext.__deep_search 控制）：
+    // 前端把 TG 频道拆成小批次（每批 2 个）请求后，若仍按"本批结果<3"判断，
+    // 冷门词会让每一批都误触发深搜翻页（67 频道×8 页 = CPU 炸弹），
+    // 因此只允许最后一批深搜（深搜只增结果，不减结果）。
+    const allowDeep = (ext as any)?.__deep_search !== false;
     if (
+      allowDeep &&
       results.length < SearchService.TG_DEEP_SEARCH_TRIGGER &&
       keyword.trim().length > 1 &&
       chList.length > 0

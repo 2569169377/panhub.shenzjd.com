@@ -127,14 +127,19 @@ export function useSearch() {
     params: { src: "plugin" | "tg"; plugins?: string; channels?: string },
     label: string,
     shouldSkip: () => boolean,
-    onAuthRequired?: () => void
+    onAuthRequired?: () => void,
+    /** 是否允许 TG 深搜（翻更多页补结果）。前端拆批后只有最后一批允许，防误触发爆炸 */
+    deep = true
   ): () => Promise<MergedLinks> {
     return async () => {
       if (shouldSkip()) return {};
       const ac = new AbortController();
       activeControllers.push(ac);
       try {
-        const extParam = JSON.stringify({ __plugin_timeout_ms: pluginTimeoutMs });
+        const extParam = JSON.stringify({
+          __plugin_timeout_ms: pluginTimeoutMs,
+          __deep_search: deep,
+        });
         const q = new URLSearchParams({
           kw: keyword,
           res: "merged_by_type",
@@ -205,10 +210,14 @@ export function useSearch() {
       );
     }
 
-    // 为 TG 频道创建搜索任务（每批作为一个任务）
-    const tgBatchSize = conc;
+    // 为 TG 频道创建搜索任务（每批 2 个频道作为一个任务）：
+    // 服务端单请求只等 2 个频道抓完（约 2~4s）就返回 → "边搜边出"更细粒度，
+    // 前面几条结果很快出现，后续批次陆续补齐；同时服务端单请求并发减半，
+    // 适配 2 核小服务器。结果集不变（全部频道都会搜到）。
+    const tgBatchSize = 2;
     for (let i = 0; i < enabledTgChannels.length; i += tgBatchSize) {
       const batch = enabledTgChannels.slice(i, i + tgBatchSize);
+      const isLastBatch = i + tgBatchSize >= enabledTgChannels.length;
       searchTasks.push(
         createSearchTask(
           apiBase,
@@ -218,7 +227,9 @@ export function useSearch() {
           { src: "tg", channels: batch.join(",") },
           `TG batch ${Math.floor(i / tgBatchSize)}`,
           shouldSkip,
-          onAuth
+          onAuth,
+          // 深搜只允许最后一批触发，避免每批"结果<3"误触发翻页爆炸
+          isLastBatch
         )
       );
     }
