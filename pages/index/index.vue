@@ -69,7 +69,10 @@
           </span>
           <span v-if="searchState.paused" class="paused-indicator-bar">
             <span class="pause-icon">⏸</span>
-            <span class="paused-text">搜索已暂停</span>
+            <span v-if="autoPausedAtLimit" class="paused-text">
+              已找到 {{ searchState.total }} 条结果，可继续搜索更多
+            </span>
+            <span v-else class="paused-text">搜索已暂停</span>
           </span>
         </div>
 
@@ -261,6 +264,7 @@ const {
   pauseSearch,
   continueSearch,
   hasResults,
+  autoPausedAtLimit,
 } = useSearch();
 const { settings, loadSettings } = useSettings();
 const auth = useAuth();
@@ -308,7 +312,12 @@ async function doSearch() {
 
 // 搜索执行
 async function onSearch() {
-  if (!kw.value || searchState.value.loading) return;
+  if (!kw.value) return;
+  // 暂停状态下发起新搜索：放弃旧任务重新开始（想继续旧搜索请点"继续"按钮）
+  if (searchState.value.paused) {
+    resetSearch();
+  }
+  if (searchState.value.loading) return;
   if (auth.locked.value && requestUnlock) {
     requestUnlock(doSearch);
     return;

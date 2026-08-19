@@ -13,6 +13,13 @@ const devError = (...args: any[]) => {
   if (import.meta.dev) console.error(...args);
 };
 
+/**
+ * 每轮搜索（首搜或每次"继续"）的累计结果上限：
+ * 达到后自动暂停，不再发起剩余请求，用户点击"继续"再搜下一轮（阈值累进 +100）。
+ * 大部分用户只看前几条，几百条结果纯浪费服务器资源（尤其 TG 真爬请求）。
+ */
+const MAX_RESULTS_PER_ROUND = 100;
+
 export interface SearchOptions {
   apiBase: string;
   keyword: string;
@@ -80,6 +87,10 @@ export function useSearch() {
   let pausedAtTaskIndex = 0;
   /** 当前并搜已完成数，暂停时用于记录断点 */
   let parallelCompletedCount = 0;
+  /** 当前轮次结果上限（首搜 100，每次继续 +100，累进 100→200→300） */
+  let maxResultsThreshold = MAX_RESULTS_PER_ROUND;
+  /** 是否因达到结果上限而自动暂停（区别于用户手动暂停，UI 文案用） */
+  const autoPausedAtLimit = ref(false);
 
   // 取消所有进行中的请求
   function cancelActiveRequests(): void {
@@ -94,6 +105,7 @@ export function useSearch() {
   // 暂停搜索
   function pauseSearch(): void {
     if (state.value.loading || state.value.deepLoading) {
+      autoPausedAtLimit.value = false;
       setPaused(true);
       pausedAtTaskIndex = parallelCompletedCount;
       cancelActiveRequests();
@@ -107,6 +119,10 @@ export function useSearch() {
     setPaused(false);
     setDeepLoading(true);
 
+    // 累进：继续搜索允许再收集一轮结果（100→200→300…）
+    maxResultsThreshold += MAX_RESULTS_PER_ROUND;
+    autoPausedAtLimit.value = false;
+
     const startFrom = pausedAtTaskIndex;
     try {
       await performParallelSearch(options, searchSeq, startFrom, state.value.merged);
@@ -115,7 +131,10 @@ export function useSearch() {
     } finally {
       pausedAtTaskIndex = 0;
       setDeepLoading(false);
-      setLoading(false);
+      // 自动暂停（达上限）时保持 loading，让"继续"按钮仍可用
+      if (!state.value.paused) {
+        setLoading(false);
+      }
     }
   }
   /** 创建带 AbortController 的搜索任务（插件或 TG 批次） */
@@ -262,6 +281,7 @@ export function useSearch() {
     parallelCompletedCount = startFromTaskIndex;
 
     // 每个任务完成即立刻合并展示，不等其它任务
+    const totalTaskCount = tasksToSchedule.length;
     const processTask = (result: MergedLinks) => {
       if (mySeq !== searchSeq || state.value.paused) return;
       if (Object.keys(result).length > 0) {
@@ -277,6 +297,21 @@ export function useSearch() {
       }
       completedCount++;
       parallelCompletedCount = completedCount;
+
+      // 结果达到本轮上限且还有剩余任务 → 自动暂停：
+      // 停止剩余请求（进行中 abort，排队中跳过），省服务器资源；用户点"继续"再搜下一轮
+      if (completedCount < totalTaskCount) {
+        const curTotal = Object.values(currentMerged).reduce(
+          (sum, arr) => sum + (arr?.length || 0),
+          0
+        );
+        if (curTotal >= maxResultsThreshold) {
+          autoPausedAtLimit.value = true;
+          setPaused(true);
+          pausedAtTaskIndex = completedCount;
+          cancelActiveRequests();
+        }
+      }
     };
 
     const wrapped = limitedTasks.map((limitedTask) =>
@@ -358,6 +393,8 @@ export function useSearch() {
   function resetSearch(): void {
     cancelActiveRequests();
     searchSeq++;
+    maxResultsThreshold = MAX_RESULTS_PER_ROUND;
+    autoPausedAtLimit.value = false;
     setLoading(false);
     setDeepLoading(false);
     setPaused(false);
@@ -400,6 +437,7 @@ export function useSearch() {
     total,
     merged,
     hasResults,
+    autoPausedAtLimit: computed(() => autoPausedAtLimit.value),
     performSearch,
     resetSearch,
     copyLink,
