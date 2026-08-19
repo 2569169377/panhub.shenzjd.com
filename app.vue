@@ -97,6 +97,15 @@
       </nav>
     </header>
 
+    <!-- 公告条（全站导航栏下方；关闭后不再显示，改公告内容时升级 key 版本号重新展示） -->
+    <div v-if="showAnnouncement" class="announce-bar" role="status">
+      <span class="announce-bar__text">
+        📢 为节省服务器资源，默认搜索 <strong>50 条</strong>结果即自动暂停；
+        如需更多结果，点击「继续」即可继续搜索
+      </span>
+      <button class="announce-bar__close" type="button" @click="dismissAnnouncement" aria-label="关闭公告" title="关闭">✕</button>
+    </div>
+
     <!-- 主内容区 -->
     <main class="main">
       <NuxtPage />
@@ -227,6 +236,7 @@ onMounted(() => {
   initDarkMode();
   loadSettings();
   auth.fetchStatus();
+  checkAnnouncement();
   document.addEventListener("click", onDocumentClick);
 });
 
@@ -239,6 +249,22 @@ function onDocumentClick(e: MouseEvent) {
   if (showNavMenu.value && !target.closest(".nav-menu-btn") && !target.closest(".nav-dropdown")) {
     showNavMenu.value = false;
   }
+}
+
+// 公告条（v1：搜索上限 50 自动暂停。改公告内容时升级 key 版本号，让已关闭用户重新看到）
+const ANNOUNCEMENT_KEY = "panhub:announcement-dismissed:v1";
+const showAnnouncement = ref(false);
+function checkAnnouncement() {
+  try {
+    if (localStorage.getItem(ANNOUNCEMENT_KEY)) return;
+  } catch {}
+  showAnnouncement.value = true;
+}
+function dismissAnnouncement() {
+  showAnnouncement.value = false;
+  try {
+    localStorage.setItem(ANNOUNCEMENT_KEY, "1");
+  } catch {}
 }
 </script>
 
@@ -615,6 +641,48 @@ function onDocumentClick(e: MouseEvent) {
   }
 }
 
-/* 链接检测助手通知条（已移除：服务端探活替代油猴脚本） */
-
+/* 公告条（全宽细条，导航栏下方） */
+.announce-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 16px;
+  background: linear-gradient(90deg, rgba(15, 118, 110, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+  border-bottom: 1px solid rgba(15, 118, 110, 0.12);
+  font-size: 13px;
+  color: var(--text-secondary, #4b5563);
+  line-height: 1.5;
+  animation: barSlideIn 0.3s ease;
+}
+.announce-bar__text {
+  text-align: center;
+}
+.announce-bar__text strong {
+  color: var(--primary, #0f766e);
+}
+.announce-bar__close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: var(--text-tertiary, #9ca3af);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.announce-bar__close:hover {
+  color: var(--text-secondary, #4b5563);
+}
+@keyframes barSlideIn {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
 </style>

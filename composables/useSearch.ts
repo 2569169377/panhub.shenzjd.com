@@ -15,10 +15,10 @@ const devError = (...args: any[]) => {
 
 /**
  * 每轮搜索（首搜或每次"继续"）的累计结果上限：
- * 达到后自动暂停，不再发起剩余请求，用户点击"继续"再搜下一轮（阈值累进 +100）。
+ * 达到后自动暂停，不再发起剩余请求，用户点击"继续"再搜下一轮（阈值累进 +50）。
  * 大部分用户只看前几条，几百条结果纯浪费服务器资源（尤其 TG 真爬请求）。
  */
-const MAX_RESULTS_PER_ROUND = 100;
+const MAX_RESULTS_PER_ROUND = 50;
 
 export interface SearchOptions {
   apiBase: string;
@@ -87,7 +87,7 @@ export function useSearch() {
   let pausedAtTaskIndex = 0;
   /** 当前并搜已完成数，暂停时用于记录断点 */
   let parallelCompletedCount = 0;
-  /** 当前轮次结果上限（首搜 100，每次继续 +100，累进 100→200→300） */
+  /** 当前轮次结果上限（首搜 50，每次继续 +50，累进 50→100→150） */
   let maxResultsThreshold = MAX_RESULTS_PER_ROUND;
   /** 是否因达到结果上限而自动暂停（区别于用户手动暂停，UI 文案用） */
   const autoPausedAtLimit = ref(false);
@@ -119,7 +119,7 @@ export function useSearch() {
     setPaused(false);
     setDeepLoading(true);
 
-    // 累进：继续搜索允许再收集一轮结果（100→200→300…）
+    // 累进：继续搜索允许再收集一轮结果（50→100→150…）
     maxResultsThreshold += MAX_RESULTS_PER_ROUND;
     autoPausedAtLimit.value = false;
 
