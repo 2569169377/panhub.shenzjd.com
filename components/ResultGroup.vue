@@ -127,6 +127,14 @@ let copyTimer: ReturnType<typeof setTimeout> | null = null;
 // 链接有效性检测（服务端探活，异步懒查当前可见链接）
 const { enqueue, statusOf } = useLinkCheck();
 
+// 注意：visibleItems 必须先于下方 watch 声明——
+// watch({ immediate: true }) 会在 setup 执行到 watch 行时立即求值 getter，
+// 若声明在后会触发 TDZ ReferenceError: Cannot access 'visibleItems' before initialization
+// （曾导致整个组件挂载失败、搜索结果列表空白）
+const visibleItems = computed(() =>
+  props.expanded ? props.items : props.items.slice(0, props.initialVisible)
+);
+
 function linkStatus(r: any) {
   return statusOf(r.url)?.status;
 }
@@ -151,10 +159,6 @@ function handleCopy(url: string) {
   if (copyTimer) clearTimeout(copyTimer);
   copyTimer = setTimeout(() => { copiedUrl.value = ""; }, 1500);
 }
-
-const visibleItems = computed(() =>
-  props.expanded ? props.items : props.items.slice(0, props.initialVisible)
-);
 
 function formatDate(d?: string) {
   if (!d) return "";
