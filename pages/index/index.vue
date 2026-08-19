@@ -322,8 +322,9 @@ async function onSearch() {
     requestUnlock(doSearch);
     return;
   }
-  // 微信公众号认证（未关注每次搜索弹窗，可关闭不阻塞搜索；已关注不再弹）
-  await checkSearchAuth();
+  // 微信公众号认证（强制：未认证先完成关注+验证码验证，成功后自动继续搜索）
+  const authed = await checkSearchAuth();
+  if (!authed) return;
   await doSearch();
 }
 

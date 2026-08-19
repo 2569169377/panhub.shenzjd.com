@@ -1,13 +1,13 @@
 /**
- * 微信公众号认证 composable
- * - 未关注用户：每次搜索都会弹出认证提示（可点击"×"关闭，不强制关注）
+ * 微信公众号认证 composable（强制模式）
+ * - 未认证用户：搜索时强制弹出认证，弹窗无关闭按钮，必须完成
+ *   关注公众号 + 验证码验证后才能继续搜索（验证成功后自动继续）
  * - 已认证用户（cookie 存在且有效）永不弹窗
- * - 用户关闭弹窗后搜索正常进行，下次搜索再弹
  *
- * 依赖 wx-auth-sdk@1.2.8+ 的 silent + required=false 选项：
+ * 依赖 wx-auth-sdk@1.2.8+ 的 silent + required 选项：
  * - init({ silent: true }) 只做 cookie 静默验证（有效 => onVerified，无效 => 删 cookie），不自动弹窗
- * - required: false 使弹窗带关闭"×"按钮，不强制用户关注
- * 弹窗时机由 checkSearchAuth() 手动控制。
+ * - required: true 强制认证：弹窗无关闭"×"、遮罩不可点穿，必须完成验证
+ * 弹窗时机由 checkSearchAuth() 手动控制（未认证时 await 阻塞直到验证完成）。
  */
 
 import { WxAuth } from "wx-auth-sdk";
@@ -31,8 +31,8 @@ export function useWxAuth() {
       apiBase: "https://wx-auth.shenzjd.com",
       // silent: true —— init 内部 autoCheck 不会弹窗，只静默验证 cookie
       silent: true,
-      // required: false —— 弹窗带关闭"×"，不强制关注
-      required: false,
+      // required: true —— 强制认证：弹窗无关闭按钮，遮罩不可点穿
+      required: true,
       onVerified: (user: any) => {
         // init 内部 silentCheck + 下方手动 silentCheck 各触发一次，去重
         if (isVerified.value) return;
@@ -62,9 +62,10 @@ export function useWxAuth() {
   });
 
   /**
-   * 每次搜索前调用：
-   * - 已认证（关注公众号且 cookie 有效）=> 永不弹窗，返回 false
-   * - 未认证 => 弹出认证弹窗（可关闭，不阻塞搜索），返回 true
+   * 每次搜索前调用（强制认证）：
+   * - 已认证（关注公众号且 cookie 有效）=> 直接放行，返回 true
+   * - 未认证 => 弹出强制认证弹窗（不可关闭），阻塞等待用户完成
+   *   关注 + 验证码验证，验证成功后返回 true（由调用方继续搜索）
    */
   async function checkSearchAuth(): Promise<boolean> {
     if (typeof window === "undefined") return false;
@@ -74,17 +75,13 @@ export function useWxAuth() {
       await silentCheckPromise;
     }
 
-    // 已认证（cookie 有效）→ 相当于已登录，不再弹
-    if (isVerified.value) return false;
+    // 已认证（cookie 有效）→ 相当于已登录，直接放行
+    if (isVerified.value) return true;
 
-    // 未认证 → 每次搜索都弹，可点击"×"关闭，不强制关注
-    showAuthModal();
-    return true;
-  }
-
-  /** 显示认证弹窗（手动触发，走 SDK 内部 showAuthModal） */
-  function showAuthModal() {
-    WxAuth.showAuthModal();
+    // 未认证 → 强制弹窗并等待验证完成（requireAuth 内部检查 cookie 并弹窗，
+    // 验证成功后 resolve true；required:true 模式下无关闭入口）
+    const ok = await WxAuth.requireAuth();
+    return ok === true;
   }
 
   return {
