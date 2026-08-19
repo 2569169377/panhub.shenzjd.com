@@ -155,7 +155,13 @@ export function useSearch() {
         );
         return extractMergedFromResponse(response.data);
       } catch (error: any) {
-        if (error?.name === "AbortError") return {};
+        // 主动取消（AbortController.abort）不算失败：
+        // ofetch 抛 FetchError 且把 AbortError 包在 cause 链里，需逐层判断
+        const isAbort =
+          error?.name === "AbortError" ||
+          error?.cause?.name === "AbortError" ||
+          error?.cause?.cause?.name === "AbortError";
+        if (isAbort) return {};
         if (error?.statusCode === 401) onAuthRequired?.();
         devWarn(`${label} search failed:`, error);
         return {};
