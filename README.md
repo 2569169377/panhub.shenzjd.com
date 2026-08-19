@@ -272,21 +272,23 @@ npm test:coverage
 
 仓库内置了 [`.github/workflows/sync-upstream.yml`](.github/workflows/sync-upstream.yml)，fork 之后每天 03:00 UTC 会自动拉取上游 `main` 合并回你的 fork（也可在 Actions 里手动触发）。
 
-**权限要求**：该 workflow 声明了 `contents: write` + `workflows: write`。后者必需——上游会新增/修改 `.github/workflows/` 下的文件，推送它们时 GitHub 要求 token 带 `workflows` 权限。
+**默认行为**：自动同步全部代码；`.github/workflows/` 目录保持 fork 本地版本（不会覆盖你 fork 里的 workflow 文件）。这是 GitHub 的硬性规则——`GITHUB_TOKEN` 永远没有 `workflows` 权限，任何 `permissions:` 声明都无法授予，推送 workflow 文件会被整次拒绝。
 
-**遇到报错怎么办**：如果同步失败并出现
+**想连 workflow 文件一起同步**：在 fork 的 **Settings → Secrets and variables → Actions** 添加 `SYNC_TOKEN` secret：
+
+- Fine-grained PAT：勾选 Contents **Read and write** + Workflows **Read and write**（Metadata 自动只读）
+- 或 Classic PAT：勾选 `workflow` scope
+
+配置后自动同步即升级为完整同步（含 `.github/workflows/`）。
+
+**遇到报错怎么办**：如果看到
 
 ```
 ! [remote rejected] main -> main (refusing to allow a GitHub App to create or update
   workflow `.github/workflows/xxx.yml` without `workflows` permission)
 ```
 
-说明触发同步的那个 workflow 文件版本缺少 `workflows: write`（旧版）。这是同步自动化（GitHub App token）的权限问题，**手动同步一次即可恢复**：
-
-- GitHub 网页：fork 页面 → **Sync fork** → **Update branch**；或
-- CLI：`gh repo sync <你的账号>/panhub.shenzjd.com`（token 需带 `workflow` scope）
-
-手动同步会把修复后的 workflow 拉进 fork，之后自动同步即永久正常。
+这是旧版同步逻辑用 `GITHUB_TOKEN` 推送了 workflow 文件所致。升级到新版（自动跳过 workflow 文件）后不再出现；若 fork 卡在旧版，**手动同步一次**即可恢复：fork 页面 → **Sync fork** → **Update branch**，或 `gh repo sync <你的账号>/panhub.shenzjd.com`。
 
 ---
 
