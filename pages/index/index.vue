@@ -313,8 +313,8 @@ async function onSearch() {
     requestUnlock(doSearch);
     return;
   }
-  // 微信公众号认证（前3次免费，之后弹窗，不阻塞搜索）
-  checkSearchAuth();
+  // 微信公众号认证（未关注每次搜索弹窗，可关闭不阻塞搜索；已关注不再弹）
+  await checkSearchAuth();
   await doSearch();
 }
 
