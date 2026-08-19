@@ -7,6 +7,12 @@ on:
 
 permissions:
   contents: write
+  # workflows: write 必需：上游会新增/修改 .github/workflows/ 下的文件（如
+  # cleanup-actions.yml），推送这些文件时 GitHub 要求 token 带 workflows 权限，
+  # 否则整次 push 被拒：
+  #   refusing to allow a GitHub App to create or update workflow
+  #   `.github/workflows/xxx.yml` without `workflows` permission
+  workflows: write
 
 concurrency:
   group: sync-upstream
@@ -15,6 +21,8 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # 只在 fork 里运行；上游仓库自身无需自同步，避免每天空跑消耗 Actions 配额
+    if: github.repository != 'wu529778790/panhub.shenzjd.com'
     env:
       # 固定上游仓库与分支（按需改动）
       UPSTREAM_REPO: wu529778790/panhub.shenzjd.com
