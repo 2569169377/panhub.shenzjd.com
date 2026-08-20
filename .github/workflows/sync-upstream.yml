@@ -70,7 +70,11 @@ jobs:
           # update workflow ... without workflows permission），回退后 push 不触碰
           # workflow 文件，永不报错
           if [ -z "${SYNC_TOKEN:-}" ]; then
-            git checkout HEAD -- .github/workflows
+            # 关键：必须回退到 origin/<branch> 而非 HEAD。merge 之后 HEAD 已是
+            # 合并后的上游版本，git checkout HEAD -- .github/workflows 等于没回退，
+            # push 仍携带 workflow 变更，被 GITHUB_TOKEN 的 workflows 权限限制
+            # 整次拒绝（refusing to allow a GitHub App to create or update workflow）
+            git checkout "origin/${{ steps.b.outputs.local_default }}" -- .github/workflows
             git commit --no-edit -m "chore(ci): keep local workflow files (no SYNC_TOKEN)" 2>/dev/null || true
           fi
           git push origin "${{ steps.b.outputs.local_default }}"
