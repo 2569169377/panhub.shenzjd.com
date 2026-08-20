@@ -10,6 +10,12 @@
 
 ---
 
+## 🤝 合作伙伴
+
+- [AI 全自动推广拓客 - 智能外呼机器人](https://bizbot.zvo.cn)
+
+---
+
 ## ✨ 核心特性
 
 ### 🔍 智能搜索
@@ -71,7 +77,7 @@
 **热搜功能依赖 Turso，必须配置**：部署完成后到 Vercel 项目 **Settings → Environment Variables** 添加：
 
 | 名称 | 值 |
-|------|-----|
+| ------ | ----- |
 | `TURSO_URL` | `libsql://<db>-<org>.turso.io` |
 | `TURSO_AUTH_TOKEN` | Turso 控制台生成的 Token |
 
@@ -91,7 +97,7 @@
 2. 在 Worker 设置中添加两个 Secret（Dashboard → Workers → 你的 Worker → Settings → Variables and Secrets）：
 
 | 名称 | 值 |
-|------|-----|
+| ------ | ----- |
 | `TURSO_URL` | `libsql://<db>-<org>.turso.io` |
 | `TURSO_AUTH_TOKEN` | Turso 控制台生成的 Token |
 
@@ -158,7 +164,7 @@ npm build
 ## ⚙️ 环境变量
 
 | 变量名 | 默认值 | 说明 |
-|--------|--------|------|
+| -------- | -------- | ------ |
 | `LOG_LEVEL` | `info` | 日志级别（debug/info/warn/error），支持白名单校验 |
 | `NITRO_PRESET` | auto-detect | 部署预设（vercel/cloudflare/node-server） |
 | `PORT` | `4000` | 服务端口 |
@@ -168,7 +174,7 @@ npm build
 ### 部署差异说明
 
 | 特性 | Docker/Node | CF Workers / Vercel |
-|------|-------------|---------------------|
+| ------ | ------------- | --------------------- |
 | 进程内缓存 | ✅ 持久 | ❌ 每个 isolate 独立 |
 | 热搜数据持久化 | ✅ Turso | ✅ Turso（需配 `TURSO_URL`，未配则热搜不可用） |
 | 插件健康状态 | ✅ 持久 | ❌ 每次冷启动重置 |
@@ -228,7 +234,7 @@ composables/
 ## 📦 支持的网盘平台
 
 | 平台 | 图标 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | 阿里云盘 | ☁️ | 支持分享链接解析 |
 | 夸克网盘 | 🔎 | 支持分享链接解析 |
 | 百度网盘 | 🧰 | 支持分享链接解析 |
@@ -305,12 +311,6 @@ npm test:coverage
 ## 📄 许可证
 
 [MIT License](LICENSE)
-
----
-
-## 🤝 合作伙伴
-
-- [AI 全自动推广拓客](https://bizbot.zvo.cn)
 
 ---
 
