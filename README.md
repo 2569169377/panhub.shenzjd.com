@@ -308,6 +308,12 @@ npm test:coverage
 
 ---
 
+## 🤝 合作伙伴
+
+- [AI 全自动推广拓客](https://bizbot.zvo.cn)
+
+---
+
 ## 🙏 鸣谢
 
 - [Nuxt.js](https://nuxt.com/) - 渐进式 Vue 框架
