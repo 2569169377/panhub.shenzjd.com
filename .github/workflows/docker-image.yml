@@ -68,16 +68,16 @@ jobs:
             sudo chmod 777 "$DATA_DIR"
 
             echo "=== 启动新容器 ==="
+            # 资源上限：OOM 只杀容器（restart 拉起），不拖垮 2GB 宿主机；
+            # 与 Dockerfile NODE_OPTIONS=--max-old-space-size=512 对齐；
+            # 日志轮转防 json-file 写满磁盘（注释必须在命令外，\ 续行里不能插 #）
             sudo docker run -d \
               --name "$CONTAINER" \
               --restart unless-stopped \
               -p 5253:4000 \
               -e TRUST_PROXY=1 \
-              # 资源上限：OOM 只杀容器（restart 拉起），不拖垮 2GB 宿主机；
-              # 与 Dockerfile NODE_OPTIONS=--max-old-space-size=512 对齐
               --memory 768m \
               --cpus "1.0" \
-              # 日志轮转：防 json-file 日志写满磁盘
               --log-opt max-size=10m \
               --log-opt max-file=3 \
               --env-file /opt/1panel/apps/openresty/openresty/www/sites/panhub.shenzjd.com/index/.env \
