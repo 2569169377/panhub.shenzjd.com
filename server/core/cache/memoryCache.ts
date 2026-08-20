@@ -37,25 +37,44 @@ export class MemoryCache<T = unknown> {
 
   constructor(options: MemoryCacheOptions = {}) {
     this.options = {
-      maxSize: options.maxSize ?? 1000,
-      maxMemoryBytes: options.maxMemoryBytes ?? 100 * 1024 * 1024,
+      maxSize: options.maxSize ?? 300,
+      maxMemoryBytes: options.maxMemoryBytes ?? 64 * 1024 * 1024,
       cleanupInterval: options.cleanupInterval ?? 5 * 60 * 1000,
       memoryThreshold: options.memoryThreshold ?? 0.8,
     };
   }
 
-  private fastEstimate(value: T): number {
+  /**
+   * 递归估算值占用的近似内存（字节）。
+   * 修正（2026-08-20 恢复 84c5f3a）：旧实现嵌套数组按 length*64 估算，对
+   * SearchResult[] 这类对象数组严重低估（每条含 links/title/content 等字段，
+   * 真实占用是估算的几十倍），导致 maxMemoryBytes 形同虚设、缓存实际吃掉
+   * 数 GB 内存（2GB 无 swap 小机 OOM 的根因之一）。
+   * 新实现递归到字段级，估算接近真实占用；搜索同一关键词重复率低，缓存
+   * 收益有限，按真实大小收紧上限（300 条 / 64MB，适配容器 768m 限制）。
+   */
+  private fastEstimate(value: unknown): number {
+    return this.estimateAny(value, 0);
+  }
+
+  private estimateAny(value: unknown, depth: number): number {
     if (value === null || value === undefined) return 8;
-    if (typeof value === "string") return value.length * 2;
+    if (typeof value === "string") return value.length * 2 + 8;
     if (typeof value === "number") return 8;
     if (typeof value === "boolean") return 4;
     if (typeof value === "object") {
-      try {
-        if (Array.isArray(value)) return value.length * 64;
-        return Object.keys(value as object).length * 64;
-      } catch {
-        return 64;
+      // 防过深/循环引用：超过 4 层按定值计（SearchResult 结构最深约 3 层）
+      if (depth > 4) return 128;
+      if (Array.isArray(value)) {
+        if (value.length === 0) return 16;
+        return value.length * this.estimateAny(value[0], depth + 1) + 16;
       }
+      let total = 16;
+      for (const key in value as Record<string, unknown>) {
+        total +=
+          key.length * 2 + 16 + this.estimateAny((value as any)[key], depth + 1);
+      }
+      return total;
     }
     return 64;
   }

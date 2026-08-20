@@ -21,6 +21,9 @@ ENV NODE_ENV=production
 ENV PORT=4000
 ENV HOST=0.0.0.0
 ENV NITRO_LOG_LEVEL=info
+# 内存上限与容器 --memory 768m 对齐：V8 堆上限 512MB（堆+非堆在 768m 内安全），
+# 防止 OOM 拖垮宿主机（无 swap 的 2GB 小机上内存一满直接 thrash）
+ENV NODE_OPTIONS=--max-old-space-size=512
 
 EXPOSE 4000
 
