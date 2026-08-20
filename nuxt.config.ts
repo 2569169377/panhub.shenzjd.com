@@ -21,7 +21,7 @@ export default defineNuxtConfig({
         {
           name: "description",
           content:
-            "PanHub：聚合阿里云盘、夸克、百度网盘、115、迅雷等平台的全网最全网盘搜索工具，实时检索分享资源，免费、快速、无广告。",
+            "PanHub：聚合阿里云盘、夸克、百度网盘、115、迅雷等平台的全网最全网盘搜索工具，实时检索分享资源，快速、高效。",
         },
         {
           name: "keywords",

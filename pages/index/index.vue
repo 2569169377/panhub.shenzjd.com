@@ -189,17 +189,17 @@ onMounted(async () => {
 useSeoMeta({
   title: "PanHub - 全网最全的网盘搜索",
   description:
-    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，免费、快速、无广告。",
+    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，快速、高效。",
   ogTitle: "PanHub - 全网最全的网盘搜索",
   ogDescription:
-    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，免费、快速、无广告。",
+    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，快速、高效。",
   ogType: "website",
   ogSiteName: "PanHub",
   ogImage: siteUrl ? `${siteUrl}/og.svg` : "/og.svg",
   twitterCard: "summary_large_image",
   twitterTitle: "PanHub - 全网最全的网盘搜索",
   twitterDescription:
-    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，免费、快速、无广告。",
+    "聚合阿里云盘、夸克、百度网盘、115、迅雷等平台，实时检索各类分享链接与资源，快速、高效。",
   twitterImage: siteUrl ? `${siteUrl}/og.svg` : "/og.svg",
 });
 

@@ -1,6 +1,6 @@
 # PanHub · 全网最全的网盘搜索
 
-> 一个搜索框，搜遍全网网盘资源 —— 即搜即得、聚合去重、免费开源、零广告、轻量部署
+> 一个搜索框，搜遍全网网盘资源 —— 即搜即得、聚合去重、轻量部署
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fwu529778790%2Fpanhub.shenzjd.com&project-name=panhub&repository-name=panhub.shenzjd.com)
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wu529778790/panhub.shenzjd.com)
@@ -300,7 +300,6 @@ npm test:coverage
 
 ## 🛡️ 免责声明
 
-- 本项目仅用于技术学习与搜索聚合演示
 - 不存储、不传播任何受版权保护的内容
 - 所有资源链接来自公开网络（Telegram 频道、第三方网站）
 - 请遵守当地法律法规与平台使用条款
@@ -308,9 +307,11 @@ npm test:coverage
 
 ---
 
-## 📄 许可证
+## 📄 版权声明
 
-[MIT License](LICENSE)
+Copyright © 2025-2026 shenzjd. All rights reserved.
+
+本仓库代码仅供学习参考，未经授权禁止用于任何商业用途或二次分发。
 
 ---
 
