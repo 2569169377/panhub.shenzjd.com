@@ -64,8 +64,8 @@ export function useWxAuth() {
   /**
    * 每次搜索前调用（强制认证）：
    * - 已认证（关注公众号且 cookie 有效）=> 直接放行，返回 true
-   * - 未认证 => 弹出强制认证弹窗（不可关闭），阻塞等待用户完成
-   *   关注 + 验证码验证，验证成功后返回 true（由调用方继续搜索）
+   * - 未认证 => 弹出强制认证弹窗（不可关闭），等待用户完成关注+验证码
+   *   验证，验证成功后自动放行（无需再点一次搜索）
    */
   async function checkSearchAuth(): Promise<boolean> {
     if (typeof window === "undefined") return false;
@@ -78,10 +78,26 @@ export function useWxAuth() {
     // 已认证（cookie 有效）→ 相当于已登录，直接放行
     if (isVerified.value) return true;
 
-    // 未认证 → 强制弹窗并等待验证完成（requireAuth 内部检查 cookie 并弹窗，
-    // 验证成功后 resolve true；required:true 模式下无关闭入口）
-    const ok = await WxAuth.requireAuth();
-    return ok === true;
+    // 未认证 → 弹出强制认证弹窗（required:true 无关闭按钮）。
+    // 注意：不用 await WxAuth.requireAuth() 的返回值——SDK verifyCode 成功
+    // 路径是 close() 先 resolve(false) 再 onVerified()（resolveAuth 已被置
+    // null 无法覆盖），requireAuth 的 Promise 恒为 false，会误判"未认证"
+    // 跳过搜索。改为等 onVerified 回调置位 isVerified 的信号。
+    void WxAuth.showAuthModal();
+    await waitVerified();
+    return isVerified.value;
+  }
+
+  /** 等待验证成功（onVerified 回调把 isVerified 置 true 时 resolve） */
+  function waitVerified(): Promise<void> {
+    return new Promise((resolve) => {
+      const stop = watch(isVerified, (v) => {
+        if (v) {
+          stop();
+          resolve();
+        }
+      });
+    });
   }
 
   return {
