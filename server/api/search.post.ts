@@ -19,7 +19,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   }
   return undefined;
 }
-import { requireSearchAuth } from "../utils/requireAuth";
+import { requireSearchAuth, requireHumanOrCredential } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
@@ -28,6 +28,8 @@ import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
   requireSearchAuth(event);
+  // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
+  requireHumanOrCredential(event);
   const config = useRuntimeConfig();
   const service = getOrCreateSearchService(config);
   const body = (await readBody<SearchRequest>(event)) || ({} as SearchRequest);
