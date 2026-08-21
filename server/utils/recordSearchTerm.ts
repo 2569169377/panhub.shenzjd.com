@@ -42,7 +42,7 @@ function isDuplicateWithinWindow(term: string, now: number): boolean {
  * - 去掉字符集/URL 等格式校验（此前 SAFE_TERM_RE 误杀"哈利·波特与魔法石"
  *   等含标点片名），用户搜什么都记录
  * - 仅保留：非空、长度上限（防滥用）、同词 30s 去重（防并发子请求重复计数）
- * - 合规敏感词过滤由存储层 isForbidden 承担（底线，不属于"限制搜索内容"）
+ * - 敏感词过滤已移除（2026-08-22 用户拍板：彻底不限制用户搜索什么）
  *
  * 防刷职责已前移到 search 接口入口（requireHumanOrCredential 对
  * bot UA 直接 403，连搜索都不执行），本层保证到达搜索的请求全部留痕。

@@ -1,7 +1,7 @@
 import { createClient, type Client } from "@libsql/client";
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
-import { normalize, isForbidden, formatDateKey, beijingDayStart } from "./hotSearchUtils";
+import { normalize, formatDateKey, beijingDayStart } from "./hotSearchUtils";
 
 /**
  * Turso 热搜存储实现（libSQL / SQLite fork，HTTP 驱动）
@@ -75,7 +75,6 @@ export class TursoHotSearchStore implements IHotSearchStore {
     await this.waitForInit();
     const normalized = normalize(term);
     if (!normalized) return;
-    if (isForbidden(normalized)) return;
     const d = Math.max(1, delta);
 
     // 全量词库表：每次搜索 count + d、更新 last_at（hot_searches 表已废弃，只写这一张）
@@ -142,7 +141,6 @@ export class TursoHotSearchStore implements IHotSearchStore {
 
     const out: HotSearchItem[] = [];
     for (const obj of rows) {
-      if (isForbidden(obj.term as string)) continue;
       out.push({
         term: obj.term as string,
         score: obj.count as number,

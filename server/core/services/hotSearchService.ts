@@ -1,6 +1,6 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
-import { normalize, isForbidden } from "./hotSearchUtils";
+import { normalize } from "./hotSearchUtils";
 
 /**
  * 写聚合缓冲配置
@@ -84,11 +84,10 @@ export class HotSearchService {
   }
 
   async recordSearch(term: string): Promise<void> {
-    // 写路径：先规范化 + 过滤，累积进内存缓冲，达到阈值或定时器批量落盘。
+    // 写路径：先规范化，累积进内存缓冲，达到阈值或定时器批量落盘。
     // 不保证写后立即可读（读为随机词云/榜单，实时性要求低）。
     const normalized = normalize(term);
     if (!normalized) return;
-    if (isForbidden(normalized)) return;
 
     const now = Date.now();
     const cur = this.pending.get(normalized);
