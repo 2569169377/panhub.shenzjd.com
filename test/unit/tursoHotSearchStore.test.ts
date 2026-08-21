@@ -77,15 +77,20 @@ describe("TursoHotSearchStore", () => {
     expect(item?.score).toBe(2);
   });
 
-  it("过滤非法词条（URL/敏感词/空串/超长）", async () => {
+  it("过滤敏感词与空串（URL/超长不再过滤，2026-08-22 用户拍板）", async () => {
     const now = Date.now();
+    // URL 与超长词现在允许记录（不限制用户搜索什么）
     await store.recordSearch("https://example.com", now);
+    await store.recordSearch("a".repeat(21), now);
+    // 敏感词与空串仍拦截
     await store.recordSearch("赌博网站", now);
     await store.recordSearch("   ", now);
-    await store.recordSearch("a".repeat(21), now);
 
     const hot = await store.getHotSearches(10);
-    expect(hot.length).toBe(0);
+    const terms = hot.map((s) => s.term);
+    expect(terms).toContain("https://example.com");
+    expect(terms).toContain("a".repeat(21));
+    expect(terms).not.toContain("赌博网站");
   });
 
   it("全角转半角规范化", async () => {

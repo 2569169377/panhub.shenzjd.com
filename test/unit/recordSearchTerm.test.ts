@@ -80,13 +80,17 @@ describe("recordSearchTerm", () => {
     expect(mockService.recordSearch).toHaveBeenCalledTimes(3);
   });
 
-  it("非法词条不记录（空串/纯空白/超长/URL）", async () => {
+  it("非法词条不记录（空串/纯空白/超长上限200/敏感词不在此层）", async () => {
     await recordSearchTerm("");
     await recordSearchTerm("   ");
-    await recordSearchTerm("a".repeat(51));
-    await recordSearchTerm("https://example.com");
-    await recordSearchTerm("www.baidu.com");
+    await recordSearchTerm("a".repeat(201));
     expect(mockedGetService).not.toHaveBeenCalled();
+  });
+
+  it("URL 与标点词正常记录（不限制用户搜索什么）", async () => {
+    await recordSearchTerm("https://example.com/share");
+    await recordSearchTerm("哈利·波特与魔法石");
+    expect(mockService.recordSearch).toHaveBeenCalledTimes(2);
   });
 
   it("记录失败静默（不影响主流程，不抛错）", async () => {

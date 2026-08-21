@@ -132,13 +132,13 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     expect(searches.length).toBe(0);
   });
 
-  it("应该处理超长搜索词", async () => {
+  it("超长搜索词现在允许记录（2026-08-22 用户拍板：不限制搜索内容）", async () => {
     await service.clearHotSearches();
     await service.recordSearch("a".repeat(101));
     await service.flush();
 
     const searches = await service.getHotSearches(100);
-    expect(searches.length).toBe(0);
+    expect(searches.some((s) => s.term === "a".repeat(101))).toBe(true);
   });
 
   it("应该返回今日随机热搜词（service 层转发冒烟）", async () => {
