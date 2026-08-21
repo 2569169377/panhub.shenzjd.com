@@ -1,4 +1,4 @@
-import { defineEventHandler, readBody, sendError, createError } from "h3";
+import { defineEventHandler, readBody, sendError, createError, getHeader } from "h3";
 
 /** 从 H3 event 中提取客户端断开信号（兼容 h3 无 getAbortSignal 的版本） */
 function getClientAbortSignal(event: any): AbortSignal | undefined {
@@ -39,8 +39,8 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  // 后端自动记录搜索词（替代前端上报）
-  await recordSearchTerm(kw);
+  // 后端自动记录搜索词（替代前端上报）；爬虫/脚本 UA 由 recordSearchTerm 内部跳过
+  await recordSearchTerm(kw, getHeader(event, "user-agent"));
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
