@@ -160,6 +160,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from "vue";
 import { PLATFORM_INFO } from "~/config/plugins";
+import { isBotUA } from "~/utils/botUA";
 
 const config = useRuntimeConfig();
 const apiBase = (config.public?.apiBase as string) || "/api";
@@ -177,8 +178,14 @@ onMounted(async () => {
   // 从 URL 读取搜索关键词
   const q = route.query.q;
   if (q && typeof q === "string") {
-    kw.value = q;
-    await doSearch();
+    // 爬虫抓取 /?q=xxx（来自 sitemap）时不自动搜索：否则每次抓取都触发一次
+    // 完整搜索 + 记录热搜，形成自举循环。真人浏览器才自动搜索。
+    if (isBotUA(typeof navigator !== "undefined" ? navigator.userAgent : undefined)) {
+      kw.value = q; // 仍回填输入框，页面可读
+    } else {
+      kw.value = q;
+      await doSearch();
+    }
   }
   if (doubanHotRef.value) await doubanHotRef.value.init();
   if (hotSearchRef.value) await hotSearchRef.value.init();
