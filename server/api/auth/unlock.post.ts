@@ -19,7 +19,9 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig();
   const password = (config.searchPassword as string) || "";
   if (!password.trim()) {
-    return { ok: true };
+    // 未设置密码门：直接放行，但返回哨兵 token，保证客户端（如 MP）
+    // 依赖 `ok && token` 判断解锁成功的逻辑不会误报失败
+    return { ok: true, token: createAuthToken("open") };
   }
 
   const ip = getClientIp(event);

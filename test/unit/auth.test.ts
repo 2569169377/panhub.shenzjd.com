@@ -6,7 +6,7 @@ vi.mock("h3", () => ({
   setHeader: vi.fn(),
 }));
 
-import { createAuthToken, verifyAuthToken } from "../../server/utils/auth";
+import { createAuthToken, verifyAuthToken, isUnlocked } from "../../server/utils/auth";
 
 const SECRET = "test-secret-key-for-unit-tests";
 
@@ -81,5 +81,26 @@ describe("verifyAuthToken", () => {
   it("rejects token with empty secret", () => {
     const token = createAuthToken(SECRET);
     expect(verifyAuthToken(token, "")).toBe(false);
+  });
+});
+
+describe("isUnlocked（密码门未设置）", () => {
+  it("secret 为空时直接放行，无需任何凭证", () => {
+    expect(isUnlocked({} as any, "")).toBe(true);
+  });
+
+  it("secret 为空白字符串时同样放行", () => {
+    expect(isUnlocked({} as any, "   ")).toBe(true);
+  });
+});
+
+describe("createAuthToken（哨兵 token，未设密码门场景）", () => {
+  it("生成格式合法的哨兵 token（ts.sig），可供客户端 ok&&token 判断通过", () => {
+    const token = createAuthToken("open");
+    const parts = token.split(".");
+    expect(parts).toHaveLength(2);
+    expect(Number(parts[0])).toBeGreaterThan(0);
+    expect(parts[1]).toMatch(/^[a-f0-9]{64}$/);
+    expect(token).toBeTruthy();
   });
 });
