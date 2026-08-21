@@ -68,6 +68,8 @@ export function useWxAuth() {
    *   验证，验证成功后自动放行（无需再点一次搜索）
    */
   async function checkSearchAuth(): Promise<boolean> {
+    // 本地开发（npm run dev）不强制关注公众号，直接放行
+    if (import.meta.dev) return true;
     if (typeof window === "undefined") return false;
 
     // 等待静默验证收敛（最长等一次请求的完成），避免对已关注用户误弹窗
