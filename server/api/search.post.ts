@@ -22,6 +22,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 import { requireSearchAuth } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
+import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -39,8 +40,8 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  // 后端自动记录搜索词（替代前端上报）；爬虫/脚本 UA 由 recordSearchTerm 内部跳过
-  await recordSearchTerm(kw, getHeader(event, "user-agent"));
+  // 后端自动记录搜索词（替代前端上报）；爬虫 UA / 同 IP 超量由 recordSearchTerm 内部过滤
+  await recordSearchTerm(kw, getHeader(event, "user-agent"), getClientIp(event));
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
