@@ -3,6 +3,7 @@ import { createError, getHeader, getRequestHeader } from "h3";
 import { isUnlocked } from "./auth";
 import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
+import { getClientIp } from "../middleware/rateLimiter";
 import { isWxAuthEnforced, verifyWxAuthOnce } from "./wxAuthCheck";
 
 export function requireSearchAuth(event: H3Event): void {
@@ -42,6 +43,7 @@ export function requireHumanOrCredential(event: H3Event): void {
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
   if ((auth && auth.startsWith("Bearer ")) || clientSecret) return;
   loggers.search.warn(`拦截 bot UA 搜索请求`, {
+    ip: getClientIp(event),
     ua: ua?.slice(0, 200),
     path: event.path,
     method: event.method,
@@ -72,6 +74,7 @@ export async function requireWxAuth(event: H3Event): Promise<void> {
   const ok = await verifyWxAuthOnce(event);
   if (!ok) {
     loggers.search.warn(`拦截未关注公众号的搜索请求`, {
+      ip: getClientIp(event),
       path: event.path,
       method: event.method,
     });
