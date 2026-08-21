@@ -1,6 +1,0 @@
-{
-  "name": "panhub-miniprogram",
-  "version": "0.2.0",
-  "description": "PanHub WeChat Mini Program · 微信绿重构版（无第三方 UI 依赖）",
-  "dependencies": {}
-}
