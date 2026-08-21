@@ -80,7 +80,7 @@ describe("recordSearchTerm", () => {
     expect(mockService.recordSearch).toHaveBeenCalledTimes(3);
   });
 
-  it("非法词条不记录（空串/纯空白/超长上限200/敏感词不在此层）", async () => {
+  it("非法词条不记录（空串/纯空白/超长上限200）", async () => {
     await recordSearchTerm("");
     await recordSearchTerm("   ");
     await recordSearchTerm("a".repeat(201));

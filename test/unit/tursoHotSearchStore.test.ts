@@ -77,20 +77,21 @@ describe("TursoHotSearchStore", () => {
     expect(item?.score).toBe(2);
   });
 
-  it("过滤敏感词与空串（URL/超长不再过滤，2026-08-22 用户拍板）", async () => {
+  it("空串丢弃，其余全部记录（2026-08-22 用户拍板：不限制搜索内容）", async () => {
     const now = Date.now();
-    // URL 与超长词现在允许记录（不限制用户搜索什么）
+    // URL / 超长 / 敏感词均允许记录
     await store.recordSearch("https://example.com", now);
     await store.recordSearch("a".repeat(21), now);
-    // 敏感词与空串仍拦截
     await store.recordSearch("赌博网站", now);
+    // 空串仍丢弃
     await store.recordSearch("   ", now);
 
     const hot = await store.getHotSearches(10);
     const terms = hot.map((s) => s.term);
     expect(terms).toContain("https://example.com");
     expect(terms).toContain("a".repeat(21));
-    expect(terms).not.toContain("赌博网站");
+    expect(terms).toContain("赌博网站");
+    expect(terms).not.toContain("");
   });
 
   it("全角转半角规范化", async () => {

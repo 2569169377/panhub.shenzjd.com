@@ -81,7 +81,7 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     expect(stats.mode).toBe("turso");
   });
 
-  it("应该过滤违规词", async () => {
+  it("不限制用户搜索内容（2026-08-22 用户拍板：敏感词过滤已移除）", async () => {
     await service.clearHotSearches();
     await service.recordSearch("政治敏感词");
     await service.recordSearch("暴力内容");
@@ -89,10 +89,9 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     await service.flush();
 
     const searches = await service.getHotSearches(50);
-    const hasForbidden = searches.some(
-      (s) => s.term.includes("政治") || s.term.includes("暴力")
-    );
-    expect(hasForbidden).toBe(false);
+    // 用户搜什么就记录什么，不再过滤
+    expect(searches.some((s) => s.term === "政治敏感词")).toBe(true);
+    expect(searches.some((s) => s.term === "暴力内容")).toBe(true);
     expect(searches.some((s) => s.term === "正常搜索词")).toBe(true);
   });
 
