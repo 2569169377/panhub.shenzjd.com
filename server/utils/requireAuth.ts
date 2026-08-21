@@ -2,6 +2,7 @@ import type { H3Event } from "h3";
 import { createError, getHeader, getRequestHeader } from "h3";
 import { isUnlocked } from "./auth";
 import { isBotUA } from "../../utils/botUA";
+import { loggers } from "../core/utils/logger";
 
 export function requireSearchAuth(event: H3Event): void {
   const config = useRuntimeConfig();
@@ -28,6 +29,9 @@ export function requireSearchAuth(event: H3Event): void {
  *
  * 与 requireSearchAuth 独立：即使未配置 SEARCH_PASSWORD（密码门关闭），
  * bot UA 也会被此层拦截；真人浏览器仍可正常搜索。
+ *
+ * 2026-08-22 收紧：命中拦截时打 warn 日志（含 UA 与路径），
+ * 便于观察是否误伤真实用户；发现误伤可随时收紧/回退。
  */
 export function requireHumanOrCredential(event: H3Event): void {
   const ua = getHeader(event, "user-agent");
@@ -36,5 +40,10 @@ export function requireHumanOrCredential(event: H3Event): void {
   const auth = getRequestHeader(event, "authorization");
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
   if ((auth && auth.startsWith("Bearer ")) || clientSecret) return;
+  loggers.search.warn(`拦截 bot UA 搜索请求`, {
+    ua: ua?.slice(0, 200),
+    path: event.path,
+    method: event.method,
+  });
   throw createError({ statusCode: 403, statusMessage: "bot forbidden" });
 }
