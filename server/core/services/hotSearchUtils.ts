@@ -1,16 +1,11 @@
 /**
  * 热搜存储共享工具函数
- * 供 TursoHotSearchStore 使用，保证词条规范化、敏感词过滤、北京时间日期语义一致。
+ * 供 TursoHotSearchStore 使用，保证词条规范化、北京时间日期语义一致。
+ *
+ * 2026-08-22 用户拍板：**不限制用户搜索什么**——敏感词过滤 isForbidden
+ * 已移除（此前拦截 政治/色情/赌博/毒品 等词），词条规范化不再拒绝 URL
+ * 或限制长度。用户搜什么，词库就记录什么。
  */
-
-/** 敏感词过滤（热搜榜单/词库落库前拦截） */
-export function isForbidden(term: string): boolean {
-  const forbiddenPatterns = [
-    /政治|暴力|色情|赌博|毒品/i,
-    /fuck|shit|bitch/i,
-  ];
-  return forbiddenPatterns.some((pattern) => pattern.test(term));
-}
 
 /**
  * 词条规范化（2026-08-22 用户拍板：不限制用户搜索什么）：
