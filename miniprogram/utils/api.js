@@ -55,6 +55,16 @@ function recordHotSearch(term) {
   return request({ url: '/api/hot-searches', method: 'POST', data: { term } }).catch(() => {})
 }
 
+// 热搜日历：近 N 天每天词数（热搜趋势页）
+function getHotCalendar(days) {
+  return request({ url: '/api/hot-calendar', data: { days: days || 30 } })
+}
+
+// 某天的完整榜单（热搜趋势页）
+function getHotDay(date) {
+  return request({ url: '/api/hot-days', data: { date: date } })
+}
+
 function search(keyword, params) {
   const q = {
     kw: keyword,
@@ -70,4 +80,4 @@ function search(keyword, params) {
   return request({ url: '/api/search?' + buildQuery(q) })
 }
 
-module.exports = { request, getHotSearches, recordHotSearch, search }
+module.exports = { request, getHotSearches, recordHotSearch, search, getHotCalendar, getHotDay }

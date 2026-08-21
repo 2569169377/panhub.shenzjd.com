@@ -1,0 +1,44 @@
+/* 自定义 TabBar —— 设计稿：白底 + 顶部 1px 线，92px 高 + 安全区 */
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  background: #ffffff;
+  border-top: 1rpx solid #e5e5e5;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-bar__inner {
+  height: 152rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 80rpx;
+}
+
+.tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  padding: 8rpx 20rpx;
+}
+
+.tab-item__icon {
+  width: 48rpx;
+  height: 48rpx;
+}
+
+.tab-item__label {
+  font-size: 20rpx;
+  color: #999999;
+  line-height: 1.2;
+}
+
+.tab-item__label--active {
+  color: #07c160;
+  font-weight: 600;
+}

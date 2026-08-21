@@ -1,17 +1,151 @@
 <view class="page">
-  <view class="settings-group">
-    <t-cell-group>
-      <t-cell title="版本" note="v0.1.0" bordered="{{false}}"></t-cell>
-      <t-cell title="后端接口" note="panhub.shenzjd.com" bordered="{{false}}"></t-cell>
-    </t-cell-group>
+  <view class="set-content">
+    <!-- 品牌卡 -->
+    <view class="card brand-card">
+      <view class="brand-logo">
+        <image class="brand-logo__icon" src="{{searchWhite}}" mode="aspectFit" />
+      </view>
+      <view class="brand-texts">
+        <text class="brand-name">PanHub</text>
+        <text class="brand-sub">{{version}} · 搜遍全网网盘资源</text>
+      </view>
+    </view>
+
+    <!-- 设置项卡 -->
+    <view class="card set-card">
+      <!-- 搜索密码锁 -->
+      <view class="set-item">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconLock}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">搜索密码锁</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{unlocked ? '已解锁' : '已关闭'}}</text>
+          <switch
+            class="set-switch"
+            checked="{{unlocked}}"
+            color="#07C160"
+            bindchange="onToggleLock" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 深色模式 -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onDarkMode">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconMoon}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">深色模式</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{darkMode}}</text>
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 默认搜索平台 -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onDefaultSrc">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconGrid}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">默认搜索平台</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{defaultSrc}}</text>
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 结果排序方式 -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onSort">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconSort}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">结果排序方式</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{sortType}}</text>
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 清除搜索历史 -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onClearHistory">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconTrash}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">清除搜索历史</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{historyCount}} 条</text>
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 关于 PanHub -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onAbout">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconInfo}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">关于 PanHub</text>
+        </view>
+        <view class="set-item__right">
+          <text class="set-item__note">{{version}}</text>
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+
+      <view class="set-divider"></view>
+
+      <!-- 反馈建议 -->
+      <view class="set-item" hover-class="set-item--hover" bindtap="onFeedback">
+        <view class="set-item__left">
+          <view class="set-icon">
+            <image class="set-icon__img" src="{{iconFeedback}}" mode="aspectFit" />
+          </view>
+          <text class="set-item__title">反馈建议</text>
+        </view>
+        <view class="set-item__right">
+          <image class="set-chevron" src="{{chevron}}" mode="aspectFit" />
+        </view>
+      </view>
+    </view>
+
+    <view class="set-footer">PanHub · 网盘资源聚合搜索</view>
   </view>
 
-  <view class="settings-group">
-    <t-cell-group>
-      <t-cell title="解锁状态" note="{{unlocked ? '已解锁' : '未解锁'}}" bordered="{{false}}"></t-cell>
-      <t-cell wx:if="{{unlocked}}" title="退出解锁" arrow hover bind:click="onLogout"></t-cell>
-    </t-cell-group>
+  <!-- 解锁弹窗 -->
+  <view wx:if="{{showUnlock}}" class="unlock-mask">
+    <view class="unlock-card">
+      <text class="unlock-card__title">输入搜索密码</text>
+      <text class="unlock-card__sub">解锁后可正常搜索网盘资源</text>
+      <input
+        class="unlock-card__input"
+        password="{{true}}"
+        value="{{unlockPwd}}"
+        placeholder="搜索密码"
+        placeholder-class="unlock-card__placeholder"
+        bindinput="onUnlockInput"
+        confirm-type="done"
+        bindconfirm="onUnlockConfirm" />
+      <button class="unlock-card__btn" loading="{{unlocking}}" bindtap="onUnlockConfirm">解锁</button>
+      <text class="unlock-card__cancel" bindtap="onCloseUnlock">取消</text>
+    </view>
   </view>
-
-  <view class="settings-tip">PanHub · 网盘资源聚合搜索</view>
 </view>
