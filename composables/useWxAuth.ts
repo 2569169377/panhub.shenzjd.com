@@ -102,9 +102,27 @@ export function useWxAuth() {
     });
   }
 
+  /**
+   * 强制重新认证（服务端 401 时调用，2026-08-22）：
+   * - 服务端 requireWxAuth 实时校验失败（token 失效/取消关注）返回 401，
+   *   但前端 isVerified 缓存仍为 true，checkSearchAuth 会误判"已认证"放行。
+   * - 因此重置 isVerified=false 强制弹窗，用户重新完成关注+验证码，
+   *   SDK 会写入新 token，后续搜索恢复正常。
+   */
+  async function forceVerify(): Promise<boolean> {
+    // 本地开发（npm run dev）不强制关注公众号，直接放行
+    if (import.meta.dev) return true;
+    if (typeof window === "undefined") return false;
+    isVerified.value = false; // 强制重新认证
+    void WxAuth.showAuthModal();
+    await waitVerified();
+    return isVerified.value;
+  }
+
   return {
     isVerified: computed(() => isVerified.value),
     isReady: computed(() => isReady.value),
     checkSearchAuth,
+    forceVerify,
   };
 }
