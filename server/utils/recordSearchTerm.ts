@@ -19,18 +19,21 @@ const SAFE_TERM_RE = /^[一-龥a-zA-Z0-9 ]+$/;
  * 仅保留词条合法性校验（防空/超长/URL/特殊字符污染词库）；
  * 记录成功打 info 日志（默认 LOG_LEVEL=info 可见，便于排查）。
  * 校验失败或写入失败均静默吞掉，绝不影响搜索主流程。
+ *
+ * 2026-08-22 补充：可选 ip 参数，记录日志时带上来源 IP，
+ * 便于定位刷词来源（数据库不存 IP，靠日志留痕）。
  */
-export async function recordSearchTerm(term: string): Promise<void> {
+export async function recordSearchTerm(term: string, ip?: string | null): Promise<void> {
   const t = (term || "").trim();
   if (!t || t.length > 50 || !SAFE_TERM_RE.test(t)) {
-    loggers.hotSearch.warn(`跳过记录（词条非法）: ${JSON.stringify(term)}`);
+    loggers.hotSearch.warn(`跳过记录（词条非法）: ${JSON.stringify(term)}`, ip ? { ip } : undefined);
     return;
   }
 
   try {
     const service = getOrCreateHotSearchService();
     await service.recordSearch(t);
-    loggers.hotSearch.info(`记录搜索词: "${t}"`);
+    loggers.hotSearch.info(`记录搜索词: "${t}"`, ip ? { ip } : undefined);
   } catch {
     // 记录失败不影响搜索
   }
