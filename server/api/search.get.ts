@@ -1,4 +1,4 @@
-import { defineEventHandler, getQuery, getHeader, sendError, createError } from "h3";
+import { defineEventHandler, getQuery, sendError, createError } from "h3";
 
 /** 从 H3 event 中提取客户端断开信号（兼容 h3 无 getAbortSignal 的版本） */
 function getClientAbortSignal(event: any): AbortSignal | undefined {
@@ -22,7 +22,6 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 import { requireSearchAuth, requireHumanOrCredential } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
-import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -48,11 +47,9 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  // 记录搜索词（2026-08-22 修复：前端主搜索走 GET，不能删除记录）。
-  // 防刷由 recordSearchTerm 内部三层过滤承担：SAFE_TERM_RE（词条合法性）
-  // + isBotUA（爬虫/脚本 UA 跳过）+ isThrottledByIp（同 IP 窗口节流），
-  // 真人 GET 搜索正常记录、脚本/爬虫刷词被拦。
-  await recordSearchTerm(kw, getHeader(event, "user-agent"), getClientIp(event));
+  // 记录搜索词（2026-08-22：只要搜索就记录，便于排查）。
+  // 防刷由入口 requireHumanOrCredential 承担（bot UA 403），本层不再过滤。
+  await recordSearchTerm(kw);
 
   let ext: Record<string, any> | undefined;
   const extStr = (q.ext as string | undefined)?.trim();
