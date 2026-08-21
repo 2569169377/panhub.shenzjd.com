@@ -3,6 +3,7 @@ import { createError, getHeader, getRequestHeader } from "h3";
 import { isUnlocked } from "./auth";
 import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
+import { isWxAuthEnforced, verifyWxAuthOnce } from "./wxAuthCheck";
 
 export function requireSearchAuth(event: H3Event): void {
   const config = useRuntimeConfig();
@@ -46,4 +47,34 @@ export function requireHumanOrCredential(event: H3Event): void {
     method: event.method,
   });
   throw createError({ statusCode: 403, statusMessage: "bot forbidden" });
+}
+
+/**
+ * 微信关注公众号登录态校验（2026-08-22，开关控制）
+ *
+ * 思路：前端已强制"关注公众号 + 验证码"才能搜索，但脚本直调 API 可绕过
+ * 前端弹窗。本层在服务端实时校验 wxauth cookie（wxauth-token/wxauth-openid），
+ * 未认证请求直接 401，从根上挡住刷词脚本。
+ *
+ * 规则（2026-08-22 用户拍板）：
+ * - 仅当 WX_AUTH_ENFORCE=1 时启用（默认关闭，不影响现状）
+ * - 已带 Bearer / x-panhub-client-secret 凭证（小程序/API）→ 放行
+ * - **实时校验、不缓存**：取消关注 = 退出登录，下次搜索立即 401
+ * - wx-auth 服务故障 → 降级放行（不误伤真人），打 warn 日志
+ */
+export async function requireWxAuth(event: H3Event): Promise<void> {
+  if (!isWxAuthEnforced()) return;
+  // 已授权客户端（小程序/API）凭证放行
+  const auth = getRequestHeader(event, "authorization");
+  const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
+  if ((auth && auth.startsWith("Bearer ")) || clientSecret) return;
+
+  const ok = await verifyWxAuthOnce(event);
+  if (!ok) {
+    loggers.search.warn(`拦截未关注公众号的搜索请求`, {
+      path: event.path,
+      method: event.method,
+    });
+    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+  }
 }
