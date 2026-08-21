@@ -13,15 +13,14 @@ export function isForbidden(term: string): boolean {
 }
 
 /**
- * 词条规范化：
- * - 去首尾空白，空串/纯 URL/超长词丢弃
+ * 词条规范化（2026-08-22 用户拍板：不限制用户搜索什么）：
+ * - 去首尾空白，空串丢弃
+ * - 不再拒绝 URL、不再限制长度（此前会丢弃 https:// 开头词与 >20 字词）
  * - 全角字符转半角（Ａ-Ｚ → A-Z 等）
  */
 export function normalize(term: string): string | null {
   let t = term.trim();
   if (!t) return null;
-  if (/^https?:\/\//i.test(t)) return null;
-  if (t.length > 20) return null;
   t = t.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (ch) =>
     String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
   );
