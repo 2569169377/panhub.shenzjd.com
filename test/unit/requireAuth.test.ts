@@ -31,6 +31,11 @@ vi.mock("../../server/utils/wxAuthCheck", () => ({
   verifyWxAuthOnce: vi.fn(async () => true),
 }));
 
+// mock rateLimiter：避免加载 h3 defineEventHandler（getClientIp 供 requireAuth 日志用）
+vi.mock("../../server/middleware/rateLimiter", () => ({
+  getClientIp: vi.fn(() => "127.0.0.1"),
+}));
+
 import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../../server/utils/requireAuth";
 import * as h3 from "h3";
 import * as auth from "../../server/utils/auth";
