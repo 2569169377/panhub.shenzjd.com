@@ -285,21 +285,12 @@ function getSearchOptions() {
   };
 }
 
-// 记录热搜词
-async function recordHotSearch(keyword: string) {
-  const term = keyword?.trim();
-  if (!term) return;
-  try {
-    await $fetch(`${apiBase}/hot-searches`, { method: "POST", body: { term } });
-  } catch (_e) {}
-}
-
 // 执行实际搜索逻辑（供 requestUnlock 回调复用）
 async function doSearch() {
   if (!kw.value || searchState.value.loading) return;
   loadSettings();
   const keyword = kw.value.trim();
-  recordHotSearch(keyword);
+  // 搜索词由后端 search 接口自动记录（见 server/utils/recordSearchTerm.ts），前端不再上报
   // 同步搜索词到 URL
   if (router) {
     router.replace({ query: { q: keyword } });

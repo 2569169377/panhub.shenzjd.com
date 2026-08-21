@@ -188,46 +188,6 @@ log("--- Error Case Tests ---");
   if (!passed) process.exit(1);
 }
 
-// Test: hot-searches POST with empty term returns 400
-{
-  let passed = false;
-  try {
-    await ofetch(`${API_BASE}/hot-searches`, {
-      method: "POST",
-      body: { term: "" },
-    });
-    err("Expected 400 for empty term, got success");
-  } catch (e) {
-    if (e.status === 400 || e.statusCode === 400) {
-      log("PASS: empty term returns 400");
-      passed = true;
-    } else {
-      err(`Expected 400 for empty term, got ${e.status || e.statusCode}`);
-    }
-  }
-  if (!passed) process.exit(1);
-}
-
-// Test: hot-searches POST with unsafe characters returns 400
-{
-  let passed = false;
-  try {
-    await ofetch(`${API_BASE}/hot-searches`, {
-      method: "POST",
-      body: { term: "<script>alert(1)</script>" },
-    });
-    err("Expected 400 for unsafe term, got success");
-  } catch (e) {
-    if (e.status === 400 || e.statusCode === 400) {
-      log("PASS: unsafe term returns 400");
-      passed = true;
-    } else {
-      err(`Expected 400 for unsafe term, got ${e.status || e.statusCode}`);
-    }
-  }
-  if (!passed) process.exit(1);
-}
-
 // Test: hot-searches GET with invalid limit returns 400
 {
   let passed = false;

@@ -80,7 +80,7 @@ export function getClientIp(event: any): string {
 export function getRateLimit(pathname: string, limits: Record<string, { limit: number; windowMs: number }>, defaultLimit: { limit: number; windowMs: number }) {
   // 精确匹配
   if (limits[pathname]) return limits[pathname];
-  // 前缀匹配（/api/hot-searches POST 和 GET 共享限制）
+  // 前缀匹配（如 /api/hot-searches 各子路径共享限制）
   for (const [prefix, config] of Object.entries(limits)) {
     if (pathname.startsWith(prefix)) return config;
   }

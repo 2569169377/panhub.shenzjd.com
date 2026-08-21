@@ -21,6 +21,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 }
 import { requireSearchAuth } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
+import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -37,6 +38,9 @@ export default defineEventHandler(async (event) => {
       createError({ statusCode: 400, statusMessage: "kw is required" })
     );
   }
+
+  // 后端自动记录搜索词（替代前端上报）
+  await recordSearchTerm(kw);
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
