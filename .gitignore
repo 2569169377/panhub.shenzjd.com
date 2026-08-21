@@ -41,9 +41,6 @@ vitest.config.ts.timestamp-*.mjs
 # Vitest test DB sandbox dirs (created/cleaned by unit tests)
 data-test*
 
-# WeChat mini-program: "构建 npm" output (regenerated locally)
-miniprogram/miniprogram_npm/
-
 # Guard: this project uses npm, NOT pnpm — ignore accidental pnpm artifacts
 pnpm-lock.yaml
 pnpm-workspace.yaml

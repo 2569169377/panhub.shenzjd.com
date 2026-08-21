@@ -41,8 +41,8 @@ export function setAuthCookie(event: H3Event, token: string): void {
 /**
  * 统一鉴权入口。兼容三套凭证：
  *   1. Web 端 Cookie（panhub_unlock）
- *   2. 小程序 Authorization: Bearer <HMAC token>（已输密码解锁的 MP 用户）
- *   3. 小程序共享密钥（x-panhub-client-secret 匹配 MP_CLIENT_SECRET）—— 上线初期放开，后续收口
+ *   2. MP 客户端（shenzujiudi-mini，独立仓库）Authorization: Bearer <HMAC token>（已输密码解锁的用户）
+ *   3. MP 客户端共享密钥（x-panhub-client-secret 匹配 MP_CLIENT_SECRET）—— 上线初期放开，后续收口
  * 任一通过即算已解锁。secret 为空时直接放行（未设置密码门）。
  */
 export function isUnlocked(event: H3Event, secret: string): boolean {
