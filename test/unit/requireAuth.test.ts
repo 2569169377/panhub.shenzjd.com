@@ -1,5 +1,5 @@
 /**
- * requireAuth（requireSearchAuth / requireHumanOrCredential）单元测试
+ * requireAuth（requireSearchAuth / requireHumanOrCredential / requireWxAuth）单元测试
  *
  * 验证：
  * - 密码门未配置时 requireSearchAuth 放行
@@ -7,6 +7,7 @@
  * - bot/脚本 UA 无凭证 → 403（入口拦截，不执行搜索）
  * - bot/脚本 UA 带 Bearer / client-secret → 放行（小程序等真实渠道）
  * - 正常浏览器 UA → 放行
+ * - requireWxAuth：开关关闭跳过；开关开启时未认证 401；已带凭证放行
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,9 +25,19 @@ vi.mock("../../server/utils/auth", () => ({
   isUnlocked: vi.fn(() => false),
 }));
 
-import { requireSearchAuth, requireHumanOrCredential } from "../../server/utils/requireAuth";
+// mock wxAuthCheck：避免测试触发远程 HTTP
+vi.mock("../../server/utils/wxAuthCheck", () => ({
+  isWxAuthEnforced: vi.fn(() => false),
+  verifyWxAuthOnce: vi.fn(async () => true),
+}));
+
+import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../../server/utils/requireAuth";
 import * as h3 from "h3";
 import * as auth from "../../server/utils/auth";
+import * as wxAuthCheck from "../../server/utils/wxAuthCheck";
+
+const mockedIsWxAuthEnforced = vi.mocked(wxAuthCheck.isWxAuthEnforced);
+const mockedVerifyWxAuthOnce = vi.mocked(wxAuthCheck.verifyWxAuthOnce);
 
 const mockedGetHeader = vi.mocked(h3.getHeader);
 const mockedGetRequestHeader = vi.mocked(h3.getRequestHeader);
@@ -136,5 +147,59 @@ describe("isBotUA（依赖引用完整性）", () => {
   it("可正常判定", () => {
     expect(isBotUA("curl/8.7.1")).toBe(true);
     expect(isBotUA("Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36")).toBe(false);
+  });
+});
+
+describe("requireWxAuth", () => {
+  beforeEach(() => {
+    mockedIsWxAuthEnforced.mockReset();
+    mockedVerifyWxAuthOnce.mockReset();
+    mockedGetHeader.mockReset();
+    mockedGetRequestHeader.mockReset();
+  });
+
+  it("开关未启用时跳过（不校验）", async () => {
+    mockedIsWxAuthEnforced.mockReturnValue(false);
+    expect(() => requireWxAuth(makeEvent())).not.toThrow();
+    expect(mockedVerifyWxAuthOnce).not.toHaveBeenCalled();
+  });
+
+  it("开关启用且已带 Bearer 凭证 → 放行（小程序）", async () => {
+    mockedIsWxAuthEnforced.mockReturnValue(true);
+    mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "authorization" ? "Bearer abc" : undefined
+    );
+    await expect(requireWxAuth(makeEvent())).resolves.toBeUndefined();
+    expect(mockedVerifyWxAuthOnce).not.toHaveBeenCalled();
+  });
+
+  it("开关启用且已带 client-secret → 放行（小程序）", async () => {
+    mockedIsWxAuthEnforced.mockReturnValue(true);
+    mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "x-panhub-client-secret" ? "secret" : undefined
+    );
+    await expect(requireWxAuth(makeEvent())).resolves.toBeUndefined();
+    expect(mockedVerifyWxAuthOnce).not.toHaveBeenCalled();
+  });
+
+  it("开关启用、无凭证且未关注公众号 → 401", async () => {
+    mockedIsWxAuthEnforced.mockReturnValue(true);
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    let err: any;
+    try {
+      await requireWxAuth(makeEvent());
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.__isH3Error).toBe(true);
+    expect(err.statusCode).toBe(401);
+    expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
+  });
+
+  it("开关启用、校验通过 → 放行", async () => {
+    mockedIsWxAuthEnforced.mockReturnValue(true);
+    mockedVerifyWxAuthOnce.mockResolvedValue(true);
+    await expect(requireWxAuth(makeEvent())).resolves.toBeUndefined();
   });
 });
