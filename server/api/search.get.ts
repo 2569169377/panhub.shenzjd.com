@@ -21,7 +21,6 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 }
 import { requireSearchAuth } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
-import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -45,8 +44,8 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  // 后端自动记录搜索词（替代前端上报）
-  await recordSearchTerm(kw);
+  // GET 接口不记录搜索词（2026-08-22）：GET 无 CSRF/会话语义，主要被外部脚本与
+  // 爬虫探测使用，记录会污染热搜词库（sitemap 自举/刷词）。POST 接口才记录。
 
   let ext: Record<string, any> | undefined;
   const extStr = (q.ext as string | undefined)?.trim();
