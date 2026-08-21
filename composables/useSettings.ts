@@ -1,9 +1,5 @@
 import type { Ref } from "vue";
-import {
-  ALL_PLUGIN_NAMES,
-  DEFAULT_USER_SETTINGS,
-  STORAGE_KEYS,
-} from "~/config/plugins";
+import { DEFAULT_USER_SETTINGS } from "~/config/plugins";
 import channelsConfig from "~/config/channels.json";
 
 export interface UserSettings {
@@ -16,16 +12,7 @@ export interface UserSettings {
 export interface UseSettingsReturn {
   settings: Ref<UserSettings>;
   loadSettings: () => void;
-  saveSettings: () => void;
-  resetToDefault: () => void;
-  onSelectAll: () => void;
-  onClearAll: () => void;
-  onSelectAllTg: () => void;
-  onClearAllTg: () => void;
 }
-
-// 模块级守卫：useSettings() 在多个组件中调用，loadSettings() 只需执行一次
-let _settingsInitialized = false;
 
 function getDefaultSettings(defaultTgChannels: string[]): UserSettings {
   return {
@@ -36,6 +23,14 @@ function getDefaultSettings(defaultTgChannels: string[]): UserSettings {
   };
 }
 
+/**
+ * 用户设置（服务端默认下发版）。
+ *
+ * 2026-08-21：设置面板已移除 —— 频道/插件信息是核心资产，
+ * 未来由服务端接口与广告一起下发；客户端不再提供可配置入口，
+ * 也不再读取 localStorage 中的历史自定义配置（老用户配置立即失效，
+ * 搜索恒使用默认频道 + 全部插件）。
+ */
 export function useSettings(): UseSettingsReturn {
   const config = useRuntimeConfig();
 
@@ -52,120 +47,11 @@ export function useSettings(): UseSettingsReturn {
     getDefaultSettings(defaultTgChannels.value)
   );
 
-  function loadSettings(): void {
-    if (typeof window === "undefined") return;
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.settings);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return;
-
-      const validated: UserSettings = {
-        enabledTgChannels: Array.isArray(parsed.enabledTgChannels)
-          ? parsed.enabledTgChannels.filter((x: unknown) => typeof x === "string")
-          : [...(defaultTgChannels.value?.length ? defaultTgChannels.value : channelsConfig.defaultChannels)],
-        enabledPlugins: Array.isArray(parsed.enabledPlugins)
-          ? parsed.enabledPlugins
-              .filter((x: unknown) => typeof x === "string")
-              // 合并新增插件：老用户 localStorage 里只有旧名单，新加的插件自动启用
-              .concat(
-                ALL_PLUGIN_NAMES.filter(
-                  (n) => !parsed.enabledPlugins.includes(n)
-                )
-              )
-          : [...DEFAULT_USER_SETTINGS.enabledPlugins],
-        concurrency:
-          typeof parsed.concurrency === "number" && parsed.concurrency > 0
-            ? Math.min(16, Math.max(1, parsed.concurrency))
-            : DEFAULT_USER_SETTINGS.concurrency,
-        pluginTimeoutMs:
-          typeof parsed.pluginTimeoutMs === "number" && parsed.pluginTimeoutMs > 0
-            ? parsed.pluginTimeoutMs
-            : DEFAULT_USER_SETTINGS.pluginTimeoutMs,
-      };
-
-      validated.enabledPlugins = validated.enabledPlugins.filter((name) =>
-        ALL_PLUGIN_NAMES.includes(name as any)
-      );
-
-      if (
-        validated.enabledPlugins.length === 0 &&
-        validated.enabledTgChannels.length === 0
-      ) {
-        validated.enabledPlugins = [...DEFAULT_USER_SETTINGS.enabledPlugins];
-      }
-
-      settings.value = validated;
-    } catch (_error) {
-      // Silent failure
-    }
-  }
-
-  function saveSettings(): void {
-    if (typeof window === "undefined") return;
-
-    try {
-      localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings.value));
-    } catch (_error) {
-      // Silent failure
-    }
-  }
-
-  function resetToDefault(): void {
-    if (typeof window === "undefined") return;
-
-    try {
-      localStorage.removeItem(STORAGE_KEYS.settings);
-    } catch (_error) {
-      // Silent failure
-    }
-
-    settings.value = getDefaultSettings(
-      defaultTgChannels.value?.length ? defaultTgChannels.value : channelsConfig.defaultChannels
-    );
-
-    if (typeof window !== "undefined") {
-      window.location.reload();
-    }
-  }
-
-  function onSelectAll(): void {
-    settings.value.enabledPlugins = [...ALL_PLUGIN_NAMES];
-    saveSettings();
-  }
-
-  function onClearAll(): void {
-    settings.value.enabledPlugins = [];
-    saveSettings();
-  }
-
-  function onSelectAllTg(): void {
-    settings.value.enabledTgChannels = [
-      ...(defaultTgChannels.value?.length ? defaultTgChannels.value : channelsConfig.defaultChannels),
-    ];
-    saveSettings();
-  }
-
-  function onClearAllTg(): void {
-    settings.value.enabledTgChannels = [];
-    saveSettings();
-  }
-
-  if (typeof window !== "undefined" && !_settingsInitialized) {
-    _settingsInitialized = true;
-    loadSettings();
-  }
+  // 保留函数签名以兼容现有调用方；不再做任何本地持久化
+  function loadSettings(): void {}
 
   return {
     settings,
     loadSettings,
-    saveSettings,
-    resetToDefault,
-    onSelectAll,
-    onClearAll,
-    onSelectAllTg,
-    onClearAllTg,
   };
 }

@@ -68,13 +68,6 @@
             :aria-label="social.name"
             :title="social.name"
             v-html="social.icon" />
-          <!-- 设置按钮 -->
-          <button class="btn-icon" type="button" @click="openSettings = true" aria-label="打开设置" title="设置">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
         </div>
 
         <!-- 移动端下拉菜单 -->
@@ -116,17 +109,6 @@
       <FloatingQrHost />
     </ClientOnly>
 
-    <!-- 设置抽屉 -->
-    <ClientOnly>
-      <SettingsDrawer
-        v-model="settings"
-        v-model:open="openSettings"
-        :all-plugins="ALL_PLUGIN_NAMES"
-        :all-tg-channels="allTgChannels"
-        @save="saveSettings"
-        @reset-default="resetToDefault" />
-    </ClientOnly>
-
     <!-- Toast 通知 -->
     <div v-if="toast.show" class="toast" :class="toast.type" role="status" aria-live="polite">
       {{ toast.message }}
@@ -144,8 +126,6 @@
 </template>
 
 <script setup lang="ts">
-import { ALL_PLUGIN_NAMES } from "./config/plugins";
-import channelsConfig from "~/config/channels.json";
 // 暗色模式：阻塞脚本设置 class + CSS 文件引入
 useHead({
   link: [{ rel: "stylesheet", href: "/css/dark-mode.css" }],
@@ -156,11 +136,10 @@ useHead({
   ],
 });
 
-const { settings, loadSettings, saveSettings, resetToDefault } = useSettings();
+const { settings, loadSettings } = useSettings();
 const { toast, showToast } = useToast();
 const { isDark, toggle: toggleDark, init: initDarkMode } = useDarkMode();
 const auth = useAuth();
-const openSettings = ref(false);
 const showPasswordGate = ref(false);
 const showNavMenu = ref(false);
 
@@ -216,21 +195,6 @@ async function onUnlock(password: string) {
 }
 
 provide("requestUnlock", requestUnlock);
-
-// 所有可用的 TG 频道（用于设置面板）
-const allTgChannels = computed(() => {
-  const configChannels = (useRuntimeConfig().public as any)?.tgDefaultChannels;
-  return Array.isArray(configChannels) && configChannels.length > 0
-    ? configChannels
-    : channelsConfig.defaultChannels;
-});
-
-// 监听设置保存事件，显示提示
-watch(() => settings.value, (newVal, oldVal) => {
-  if (oldVal && newVal && JSON.stringify(newVal) !== JSON.stringify(oldVal)) {
-    showToast("设置已保存", "success");
-  }
-}, { deep: true });
 
 onMounted(() => {
   initDarkMode();
