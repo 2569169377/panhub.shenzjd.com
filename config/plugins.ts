@@ -39,9 +39,3 @@ export const DEFAULT_USER_SETTINGS = {
   concurrency: 4,
   pluginTimeoutMs: 5000,
 } as const;
-
-// 本地存储键名
-export const STORAGE_KEYS = {
-  settings: "panhub.settings",
-  searchMode: "searchMode",
-} as const;
