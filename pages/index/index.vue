@@ -275,7 +275,7 @@ const {
 } = useSearch();
 const { settings, loadSettings } = useSettings();
 const auth = useAuth();
-const { checkSearchAuth } = useWxAuth();
+const { checkSearchAuth, forceVerify } = useWxAuth();
 const requestUnlock = inject<(onSuccess?: () => void) => void>("requestUnlock");
 
 // 获取搜索选项（使用最新的用户设置）
@@ -304,8 +304,32 @@ async function doSearch() {
   }
   await performSearch({
     ...getSearchOptions(),
-    onAuthRequired: requestUnlock ?? undefined,
+    onAuthRequired: handleAuthRequired,
   });
+}
+
+// 搜索接口返回 401 时回调（2026-08-22）：
+// 服务端 requireWxAuth 实时校验失败（token 失效/取消关注）→ 强制重新吊起
+// 微信认证弹窗，认证成功后再重试搜索；密码门未解锁则走密码门。
+let wxAuthRetrying = false;
+async function handleAuthRequired() {
+  if (auth.locked.value && requestUnlock) {
+    requestUnlock(doSearch);
+    return;
+  }
+  // 防止一次搜索并发多个子请求同时触发多次弹窗
+  if (wxAuthRetrying) return;
+  wxAuthRetrying = true;
+  try {
+    // 强制重新认证（重置 isVerified，重新弹关注公众号弹窗）
+    const ok = await forceVerify();
+    if (ok) {
+      resetSearch();
+      await doSearch();
+    }
+  } finally {
+    wxAuthRetrying = false;
+  }
 }
 
 // 搜索执行
@@ -340,7 +364,7 @@ async function handleContinueSearch() {
       loadSettings();
       await continueSearch({
         ...getSearchOptions(),
-        onAuthRequired: requestUnlock ?? undefined,
+        onAuthRequired: handleAuthRequired,
       });
     });
     return;
@@ -348,7 +372,7 @@ async function handleContinueSearch() {
   loadSettings();
   await continueSearch({
     ...getSearchOptions(),
-    onAuthRequired: requestUnlock ?? undefined,
+    onAuthRequired: handleAuthRequired,
   });
 }
 
