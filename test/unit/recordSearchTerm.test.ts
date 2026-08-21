@@ -1,14 +1,16 @@
 /**
- * recordSearchTerm / isBotUA 单元测试
+ * recordSearchTerm / isBotUA / IP 节流 单元测试
  *
  * 验证：
  * - 爬虫/脚本 UA 命中时跳过热搜记录（切断 sitemap 自举循环与外部刷词）
  * - 正常浏览器 UA / 无 UA 正常记录
+ * - 同 IP 窗口超量丢弃（抗脚本换 UA 刷词底线）
  * - 词条格式校验（非法词不记录）
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { isBotUA, recordSearchTerm } from "../../server/utils/recordSearchTerm";
+import { isBotUA } from "../../utils/botUA";
+import { recordSearchTerm, isThrottledByIp, resetIpThrottle } from "../../server/utils/recordSearchTerm";
 
 // mock 热搜服务，避免测试触碰 Turso
 vi.mock("../../server/core/services/hotSearchService", () => ({
@@ -21,7 +23,7 @@ import { getOrCreateHotSearchService } from "../../server/core/services/hotSearc
 
 const mockedGetService = vi.mocked(getOrCreateHotSearchService);
 
-describe("isBotUA", () => {
+describe("isBotUA（共享 utils）", () => {
   it("识别主流搜索引擎爬虫", () => {
     expect(isBotUA("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")).toBe(true);
     expect(isBotUA("Baiduspider/2.0; +http://www.baidu.com/search/spider.html")).toBe(true);
@@ -63,9 +65,35 @@ describe("isBotUA", () => {
   });
 });
 
+describe("isThrottledByIp", () => {
+  beforeEach(() => {
+    resetIpThrottle();
+  });
+
+  it("窗口内前 20 条放行，超出丢弃", () => {
+    for (let i = 1; i <= 20; i++) {
+      expect(isThrottledByIp("1.2.3.4")).toBe(false);
+    }
+    expect(isThrottledByIp("1.2.3.4")).toBe(true);
+    expect(isThrottledByIp("1.2.3.4")).toBe(true);
+  });
+
+  it("不同 IP 独立计数", () => {
+    for (let i = 0; i < 30; i++) isThrottledByIp("5.6.7.8");
+    expect(isThrottledByIp("9.9.9.9")).toBe(false);
+    expect(isThrottledByIp("9.9.9.9")).toBe(false);
+  });
+
+  it("无 IP 放行", () => {
+    expect(isThrottledByIp(undefined)).toBe(false);
+    expect(isThrottledByIp(null)).toBe(false);
+  });
+});
+
 describe("recordSearchTerm", () => {
   beforeEach(() => {
     mockedGetService.mockClear();
+    resetIpThrottle();
   });
 
   it("正常浏览器 UA 记录搜索词", async () => {
@@ -88,6 +116,25 @@ describe("recordSearchTerm", () => {
   it("无 UA 仍记录（真实渠道兜底）", async () => {
     await recordSearchTerm("凡人修仙传", undefined);
     expect(mockedGetService).toHaveBeenCalledTimes(1);
+  });
+
+  it("同 IP 超量后跳过记录（抗刷底线）", async () => {
+    for (let i = 0; i < 20; i++) {
+      await recordSearchTerm(`词${i}`, "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36", "203.0.113.7");
+    }
+    expect(mockedGetService).toHaveBeenCalledTimes(20);
+    // 第 21 条同 IP 被节流丢弃
+    await recordSearchTerm("超量词", "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36", "203.0.113.7");
+    expect(mockedGetService).toHaveBeenCalledTimes(20);
+  });
+
+  it("节流不影响其他 IP 的记录", async () => {
+    for (let i = 0; i < 25; i++) {
+      await recordSearchTerm(`刷词${i}`, "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36", "198.51.100.9");
+    }
+    expect(mockedGetService).toHaveBeenCalledTimes(20);
+    await recordSearchTerm("正常用户", "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36", "198.51.100.10");
+    expect(mockedGetService).toHaveBeenCalledTimes(21);
   });
 
   it("非法词条不记录（空串/超长/特殊字符）", async () => {
