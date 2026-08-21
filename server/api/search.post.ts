@@ -22,6 +22,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
 import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
+import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
@@ -45,7 +46,7 @@ export default defineEventHandler(async (event) => {
 
   // 记录搜索词（2026-08-22：只要搜索就记录，便于排查）。
   // 防刷由入口 requireHumanOrCredential 承担（bot UA 403），本层不再过滤。
-  await recordSearchTerm(kw);
+  await recordSearchTerm(kw, getClientIp(event));
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
