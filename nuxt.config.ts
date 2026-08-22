@@ -50,6 +50,8 @@ export default defineNuxtConfig({
   routeRules: {
     // 热搜接口不缓存，否则 POST 写入后 GET 仍返回旧数据
     "/api/hot-searches": { swr: false, cache: false },
+    // 热搜日历含"今日搜索次数"等实时统计，禁缓存避免滞后
+    "/api/hot-calendar": { swr: false, cache: false },
     // 豆瓣热搜允许短时缓存（服务端已有 60 分钟 cache）
     "/api/douban-hot": { swr: false, cache: false },
     // 密码门接口不缓存，确保 POST body 正常处理
