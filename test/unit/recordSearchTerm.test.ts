@@ -87,10 +87,24 @@ describe("recordSearchTerm", () => {
     expect(mockedGetService).not.toHaveBeenCalled();
   });
 
-  it("URL 与标点词正常记录（不限制用户搜索什么）", async () => {
+  it("URL/绝对路径/控制字符/纯符号被过滤（2026-08-22 用户拍板：加格式校验）", async () => {
     await recordSearchTerm("https://example.com/share");
+    await recordSearchTerm("http://www.baidu.com");
+    await recordSearchTerm("www.example.com");
+    await recordSearchTerm("//cdn.example.com/a.js");
+    await recordSearchTerm("\\server\\share\\file");
+    await recordSearchTerm("!!!@@@###");
+    await recordSearchTerm("----");
+    expect(mockedGetService).not.toHaveBeenCalled();
+  });
+
+  it("含标点片名正常记录（不误杀真人）", async () => {
     await recordSearchTerm("哈利·波特与魔法石");
-    expect(mockService.recordSearch).toHaveBeenCalledTimes(2);
+    await recordSearchTerm("《繁花》");
+    await recordSearchTerm("猎冰-2024");
+    await recordSearchTerm("蜘蛛侠：英雄无归");
+    await recordSearchTerm("A·B+C 100%");
+    expect(mockService.recordSearch).toHaveBeenCalledTimes(5);
   });
 
   it("记录失败静默（不影响主流程，不抛错）", async () => {

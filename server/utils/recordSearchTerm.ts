@@ -12,6 +12,29 @@ const DEDUP_WINDOW_MS = 30_000;
 const MAX_TERM_LENGTH = 200;
 const recentTerms = new Map<string, number>();
 
+/**
+ * 词条格式过滤（2026-08-22 用户拍板：自己写过滤，排除明显非搜索内容）：
+ * - 排除 URL / 绝对路径（http://、https://、www.、//、/\ 开头）
+ * - 排除控制字符（不可见格式字符）
+ * - 排除纯符号/纯标点/纯空白（至少含一个中文、字母或数字才算"搜索词"）
+ * - 保留含标点片名（哈利·波特与魔法石、《繁花》等）——不重蹈 SAFE_TERM_RE 误杀覆辙
+ */
+const REJECT_URL_RE = /^(https?:\/\/|www\.|\/\/|\/\\|\\)/i;
+const HAS_CONTROL_CHAR_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const HAS_CONTENT_RE = /[\u4e00-\u9fa5a-zA-Z0-9]/;
+
+/** 词条是否应被过滤（返回 true 表示跳过不记录） */
+export function isRejectedTerm(term: string | null | undefined): boolean {
+  const t = (term || "").trim();
+  if (!t) return true;
+  if (t.length > MAX_TERM_LENGTH) return true;
+  if (REJECT_URL_RE.test(t)) return true;
+  if (HAS_CONTROL_CHAR_RE.test(t)) return true;
+  // 至少含一个中文/字母/数字，排除纯标点、纯符号垃圾
+  if (!HAS_CONTENT_RE.test(t)) return true;
+  return false;
+}
+
 /** 测试用：清空去重缓存 */
 export function resetTermDedup(): void {
   recentTerms.clear();
@@ -38,25 +61,26 @@ function isDuplicateWithinWindow(term: string, now: number): boolean {
  * search 接口内自动记录 —— 覆盖所有渠道（Web/MP/爬虫/API 直调），
  * 数据更全且不依赖客户端行为。
  *
- * 2026-08-22 策略（用户拍板）：**不限制用户搜索什么**——
- * - 去掉字符集/URL 等格式校验（此前 SAFE_TERM_RE 误杀"哈利·波特与魔法石"
- *   等含标点片名），用户搜什么都记录
- * - 仅保留：非空、长度上限（防滥用）、同词 30s 去重（防并发子请求重复计数）
- * - 敏感词过滤已移除（2026-08-22 用户拍板：彻底不限制用户搜索什么）
+ * 2026-08-22 策略：
+ * - 用户拍板"不限制用户搜索什么"：敏感词不过滤、含标点片名照常记录
+ * - 但用户补充拍板：加格式校验，排除明显非搜索内容（URL/控制字符/纯符号）
+ * - 保留：非空、长度上限（防滥用）、同词 30s 去重（防并发子请求重复计数）
  *
  * 防刷职责已前移到 search 接口入口（requireHumanOrCredential 对
  * bot UA 直接 403，连搜索都不执行），本层保证到达搜索的请求全部留痕。
  * 校验失败或写入失败均静默吞掉，绝不影响搜索主流程。
  */
 export async function recordSearchTerm(term: string, ip?: string | null): Promise<void> {
-  const t = (term || "").trim();
-  if (!t) {
+  if (isRejectedTerm(term)) {
+    const t = (term || "").trim();
+    if (t.length > MAX_TERM_LENGTH) {
+      loggers.hotSearch.warn(`跳过记录（超长）: ${t.length} chars`, ip ? { ip } : undefined);
+    } else {
+      loggers.hotSearch.warn(`跳过记录（词条非法）: ${JSON.stringify(term)}`, ip ? { ip } : undefined);
+    }
     return;
   }
-  if (t.length > MAX_TERM_LENGTH) {
-    loggers.hotSearch.warn(`跳过记录（超长）: ${t.length} chars`, ip ? { ip } : undefined);
-    return;
-  }
+  const t = term.trim();
   // 同词短窗口去重：前端并发子请求只记一次
   if (isDuplicateWithinWindow(t, Date.now())) {
     return;
