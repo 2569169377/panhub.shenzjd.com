@@ -93,7 +93,7 @@
     <!-- 公告条（全站导航栏下方；关闭后不再显示，改公告内容时升级 key 版本号重新展示） -->
     <div v-if="showAnnouncement" class="announce-bar" role="status">
       <span class="announce-bar__text">
-        📢 为节省服务器资源，默认搜索 <strong>50 条</strong>结果即自动暂停；
+        📢 为节省服务器资源，默认搜索 <strong>90 条</strong>结果即自动暂停；
         如需更多结果，点击「继续」即可继续搜索
       </span>
       <button class="announce-bar__close" type="button" @click="dismissAnnouncement" aria-label="关闭公告" title="关闭">✕</button>
@@ -215,8 +215,8 @@ function onDocumentClick(e: MouseEvent) {
   }
 }
 
-// 公告条（v1：搜索上限 50 自动暂停。改公告内容时升级 key 版本号，让已关闭用户重新看到）
-const ANNOUNCEMENT_KEY = "panhub:announcement-dismissed:v1";
+// 公告条（v2：搜索上限 50→90 自动暂停。改公告内容时升级 key 版本号，让已关闭用户重新看到）
+const ANNOUNCEMENT_KEY = "panhub:announcement-dismissed:v2";
 const showAnnouncement = ref(false);
 function checkAnnouncement() {
   try {

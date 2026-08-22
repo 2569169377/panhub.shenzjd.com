@@ -15,10 +15,10 @@ const devError = (...args: any[]) => {
 
 /**
  * 每轮搜索（首搜或每次"继续"）的累计结果上限：
- * 达到后自动暂停，不再发起剩余请求，用户点击"继续"再搜下一轮（阈值累进 +50）。
+ * 达到后自动暂停，不再发起剩余请求，用户点击"继续"再搜下一轮（阈值累进 +90）。
  * 大部分用户只看前几条，几百条结果纯浪费服务器资源（尤其 TG 真爬请求）。
  */
-const MAX_RESULTS_PER_ROUND = 50;
+const MAX_RESULTS_PER_ROUND = 90;
 
 export interface SearchOptions {
   apiBase: string;
