@@ -179,6 +179,43 @@ describe("TursoHotSearchStore", () => {
     expect(await store.getTotalSearches()).toBe(0);
   });
 
+  it("getTotalTerms 返回词库累计词数（全表 COUNT(*)）", async () => {
+    const now = Date.now();
+    await store.recordSearch("词A", now);
+    await store.recordSearch("词B", now);
+    await store.recordSearch("词C", now);
+    await store.recordSearch("词A", now); // 同词不新增行
+
+    expect(await store.getTotalTerms()).toBe(3);
+  });
+
+  it("getTotalTerms 空库返回 0", async () => {
+    expect(await store.getTotalTerms()).toBe(0);
+  });
+
+  it("recordDailySearches 累加指定日期的搜索次数", async () => {
+    await store.recordDailySearches("2026-08-22", 5);
+    await store.recordDailySearches("2026-08-22", 3);
+    await store.recordDailySearches("2026-08-21", 2);
+
+    expect(await store.getDailySearches("2026-08-22")).toBe(8);
+    expect(await store.getDailySearches("2026-08-21")).toBe(2);
+  });
+
+  it("getDailySearches 无记录返回 0", async () => {
+    expect(await store.getDailySearches("2026-08-22")).toBe(0);
+  });
+
+  it("clearHotSearches 同时清空 daily_stats", async () => {
+    const now = Date.now();
+    await store.recordSearch("清空词", now);
+    await store.recordDailySearches("2026-08-22", 10);
+
+    await store.clearHotSearches();
+    expect((await store.getHotSearches(10)).length).toBe(0);
+    expect(await store.getDailySearches("2026-08-22")).toBe(0);
+  });
+
   it("deleteHotSearch 删除与容错", async () => {
     const now = Date.now();
     await store.recordSearch("待删词", now);

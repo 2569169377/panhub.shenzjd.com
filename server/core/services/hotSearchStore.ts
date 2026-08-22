@@ -58,6 +58,23 @@ export interface IHotSearchStore {
   getTotalSearches(): Promise<number>;
 
   /**
+   * 获取词库累计词数（全表 COUNT(*)）
+   */
+  getTotalTerms(): Promise<number>;
+
+  /**
+   * 累加指定日期（北京时间 YYYY-MM-DD）的搜索次数（daily_stats 表，写放大极小）
+   * @param date  北京时间日期键
+   * @param delta 该日期新增搜索次数
+   */
+  recordDailySearches(date: string, delta: number): Promise<void>;
+
+  /**
+   * 读取指定日期（北京时间 YYYY-MM-DD）的搜索总次数；无记录返回 0
+   */
+  getDailySearches(date: string): Promise<number>;
+
+  /**
    * 获取指定日期的全量词单
    */
   getDayItems(date: string): Promise<DayTerm[]>;

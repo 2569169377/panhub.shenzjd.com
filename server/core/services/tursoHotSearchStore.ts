@@ -55,6 +55,10 @@ export class TursoHotSearchStore implements IHotSearchStore {
       )`,
       "CREATE INDEX IF NOT EXISTS idx_search_terms_last ON search_terms(last_at DESC)",
       "CREATE INDEX IF NOT EXISTS idx_search_terms_count ON search_terms(count DESC)",
+      `CREATE TABLE IF NOT EXISTS daily_stats (
+        date TEXT PRIMARY KEY,
+        searches INTEGER NOT NULL DEFAULT 0
+      )`,
     ]);
     // hot_searches 表已废弃（2026-08-18）：生产 API 全部只读 search_terms，
     // 热搜写入只落 search_terms 一张表（原双表每次搜索写 2 行 → 1 行，省一半写入配额）
@@ -159,7 +163,10 @@ export class TursoHotSearchStore implements IHotSearchStore {
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
-    await this.client.execute("DELETE FROM search_terms");
+    await this.client.batch([
+      "DELETE FROM search_terms",
+      "DELETE FROM daily_stats",
+    ]);
     return { success: true, message: "热搜记录已清除" };
   }
 
@@ -278,6 +285,33 @@ export class TursoHotSearchStore implements IHotSearchStore {
     await this.waitForInit();
     const row = (
       await this.client.execute("SELECT COALESCE(SUM(count), 0) as s FROM search_terms")
+    ).rows[0];
+    return (row?.s ?? 0) as number;
+  }
+
+  async getTotalTerms(): Promise<number> {
+    await this.waitForInit();
+    const row = (
+      await this.client.execute("SELECT COUNT(*) as c FROM search_terms")
+    ).rows[0];
+    return (row?.c ?? 0) as number;
+  }
+
+  async recordDailySearches(date: string, delta: number): Promise<void> {
+    await this.waitForInit();
+    const d = Math.max(0, delta);
+    if (d === 0) return;
+    await this.client.execute(
+      `INSERT INTO daily_stats (date, searches) VALUES (?, ?)
+       ON CONFLICT(date) DO UPDATE SET searches = searches + excluded.searches`,
+      [date, d]
+    );
+  }
+
+  async getDailySearches(date: string): Promise<number> {
+    await this.waitForInit();
+    const row = (
+      await this.client.execute("SELECT searches as s FROM daily_stats WHERE date = ?", [date])
     ).rows[0];
     return (row?.s ?? 0) as number;
   }

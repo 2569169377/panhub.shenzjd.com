@@ -1,9 +1,10 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getOrCreateHotSearchService } from "../core/services/hotSearchService";
+import { formatDateKey } from "../core/services/hotSearchUtils";
 
 /**
  * 每日榜单日历：近 N 天每天的词数与 top3（供日历热力图使用）
- * 附带历史累计搜索总次数（全表 SUM(count)），供页面量级展示。
+ * 附带量级统计：历史累计搜索总次数 / 词库累计词数 / 今日搜索次数 / 今日搜索词数。
  * GET /api/hot-calendar?days=30
  */
 export default defineEventHandler(async (event) => {
@@ -20,18 +21,35 @@ export default defineEventHandler(async (event) => {
     return {
       code: 0,
       message: "success",
-      data: { days: [], totalSearches: 0, configured: false },
+      data: {
+        days: [],
+        totalSearches: 0,
+        totalTerms: 0,
+        todaySearches: 0,
+        todayTerms: 0,
+        configured: false,
+      },
     };
   }
 
-  const [daysData, totalSearches] = await Promise.all([
+  const today = formatDateKey(Date.now());
+  const [daysData, totalSearches, totalTerms, todaySearches] = await Promise.all([
     service.getCalendar(days),
     service.getTotalSearches(),
+    service.getTotalTerms(),
+    service.getDailySearches(today),
   ]);
 
   return {
     code: 0,
     message: "success",
-    data: { days: daysData, totalSearches, configured: true },
+    data: {
+      days: daysData,
+      totalSearches,
+      totalTerms,
+      todaySearches,
+      todayTerms: daysData.find((d) => d.date === today)?.count ?? 0,
+      configured: true,
+    },
   };
 });

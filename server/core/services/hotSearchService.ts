@@ -1,6 +1,6 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
-import { normalize } from "./hotSearchUtils";
+import { normalize, formatDateKey } from "./hotSearchUtils";
 
 /**
  * 写聚合缓冲配置
@@ -121,8 +121,15 @@ export class HotSearchService {
       await this.waitForInit();
       const store = this.store;
       if (!store) return; // 未配置 Turso：静默丢弃缓冲（热搜尽力而为），错误已在 waitForInit 记录一次
+      // 按日期聚合增量（用于 daily_stats 每日搜索次数，写放大极小：每天仅一条 upsert）
+      const dailyDelta = new Map<string, number>();
       for (const [term, p] of snapshot) {
         await store.recordSearch(term, p.lastAt, p.delta);
+        const day = formatDateKey(p.lastAt);
+        dailyDelta.set(day, (dailyDelta.get(day) ?? 0) + p.delta);
+      }
+      for (const [day, delta] of dailyDelta) {
+        await store.recordDailySearches(day, delta);
       }
     })()
       .catch((err) => {
@@ -222,6 +229,16 @@ export class HotSearchService {
   async getTotalSearches(): Promise<number> {
     await this.waitForInit();
     return this.requireStore().getTotalSearches();
+  }
+
+  async getTotalTerms(): Promise<number> {
+    await this.waitForInit();
+    return this.requireStore().getTotalTerms();
+  }
+
+  async getDailySearches(date: string): Promise<number> {
+    await this.waitForInit();
+    return this.requireStore().getDailySearches(date);
   }
 
   getStoreType(): "turso" | "unavailable" {
