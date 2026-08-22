@@ -7,20 +7,25 @@
         <h1 class="title">每一天，大家在搜什么</h1>
         <p class="desc">按天记录全网用户的真实搜索词 · 点击日期查看当天全部搜索词 · 点击词条立即搜索</p>
 
-        <!-- 量级统计：累计搜索总次数 + 30 天词量 -->
-        <div v-if="totalSearches > 0" class="hero-stats">
+        <!-- 量级统计：累计/今日 × 次数/词数 -->
+        <div v-if="totalSearches > 0 || totalTerms > 0" class="hero-stats">
           <div class="hero-stat">
             <span class="hero-stat__num">{{ formatNum(totalSearches) }}</span>
             <span class="hero-stat__label">累计搜索次数</span>
           </div>
           <div class="hero-stat__sep"></div>
           <div class="hero-stat">
-            <span class="hero-stat__num">{{ formatNum(monthTerms) }}</span>
-            <span class="hero-stat__label">近 {{ days.length }} 天搜索词数</span>
+            <span class="hero-stat__num">{{ formatNum(totalTerms) }}</span>
+            <span class="hero-stat__label">累计搜索词数</span>
           </div>
           <div class="hero-stat__sep"></div>
           <div class="hero-stat">
-            <span class="hero-stat__num">{{ todayCount }}</span>
+            <span class="hero-stat__num">{{ formatNum(todaySearches) }}</span>
+            <span class="hero-stat__label">今日搜索次数</span>
+          </div>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(todayCount) }}</span>
             <span class="hero-stat__label">今日搜索词数</span>
           </div>
         </div>
@@ -236,6 +241,8 @@ const calendarLoading = ref(false);
 const dayLoading = ref(false);
 const refreshing = ref(false);
 const totalSearches = ref(0);
+const totalTerms = ref(0);
+const todaySearches = ref(0);
 const calendarRef = ref<HTMLElement | null>(null);
 const canScrollLeft = ref(false);
 const canScrollRight = ref(false);
@@ -246,9 +253,6 @@ const todayKey = computed(() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 });
-
-/** 近 N 天累计搜索词数（日历格子数字之和，注意是词数而非次数） */
-const monthTerms = computed(() => days.value.reduce((sum, d) => sum + d.count, 0));
 
 /** 今日搜索词数（日历最后一天，即今天；无今天数据时回退 0） */
 const todayCount = computed(() => {
@@ -300,6 +304,8 @@ async function loadCalendar() {
     const data = await res.json();
     days.value = data.code === 0 ? data.data.days : [];
     totalSearches.value = data.code === 0 ? (data.data.totalSearches ?? 0) : 0;
+    totalTerms.value = data.code === 0 ? (data.data.totalTerms ?? 0) : 0;
+    todaySearches.value = data.code === 0 ? (data.data.todaySearches ?? 0) : 0;
     // 默认选中今天（日历最后一天）；今天无数据则选有数据的最近一天
     const today = todayKey.value;
     const hasToday = days.value.some((d) => d.date === today && d.count > 0);
