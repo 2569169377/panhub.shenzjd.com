@@ -67,16 +67,6 @@ jobs:
             sudo mkdir -p "$DATA_DIR"
             sudo chmod 777 "$DATA_DIR"
 
-            echo "=== 确保 .env 含 WX_AUTH_ENFORCE（幂等追加）==="
-            ENV_FILE="$DATA_DIR/.env"
-            sudo touch "$ENV_FILE"
-            if ! sudo grep -q "^WX_AUTH_ENFORCE=" "$ENV_FILE"; then
-              echo 'WX_AUTH_ENFORCE=1' | sudo tee -a "$ENV_FILE" >/dev/null
-              echo "已追加 WX_AUTH_ENFORCE=1 到 $ENV_FILE"
-            else
-              echo "WX_AUTH_ENFORCE 已存在，跳过"
-            fi
-
             echo "=== 启动新容器 ==="
             # 资源上限：OOM 只杀容器（restart 拉起），不拖垮 2GB 宿主机；
             # 与 Dockerfile NODE_OPTIONS=--max-old-space-size=512 对齐；
