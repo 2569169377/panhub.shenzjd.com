@@ -76,6 +76,7 @@ jobs:
               --restart unless-stopped \
               -p 5253:4000 \
               -e TRUST_PROXY=1 \
+              -e WX_AUTH_ENFORCE=1 \
               --memory 768m \
               --cpus "1.0" \
               --log-opt max-size=10m \
