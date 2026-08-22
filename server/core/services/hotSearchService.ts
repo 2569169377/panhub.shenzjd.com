@@ -121,13 +121,16 @@ export class HotSearchService {
       await this.waitForInit();
       const store = this.store;
       if (!store) return; // 未配置 Turso：静默丢弃缓冲（热搜尽力而为），错误已在 waitForInit 记录一次
+      // 按日期聚合增量（daily_searches 精确计数：从部署起每天一次 upsert，写放大极小）
+      const dailyDelta = new Map<string, number>();
       for (const [term, p] of snapshot) {
         await store.recordSearch(term, p.lastAt, p.delta);
+        const day = formatDateKey(p.lastAt);
+        dailyDelta.set(day, (dailyDelta.get(day) ?? 0) + p.delta);
       }
-      // 重算今天的 daily_stats（保持今天实时反映 current 累计 count 之和）。
-      // 历史日期的口径由回填脚本一次性灌入；flush 只更新今天一行，避免叠加失真。
-      const today = formatDateKey(Date.now());
-      await store.recomputeDailySearches(today);
+      for (const [day, delta] of dailyDelta) {
+        await store.recordDailySearches(day, delta);
+      }
     })()
       .catch((err) => {
         console.log(
@@ -238,38 +241,10 @@ export class HotSearchService {
     return this.requireStore().getDailySearches(date);
   }
 
-  /** 一次性回填所有历史日期的 daily_stats（按 last_at 分组 SUM count）。返回写入的天数。 */
-  async backfillDailyStats(): Promise<number> {
+  /** 已精确记录搜索次数的天数（< 7 天时前端不展示次数，只展示词数） */
+  async getDailySearchesDayCount(): Promise<number> {
     await this.waitForInit();
-    return this.requireStore().backfillDailyStats();
-  }
-
-  /**
-   * 幂等保证：若 daily_stats 完全空（表刚建/被 clear），自动回填一遍。
-   * 用本地标志防止每次请求都回填；进程重启后标志重置，会再次保证。
-   */
-  private dailyStatsBackfilled = false;
-  async ensureDailyStatsBackfilled(): Promise<void> {
-    if (this.dailyStatsBackfilled) return;
-    if (!(await this.isReady())) return;
-    const today = formatDateKey(Date.now());
-    const todayVal = await this.getDailySearches(today);
-    // 今日行已存在说明已回填（任何历史日期必有数据）
-    if (todayVal > 0) {
-      this.dailyStatsBackfilled = true;
-      return;
-    }
-    // 今日行 = 0 时回填一遍历史；flush 后续仍会重算今天
-    try {
-      const written = await this.backfillDailyStats();
-      console.log(`[HotSearchService] daily_stats 自动回填：${written} 个日期`);
-      this.dailyStatsBackfilled = true;
-    } catch (err) {
-      console.log(
-        "[HotSearchService] daily_stats 自动回填失败:",
-        err instanceof Error ? err.message : err
-      );
-    }
+    return this.requireStore().getDailySearchesDayCount();
   }
 
   getStoreType(): "turso" | "unavailable" {

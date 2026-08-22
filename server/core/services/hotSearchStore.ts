@@ -63,26 +63,23 @@ export interface IHotSearchStore {
   getTotalTerms(): Promise<number>;
 
   /**
-   * 重算指定日期（北京时间 YYYY-MM-DD）的"该日活跃词累计计数之和"，
-   * 写回 daily_stats(date)。语义：date 这天活跃过的所有词的 count 之和。
-   *
-   * **口径**：近似值（非精确的新增搜索次数），因为 search_terms.count 是
-   * 历史累计值，无法从中分离出"某一天新增了多少次"。优点：可一次性回填
-   * 所有历史日期，立刻产生有量感的数字；全表 SUM 恒等于 totalSearches。
+   * 累加指定日期（北京时间 YYYY-MM-DD）的搜索次数（daily_searches 表，精确增量）
+   * 从部署起每次搜索 +delta，是"今日搜索次数"的可靠数据源（无历史回填，避免虚高）。
+   * @param date  北京时间日期键
+   * @param delta 该日期新增搜索次数（flush 聚合后的真实次数）
    */
-  recomputeDailySearches(date: string): Promise<void>;
+  recordDailySearches(date: string, delta: number): Promise<void>;
 
   /**
-   * 读取 daily_stats 某一天的值；无记录返回 0
+   * 读取指定日期的搜索次数（daily_searches）；无记录返回 0
    */
   getDailySearches(date: string): Promise<number>;
 
   /**
-   * 一次性回填所有历史日期的 daily_stats（按 last_at 分组 SUM count）。
-   * 由 service.flush 调用 rec… 维持当日实时值，历史日期由本函数灌入。
-   * 返回写入的天数。
+   * 搜索次数是否已积累足够（记录天数 >= minDays 才可展示，用户拍板：攒一星期再展示）
+   * 返回 daily_searches 中有记录的天数
    */
-  backfillDailyStats(): Promise<number>;
+  getDailySearchesDayCount(): Promise<number>;
 
   /**
    * 获取指定日期的全量词单

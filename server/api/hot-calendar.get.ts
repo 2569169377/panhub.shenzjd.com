@@ -4,8 +4,13 @@ import { formatDateKey } from "../core/services/hotSearchUtils";
 
 /**
  * 每日榜单日历：近 N 天每天的词数与 top3（供日历热力图使用）
- * 附带量级统计：历史累计搜索总次数 / 词库累计词数 / 今日搜索次数 / 今日搜索词数。
+ * 附带量级统计：累计词数 / 今日词数（精确），以及从部署起精确记录的每日搜索次数。
  * GET /api/hot-calendar?days=30
+ *
+ * 搜索次数口径（2026-08-22 用户拍板）：
+ * - search_terms.count 是每词历史累计值，无法精确拆分"今日新增"→ 不展示累计搜索次数
+ * - 新增 daily_searches 表：从部署起每次搜索 +delta 精确记录，攒满 7 天（searchesReady）
+ *   前端才展示今日搜索次数，避免 0 或虚高误导
  */
 export default defineEventHandler(async (event) => {
   const service = getOrCreateHotSearchService();
@@ -23,35 +28,34 @@ export default defineEventHandler(async (event) => {
       message: "success",
       data: {
         days: [],
-        totalSearches: 0,
         totalTerms: 0,
-        todaySearches: 0,
         todayTerms: 0,
+        todaySearches: 0,
+        searchesReady: false,
         configured: false,
       },
     };
   }
 
-  // 幂等：daily_stats 表空时自动回填一遍（首次部署/clear 后）
-  await service.ensureDailyStatsBackfilled();
-
   const today = formatDateKey(Date.now());
-  const [daysData, totalSearches, totalTerms, todaySearches] = await Promise.all([
+  const [daysData, totalTerms, todaySearches, searchesDayCount] = await Promise.all([
     service.getCalendar(days),
-    service.getTotalSearches(),
     service.getTotalTerms(),
     service.getDailySearches(today),
+    service.getDailySearchesDayCount(),
   ]);
+
+  const todayTerms = daysData.find((d) => d.date === today)?.count ?? 0;
 
   return {
     code: 0,
     message: "success",
     data: {
       days: daysData,
-      totalSearches,
       totalTerms,
+      todayTerms,
       todaySearches,
-      todayTerms: daysData.find((d) => d.date === today)?.count ?? 0,
+      searchesReady: searchesDayCount >= 7,
       configured: true,
     },
   };

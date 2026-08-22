@@ -166,29 +166,19 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     expect(total).toBe(3);
   });
 
-  it("flush 时重算今日 daily_stats（按 last_at 分组 SUM count）", async () => {
+  it("flush 时按日期精确聚合写入 daily_searches（部署起计数）", async () => {
     await service.clearHotSearches();
-    await service.recordSearch("重算词A");
-    await service.recordSearch("重算词A");
-    await service.recordSearch("重算词B");
+    await service.recordSearch("日词A");
+    await service.recordSearch("日词A");
+    await service.recordSearch("日词B");
     await service.flush();
 
     const today = new Date(Date.now() + 8 * 3600 * 1000);
     const pad = (n: number) => String(n).padStart(2, "0");
     const todayKey = `${today.getUTCFullYear()}-${pad(today.getUTCMonth() + 1)}-${pad(today.getUTCDate())}`;
 
-    // 今日活跃词的 count 之和：重算词A=2 + 重算词B=1 = 3
-    const daily = await service.getDailySearches(todayKey);
-    expect(daily).toBe(3);
-  });
-
-  it("backfillDailyStats 服务层透传（store 内存库）冒烟", async () => {
-    await service.clearHotSearches();
-    await service.recordSearch("回填词");
-    await service.flush();
-
-    const written = await service.backfillDailyStats();
-    expect(written).toBeGreaterThanOrEqual(1);
+    // 今日精确次数：词A 2 次 + 词B 1 次 = 3
+    expect(await service.getDailySearches(todayKey)).toBe(3);
   });
 
   it("应该返回词库累计词数（service 层转发冒烟）", async () => {
