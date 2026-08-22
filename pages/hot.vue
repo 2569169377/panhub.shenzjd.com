@@ -21,7 +21,9 @@
           <div class="hero-stat__sep"></div>
           <div class="hero-stat">
             <span class="hero-stat__num">{{ formatNum(todaySearches) }}</span>
-            <span class="hero-stat__label">今日搜索次数</span>
+            <span
+              class="hero-stat__label"
+              title="今日活跃词的累计搜索次数之和（含历史）。全表总和等于累计搜索次数，是守恒近似口径。">今日搜索次数</span>
           </div>
           <div class="hero-stat__sep"></div>
           <div class="hero-stat">
