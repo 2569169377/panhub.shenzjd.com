@@ -153,4 +153,16 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
       expect(s.term.length).toBeGreaterThan(0);
     }
   });
+
+  it("应该返回历史累计搜索总次数（service 层转发冒烟）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("总量词A");
+    await service.recordSearch("总量词A");
+    await service.recordSearch("总量词B");
+    await service.flush();
+
+    const total = await service.getTotalSearches();
+    // 词A count=2 + 词B count=1 = 3
+    expect(total).toBe(3);
+  });
 });

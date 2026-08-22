@@ -274,6 +274,14 @@ export class TursoHotSearchStore implements IHotSearchStore {
     }));
   }
 
+  async getTotalSearches(): Promise<number> {
+    await this.waitForInit();
+    const row = (
+      await this.client.execute("SELECT COALESCE(SUM(count), 0) as s FROM search_terms")
+    ).rows[0];
+    return (row?.s ?? 0) as number;
+  }
+
   close(): void {
     try {
       this.client.close();

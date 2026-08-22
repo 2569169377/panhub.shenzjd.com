@@ -164,6 +164,21 @@ describe("TursoHotSearchStore", () => {
     expect(items[0]).toEqual({ term: "日词2", rank: 1, count: 2 });
   });
 
+  it("getTotalSearches 返回历史累计搜索总次数（全表 SUM(count)）", async () => {
+    const now = Date.now();
+    await store.recordSearch("词A", now, 3);
+    await store.recordSearch("词B", now, 2);
+    await store.recordSearch("词C", now, 5);
+    await store.recordSearch("词A", now, 4); // 累计 count 合并：词A 3+4=7
+
+    const total = await store.getTotalSearches();
+    expect(total).toBe(7 + 2 + 5); // 14
+  });
+
+  it("getTotalSearches 空库返回 0", async () => {
+    expect(await store.getTotalSearches()).toBe(0);
+  });
+
   it("deleteHotSearch 删除与容错", async () => {
     const now = Date.now();
     await store.recordSearch("待删词", now);

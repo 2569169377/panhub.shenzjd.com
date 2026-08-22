@@ -52,6 +52,12 @@ export interface IHotSearchStore {
   getCalendar(days: number): Promise<DaySnapshot[]>;
 
   /**
+   * 获取历史累计搜索总次数（全表 SUM(count)）
+   * count 为每个词的累计搜索次数，全表求和即从建库以来所有搜索次数的总和。
+   */
+  getTotalSearches(): Promise<number>;
+
+  /**
    * 获取指定日期的全量词单
    */
   getDayItems(date: string): Promise<DayTerm[]>;

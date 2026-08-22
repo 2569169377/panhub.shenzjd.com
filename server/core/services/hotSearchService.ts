@@ -219,6 +219,11 @@ export class HotSearchService {
     return this.requireStore().getDayItems(date);
   }
 
+  async getTotalSearches(): Promise<number> {
+    await this.waitForInit();
+    return this.requireStore().getTotalSearches();
+  }
+
   getStoreType(): "turso" | "unavailable" {
     return this.storeType;
   }
