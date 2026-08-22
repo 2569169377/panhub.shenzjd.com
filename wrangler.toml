@@ -11,8 +11,9 @@ binding = "ASSETS"
 [vars]
 LOG_LEVEL = "info"
 # 微信关注公众号登录态校验开关（2026-08-22）：1=服务端实时校验 wxauth cookie，
-# 未关注/取消关注的搜索请求 401；脚本直调 API 无法绕过。默认关闭。
-WX_AUTH_ENFORCE = "1"
+# 未关注/取消关注的搜索请求 401。暂置 0 恢复线上（已认证用户被 401 的根因
+# 待查：wxauth cookie 未传到服务端或 token 失效），查清后再开。
+WX_AUTH_ENFORCE = "0"
 # 热搜存储已迁移到 Turso（2026-08-18，D1 已删除）：
 # Worker 通过 `wrangler secret put TURSO_URL` / `wrangler secret put TURSO_AUTH_TOKEN` 注入连接信息，
 # Docker 侧在服务器 .env 配置同样的 TURSO_URL / TURSO_AUTH_TOKEN。
