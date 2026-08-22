@@ -6,6 +6,24 @@
         <div class="badge">PanHub 热搜日历</div>
         <h1 class="title">每一天，大家在搜什么</h1>
         <p class="desc">按天记录全网用户的真实搜索词 · 点击日期查看当天全部搜索词 · 点击词条立即搜索</p>
+
+        <!-- 量级统计：累计搜索总次数 + 30 天词量 -->
+        <div v-if="totalSearches > 0" class="hero-stats">
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(totalSearches) }}</span>
+            <span class="hero-stat__label">累计搜索次数</span>
+          </div>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(monthTerms) }}</span>
+            <span class="hero-stat__label">近 {{ days.length }} 天搜索词数</span>
+          </div>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ todayCount }}</span>
+            <span class="hero-stat__label">今日搜索词数</span>
+          </div>
+        </div>
       </div>
       <button
         class="refresh-btn"
@@ -30,44 +48,83 @@
           <span>日历加载中…</span>
         </div>
 
-        <div v-else-if="days.length > 0" class="calendar-wrap">
-          <button
-            class="cal-arrow"
-            type="button"
-            :disabled="!canScrollLeft"
-            aria-label="查看更早日期"
-            title="查看更早日期"
-            @click="scrollCalendar(-1)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
-          </button>
-
-          <div ref="calendarRef" class="calendar" @scroll="onCalendarScroll">
+        <div v-else-if="days.length > 0" class="calendar-section">
+          <div class="calendar-wrap">
             <button
-              v-for="d in days"
-              :key="d.date"
-              class="cal-cell"
-              :class="[
-                { 'cal-cell--active': selected === d.date },
-                { 'cal-cell--future': d.date > todayKey },
-              ]"
+              class="cal-arrow"
               type="button"
-              :title="cellTitle(d)"
-              :aria-label="cellTitle(d)"
-              @click="selectDate(d.date)">
-              <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
-              <span v-if="d.count > 0" class="cal-cell__count">{{ d.count }}</span>
+              :disabled="!canScrollLeft"
+              aria-label="查看更早日期"
+              title="查看更早日期"
+              @click="scrollCalendar(-1)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+
+            <div ref="calendarRef" class="calendar" @scroll="onCalendarScroll">
+              <button
+                v-for="d in days"
+                :key="d.date"
+                class="cal-cell"
+                :class="[
+                  { 'cal-cell--active': selected === d.date },
+                  { 'cal-cell--future': d.date > todayKey },
+                ]"
+                type="button"
+                :title="cellTitle(d)"
+                :aria-label="cellTitle(d)"
+                @click="selectDate(d.date)">
+                <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
+                <span v-if="d.count > 0" class="cal-cell__count">{{ d.count }}</span>
+              </button>
+            </div>
+
+            <button
+              class="cal-arrow"
+              type="button"
+              :disabled="!canScrollRight"
+              aria-label="查看更新日期"
+              title="查看更新日期"
+              @click="scrollCalendar(1)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
           </div>
 
-          <button
-            class="cal-arrow"
-            type="button"
-            :disabled="!canScrollRight"
-            aria-label="查看更新日期"
-            title="查看更新日期"
-            @click="scrollCalendar(1)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-          </button>
+          <!-- 30 天搜索词数趋势 sparkline（选中日高亮） -->
+          <div v-if="sparkPoints.length > 1" class="sparkline">
+            <svg
+              class="sparkline__svg"
+              :viewBox="`0 0 ${sparkW} ${sparkH}`"
+              preserveAspectRatio="none"
+              role="img"
+              :aria-label="`近 ${days.length} 天每日搜索词数趋势`">
+              <polyline
+                :points="sparkLine"
+                fill="none"
+                stroke="var(--primary)"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round" />
+              <line
+                v-if="sparkSelectedIndex >= 0"
+                :x1="sparkX(sparkSelectedIndex)"
+                :x2="sparkX(sparkSelectedIndex)"
+                :y1="4"
+                :y2="sparkH - 4"
+                stroke="var(--primary)"
+                stroke-width="1"
+                stroke-dasharray="3 3"
+                stroke-opacity="0.4" />
+              <circle
+                v-if="sparkSelectedIndex >= 0"
+                :cx="sparkX(sparkSelectedIndex)"
+                :cy="sparkY(sparkPoints[sparkSelectedIndex])"
+                r="3.5"
+                fill="var(--primary)"
+                stroke="var(--bg-surface)"
+                stroke-width="1.5" />
+            </svg>
+            <span class="sparkline__hint">近 {{ days.length }} 天搜索词数趋势</span>
+          </div>
         </div>
 
         <div v-else class="panel-empty">
@@ -178,14 +235,57 @@ const view = ref<"cloud" | "list">("cloud");
 const calendarLoading = ref(false);
 const dayLoading = ref(false);
 const refreshing = ref(false);
+const totalSearches = ref(0);
 const calendarRef = ref<HTMLElement | null>(null);
 const canScrollLeft = ref(false);
 const canScrollRight = ref(false);
+
+/* ---------- 量级统计 ---------- */
 
 const todayKey = computed(() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 });
+
+/** 近 N 天累计搜索词数（日历格子数字之和，注意是词数而非次数） */
+const monthTerms = computed(() => days.value.reduce((sum, d) => sum + d.count, 0));
+
+/** 今日搜索词数（日历最后一天，即今天；无今天数据时回退 0） */
+const todayCount = computed(() => {
+  const t = days.value.find((d) => d.date === todayKey.value);
+  return t?.count ?? 0;
+});
+
+/* ---------- sparkline（近 N 天每日搜索词数趋势） ---------- */
+
+const sparkW = 600;
+const sparkH = 44;
+
+const sparkPoints = computed(() => days.value.map((d) => d.count));
+
+/** 当前选中日期在 sparkline 中的索引（无则 -1） */
+const sparkSelectedIndex = computed(() => days.value.findIndex((d) => d.date === selected.value));
+
+function sparkX(i: number): number {
+  const n = sparkPoints.value.length;
+  if (n <= 1) return sparkW / 2;
+  const pad = 4;
+  return pad + (i / (n - 1)) * (sparkW - pad * 2);
+}
+
+function sparkY(v: number): number {
+  const max = Math.max(...sparkPoints.value, 1);
+  const pad = 6;
+  return sparkH - pad - (v / max) * (sparkH - pad * 2);
+}
+
+const sparkLine = computed(() =>
+  sparkPoints.value.map((v, i) => `${sparkX(i).toFixed(1)},${sparkY(v).toFixed(1)}`).join(" ")
+);
+
+function formatNum(n: number): string {
+  return n.toLocaleString("zh-CN");
+}
 
 const selectedTitle = computed(() => {
   if (!selected.value) return "当日搜索词";
@@ -199,6 +299,7 @@ async function loadCalendar() {
     const res = await fetch("/api/hot-calendar?days=30");
     const data = await res.json();
     days.value = data.code === 0 ? data.data.days : [];
+    totalSearches.value = data.code === 0 ? (data.data.totalSearches ?? 0) : 0;
     // 默认选中今天（日历最后一天）；今天无数据则选有数据的最近一天
     const today = todayKey.value;
     const hasToday = days.value.some((d) => d.date === today && d.count > 0);
@@ -353,6 +454,41 @@ onMounted(() => {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+/* 量级统计条 */
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hero-stat__num {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-stat__label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.hero-stat__sep {
+  width: 1px;
+  height: 26px;
+  background: var(--border-light);
 }
 
 .refresh-btn {
@@ -550,6 +686,27 @@ onMounted(() => {
 
 .cal-cell--future .cal-cell__count {
   color: transparent;
+}
+
+/* sparkline 趋势图 */
+.sparkline {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-light);
+}
+
+.sparkline__svg {
+  display: block;
+  width: 100%;
+  height: 44px;
+}
+
+.sparkline__hint {
+  display: block;
+  margin-top: 4px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 /* 词云 */
