@@ -297,14 +297,23 @@ export class TursoHotSearchStore implements IHotSearchStore {
     return (row?.c ?? 0) as number;
   }
 
-  async recordDailySearches(date: string, delta: number): Promise<void> {
+  async recomputeDailySearches(date: string): Promise<void> {
     await this.waitForInit();
-    const d = Math.max(0, delta);
-    if (d === 0) return;
+    const start = beijingDayStart(date);
+    const end = start + 86400000;
+    // 该日期活跃过的所有词的累计 count 之和（每个词只被 last_at 单日计入一次）
+    const row = (
+      await this.client.execute(
+        `SELECT COALESCE(SUM(count), 0) as s FROM search_terms
+         WHERE last_at >= ? AND last_at < ?`,
+        [start, end]
+      )
+    ).rows[0];
+    const sum = (row?.s ?? 0) as number;
     await this.client.execute(
       `INSERT INTO daily_stats (date, searches) VALUES (?, ?)
-       ON CONFLICT(date) DO UPDATE SET searches = searches + excluded.searches`,
-      [date, d]
+       ON CONFLICT(date) DO UPDATE SET searches = excluded.searches`,
+      [date, sum]
     );
   }
 
@@ -314,6 +323,35 @@ export class TursoHotSearchStore implements IHotSearchStore {
       await this.client.execute("SELECT searches as s FROM daily_stats WHERE date = ?", [date])
     ).rows[0];
     return (row?.s ?? 0) as number;
+  }
+
+  /**
+   * 一次性回填所有历史日期的 daily_stats（按 last_at 北京时间日分组 SUM count）。
+   * 用于在 daily_stats 表新建后立刻灌入历史；flush 的 recompute 只更新今天一行，
+   * 避免叠加失真。
+   */
+  async backfillDailyStats(): Promise<number> {
+    await this.waitForInit();
+    const rows = (
+      await this.client.execute(
+        `SELECT date((last_at + 8*3600*1000) / 1000, 'unixepoch') as day, SUM(count) as s
+         FROM search_terms
+         WHERE last_at IS NOT NULL
+         GROUP BY day`
+      )
+    ).rows;
+    let written = 0;
+    for (const r of rows) {
+      const day = r.day as string;
+      const sum = (r.s ?? 0) as number;
+      await this.client.execute(
+        `INSERT INTO daily_stats (date, searches) VALUES (?, ?)
+         ON CONFLICT(date) DO UPDATE SET searches = excluded.searches`,
+        [day, sum]
+      );
+      written++;
+    }
+    return written;
   }
 
   close(): void {

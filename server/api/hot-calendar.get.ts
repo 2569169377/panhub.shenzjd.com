@@ -32,6 +32,9 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // 幂等：daily_stats 表空时自动回填一遍（首次部署/clear 后）
+  await service.ensureDailyStatsBackfilled();
+
   const today = formatDateKey(Date.now());
   const [daysData, totalSearches, totalTerms, todaySearches] = await Promise.all([
     service.getCalendar(days),

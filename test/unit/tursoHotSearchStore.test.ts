@@ -193,27 +193,43 @@ describe("TursoHotSearchStore", () => {
     expect(await store.getTotalTerms()).toBe(0);
   });
 
-  it("recordDailySearches 累加指定日期的搜索次数", async () => {
-    await store.recordDailySearches("2026-08-22", 5);
-    await store.recordDailySearches("2026-08-22", 3);
-    await store.recordDailySearches("2026-08-21", 2);
+  it("recomputeDailySearches 写入该日活跃词累计 count 之和", async () => {
+    const t0 = Date.now();
+    await store.recordSearch("词A", t0, 3); // count=3
+    await store.recordSearch("词B", t0, 7); // count=7
+    const today = dateKey(t0);
 
-    expect(await store.getDailySearches("2026-08-22")).toBe(8);
-    expect(await store.getDailySearches("2026-08-21")).toBe(2);
+    await store.recomputeDailySearches(today);
+    expect(await store.getDailySearches(today)).toBe(3 + 7);
+
+    // 第二天再次搜，count 累加但 last_at 仍落在今天 → 重算应反映新值
+    await store.recordSearch("词A", t0 + 1000, 2); // 词A count=5
+    await store.recomputeDailySearches(today);
+    expect(await store.getDailySearches(today)).toBe(5 + 7);
   });
 
-  it("getDailySearches 无记录返回 0", async () => {
-    expect(await store.getDailySearches("2026-08-22")).toBe(0);
+  it("backfillDailyStats 按 last_at 分组 SUM(count) 写入所有历史日期", async () => {
+    const today = Date.now();
+    const yest = today - 86400000;
+    await store.recordSearch("今天词A", today, 4);
+    await store.recordSearch("今天词B", today, 5);
+    await store.recordSearch("昨天词", yest, 10);
+
+    const written = await store.backfillDailyStats();
+    expect(written).toBe(2); // 今天 + 昨天
+
+    expect(await store.getDailySearches(dateKey(today))).toBe(4 + 5);
+    expect(await store.getDailySearches(dateKey(yest))).toBe(10);
   });
 
   it("clearHotSearches 同时清空 daily_stats", async () => {
     const now = Date.now();
     await store.recordSearch("清空词", now);
-    await store.recordDailySearches("2026-08-22", 10);
+    await store.recomputeDailySearches(dateKey(now));
 
     await store.clearHotSearches();
     expect((await store.getHotSearches(10)).length).toBe(0);
-    expect(await store.getDailySearches("2026-08-22")).toBe(0);
+    expect(await store.getDailySearches(dateKey(now))).toBe(0);
   });
 
   it("deleteHotSearch 删除与容错", async () => {
