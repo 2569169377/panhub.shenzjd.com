@@ -31,7 +31,6 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
-    "@wu529778790/floating-qr": "^0.1.6",
     "cheerio": "^1.0.0",
     "nuxt": "^4.0.3",
     "ofetch": "^1.4.1",

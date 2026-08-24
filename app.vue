@@ -104,11 +104,6 @@
       <NuxtPage />
     </main>
 
-    <!-- 公众号 + 赞赏码悬浮浮窗（@wu529778790/floating-qr，客户端挂载） -->
-    <ClientOnly>
-      <FloatingQrHost />
-    </ClientOnly>
-
     <!-- Toast 通知 -->
     <div v-if="toast.show" class="toast" :class="toast.type" role="status" aria-live="polite">
       {{ toast.message }}
@@ -126,12 +121,18 @@
 </template>
 
 <script setup lang="ts">
-// 暗色模式：阻塞脚本设置 class + CSS 文件引入
+// 暗色模式：阻塞脚本设置 class + CSS 文件引入；公众号/赞赏码浮窗由 CDN Web Component 自动注入
 useHead({
   link: [{ rel: "stylesheet", href: "/css/dark-mode.css" }],
   script: [
     {
       innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
+    },
+    {
+      // 悬浮二维码 Web Component：无需标签/JS，自动注入公众号 + 赞赏码浮窗。
+      // 组件包发布新版本（@latest）后本仓库无需任何改动即自动生效。
+      src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
+      body: true,
     },
   ],
 });
