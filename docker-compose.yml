@@ -7,11 +7,6 @@ services:
     restart: unless-stopped
     ports:
       - "4000:4000"
-    volumes:
-      # 持久化热搜 JSON 数据
-      - ./data:/app/data
-      # 如果需要持久化日志（可选）
-      # - ./logs:/app/logs
     environment:
       - NODE_ENV=production
       - PORT=4000

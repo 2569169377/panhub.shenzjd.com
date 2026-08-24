@@ -32,9 +32,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/package.json ./
 
-# 创建 data 目录（用于热搜持久化）
-RUN mkdir -p /app/data && chown node:node /app/data
-
 # 切换到非 root 用户
 USER node
 
