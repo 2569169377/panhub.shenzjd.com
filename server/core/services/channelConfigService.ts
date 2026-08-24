@@ -2,22 +2,21 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { loggers } from "../utils/logger";
 
 /**
- * 频道配置服务（2026-08-24 上线）
+ * 频道配置服务（2026-08-24）
  *
- * 背景：频道清单（70+ TG 频道 ID）是本项目核心资产，此前明文存于
- * config/channels.json 并编译进前端 bundle / 后端 runtimeConfig，
- * clone 仓库即可白嫖。现改为：
- *   - 真实清单加密（AES-256-GCM）存入 Turso channel_config 表；
- *   - 本服务启动/定期从 Turso 拉取最新版本并解密缓存；
- *   - 搜索服务（SearchServiceOptions）与 /api/channels 均从本服务读快照。
+ * 频道清单加密（AES-256-GCM）存入 Turso channel_config 表，
+ * 本服务启动/定期拉取最新版本并解密缓存，供搜索服务读取。
  *
  * 配置（环境变量）：
  *   TURSO_URL / TURSO_AUTH_TOKEN   Turso 连接（与热搜同库）
- *   CHANNEL_KEY                    64 位 hex（32 字节），加密/解密密钥，勿入库
- *   CHANNELS_JSON                  （可选兜底）明文 JSON，本地 dev / 无 Turso 时使用
+ *   CHANNEL_KEY                    64 位 hex（32 字节），加密/解密密钥
+ *   CHANNELS_JSON                  （可选兜底）明文 JSON
+ *   CHANNELS_KEYS                  （可选）频道配置分级 key1:grant1|key2:all
+ *   CHANNELS_REMOTE_URL            （可选）远程频道配置源，缺省用内置默认地址
+ *   CHANNELS_API_KEY               （可选）拉取远程配置的鉴权标识
  *
- * 加密说明：AES-256-GCM（认证加密，防篡改）。Worker 端经 nodejs_compat
- * 支持 node:crypto。密钥只存在于服务器环境变量，绝不进前端/仓库。
+ * 加载顺序：Turso > CHANNELS_JSON > 远程频道配置源 > 空。
+ * 加密说明：AES-256-GCM（认证加密）。密钥只存在于服务器环境变量。
  */
 
 export interface ChannelConfig {
@@ -31,20 +30,19 @@ export interface ChannelConfigServiceOptions {
   authToken?: string;
   channelKey?: string;
   envJson?: string;
-  /**
-   * fork 站接入：拉取官方配额频道下发的远程 URL（见 loadFromRemote）。
-   * 官方站不需要（有 Turso）；fork 站配置 CHANNELS_REMOTE_URL 即可。
-   */
+  /** 远程频道配置源（无本地配置时的兜底，见 loadFromRemote） */
   remoteUrl?: string;
-  /** fork 站拉取远程配额时携带的 API Key（可选，见 CHANNELS_API_KEY） */
+  /** 拉取远程配置时的鉴权标识（可选） */
   remoteKey?: string;
-  /**
-   * API Key 分级配额（JSON map，key → 配额数或 "all"）。
-   * 例：{"keyA":"15","keyB":"30","keyC":"all"}
-   * 无 key / key 未注册 → 默认配额；"all" → 全部 defaultChannels（不含 priority）
-   */
+  /** 频道配置分级（key → 数量或 "all"；例 key1:15|key2:all），见 resolveChannelGrant */
   channelsKeys?: string;
 }
+
+/**
+ * 远程频道配置源默认地址（写死，部署方无需任何配置即可获得频道配置兜底）
+ */
+export const DEFAULT_CHANNELS_REMOTE_URL =
+  "https://panhub.shenzjd.com/api/channels";
 
 /**
  * AES-256-GCM 加密（供 sync 脚本侧保持一致的密文格式：iv.tag.data，均 base64）
@@ -112,7 +110,11 @@ export class ChannelConfigService {
   private options: ChannelConfigServiceOptions;
 
   constructor(options: ChannelConfigServiceOptions = {}) {
-    this.options = options;
+    // remoteUrl 缺省时使用内置默认地址，部署方零配置即可获得频道配置兜底
+    this.options = {
+      ...options,
+      remoteUrl: options.remoteUrl || DEFAULT_CHANNELS_REMOTE_URL,
+    };
   }
 
   /**
@@ -155,12 +157,8 @@ export class ChannelConfigService {
   }
 
   /**
-   * 配额频道下发（2026-08-24 用户拍板：10 个固定同一批、不给 priority）。
-   *
-   * 给 fork 站/第三方提供"部分开源"能力：只下发 defaultChannels 前 N 个，
-   * 保证对方部署后能搜到东西（不至于空白），但永远比官方站搜得少。
-   * **priority 频道即使同时出现在 defaultChannels 也一律剔除**（核心优势保留）。
-   * 用于 /api/channels 配额接口；剔除后不足 limit 时按实际数量返回。
+   * 频道配置下发（取 defaultChannels 前 N 个；priority 频道即使同时
+   * 出现在 default 中也剔除，不随下发暴露）。用于 /api/channels。
    */
   getGrantedChannels(limit: number): { version: number; channels: string[] } {
     const snap = this.getSnapshot();
@@ -176,14 +174,12 @@ export class ChannelConfigService {
   }
 
   /**
-   * API Key 分级配额解析（2026-08-24 用户拍板：key 由官方决定给谁、给多少）。
-   *
+   * 频道配置分级解析。
    * CHANNELS_KEYS 格式：`key1:grant1|key2:grant2`（用 | 分隔、key:grant 配对，
-   * 避免花括号/引号在 .env（zsh source / docker --env-file）里被破坏）。
-   * grant 支持数字（如 "15"）或 "all"（全部 default 频道，priority 仍不下发）。
+   * 避免特殊字符在 .env 解析时被破坏）。grant 支持数字或 "all"（全部 default 频道）。
    *
-   * - 无 key / key 未注册 / CHANNELS_KEYS 未配置 → 返回 defaultLimit（基础配额）
-   * - key 对应数值 → 返回该数；key 对应 "all" → 返回全部 defaultChannels 数量
+   * - 无 key / key 未注册 / 未配置 → defaultLimit
+   * - key 对应数值 → 该数；key 对应 "all" → 全部 defaultChannels 数量
    * - 非法值 → 回落 defaultLimit
    */
   resolveChannelGrant(
@@ -246,23 +242,23 @@ export class ChannelConfigService {
       loggers.search.warn("频道配置来自 CHANNELS_JSON 兜底", { version: fromEnv.version });
       return fromEnv;
     }
-    // 3. 远程配额下发兜底（fork 站：官方 /api/channels 的配额频道）
+    // 3. 远程频道源兜底
     const fromRemote = await this.loadFromRemote();
     if (fromRemote) {
       this.config = fromRemote;
       this.lastLoadAt = Date.now();
-      loggers.search.warn("频道配置来自远程配额下发", {
+      loggers.search.warn("频道配置来自远程频道源", {
         version: fromRemote.version,
         channelCount: fromRemote.defaultChannels.length,
       });
       return fromRemote;
     }
-    loggers.search.warn("频道配置未加载：Turso/CHANNELS_JSON/远程配额均不可用");
+    loggers.search.warn("频道配置未加载：本地与远程频道源均不可用");
     return null;
   }
 
   /**
-   * fork 站兜底层：从 CHANNELS_REMOTE_URL 拉取官方配额频道。
+   * 远程频道配置兜底层：从 remoteUrl 拉取频道配置。
    * 响应格式与 /api/channels 一致：{ code: 0, data: { version, channels } }。
    * 失败静默（不影响主链路），8s 超时。
    */
@@ -294,7 +290,7 @@ export class ChannelConfigService {
         clearTimeout(timer);
       }
     } catch (err) {
-      loggers.search.warn("远程配额频道拉取失败（走空配置）", {
+      loggers.search.warn("远程频道源拉取失败（走空配置）", {
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
@@ -352,7 +348,6 @@ const globalChannelConfigService = new ChannelConfigService({
   remoteKey: process.env.CHANNELS_API_KEY,
   channelsKeys: process.env.CHANNELS_KEYS,
 });
-
 export function getChannelConfigService(): ChannelConfigService {
   return globalChannelConfigService;
 }

@@ -140,7 +140,7 @@ describe("ChannelConfigService", () => {
     expect(service.getSnapshot().version).toBe(3);
   });
 
-  it("远程配额下发兜底（fork 站场景，无 Turso 无 env）", async () => {
+  it("远程频道源兜底（无本地配置时拉取）", async () => {
     // 用本地 HTTP server 模拟官方 /api/channels 响应
     const { createServer } = await import("node:http");
     const server = createServer((_req, res) => {
@@ -168,7 +168,7 @@ describe("ChannelConfigService", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it("远程配额接口 500 时静默降级（不抛错）", async () => {
+  it("远程频道源 500 时静默降级（不抛错）", async () => {
     const { createServer } = await import("node:http");
     const server = createServer((_req, res) => {
       res.statusCode = 500;
@@ -186,7 +186,7 @@ describe("ChannelConfigService", () => {
   });
 });
 
-describe("ChannelConfigService 配额下发", () => {
+describe("ChannelConfigService 频道下发", () => {
   it("getGrantedChannels 只取 defaultChannels 前 N 个、不含 priority", async () => {
     const service = new ChannelConfigService({
       envJson: JSON.stringify({
@@ -201,7 +201,7 @@ describe("ChannelConfigService 配额下发", () => {
     expect(granted.channels).not.toContain("pri1");
   });
 
-  it("getGrantedChannels 配额超界按实际数量返回、非法 limit 兜底 0", async () => {
+  it("getGrantedChannels 数量超界按实际返回、非法 limit 兜底 0", async () => {
     const service = new ChannelConfigService({
       envJson: JSON.stringify({
         version: 1,
@@ -223,11 +223,11 @@ describe("ChannelConfigService 配额下发", () => {
     });
     // 剔除 pri1/pri2 后剩 a/b/c，取前 10 → a/b/c
     expect(service.getGrantedChannels(10).channels).toEqual(["a", "b", "c"]);
-    // 配额 2 → 剔除后取前 2
+    // 取 2 → 剔除后取前 2
     expect(service.getGrantedChannels(2).channels).toEqual(["a", "b"]);
   });
 
-  it("resolveChannelGrant：无 key / 未注册 key 回落默认配额", async () => {
+  it("resolveChannelGrant：无 key / 未注册 key 回落默认值", async () => {
     const service = new ChannelConfigService({
       channelsKeys: "keyA:15|keyB:all",
       envJson: JSON.stringify({
@@ -240,7 +240,7 @@ describe("ChannelConfigService 配额下发", () => {
     expect(service.resolveChannelGrant("unknown", 10)).toBe(10);
   });
 
-  it("resolveChannelGrant：已注册 key 返回配置配额、all 返回全部 default", async () => {
+  it("resolveChannelGrant：已注册 key 返回配置数量、all 返回全部 default", async () => {
     const service = new ChannelConfigService({
       channelsKeys: "keyA:15|keyB:all",
       envJson: JSON.stringify({

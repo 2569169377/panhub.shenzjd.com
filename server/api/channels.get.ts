@@ -2,16 +2,14 @@ import { defineEventHandler, getQuery, getRequestHeader, createError } from "h3"
 import { getChannelConfigService } from "../core/services/channelConfigService";
 
 /**
- * 频道配额下发接口（2026-08-24，二次迭代）
+ * 频道配置下发接口（2026-08-24）
  *
- * 面向 fork 站/第三方（官方站前端已不依赖本接口，前端只传批次号）。
- * 给 fork 站提供"部分开源"能力：
- *   - 无 key：基础配额（CHANNELS_DEFAULT_GRANT，默认 10 个 default 频道）
- *   - 有 key（Authorization: Bearer 或 ?key=）：按 CHANNELS_KEYS 配置的配额，
- *     "all" 给全部 default 频道；priority 频道一律不下发（核心优势保留）
- *   - key 由官方决定给谁、给多少，可随时从环境变量增删
+ * 返回部分频道配置供部署方兜底使用（详见 ChannelConfigService 远程兜底层）：
+ *   - 无 key：默认数量（CHANNELS_DEFAULT_GRANT，默认 10 个 default 频道）
+ *   - 带 key（Authorization: Bearer 或 ?key=）：按 CHANNELS_KEYS 分级，
+ *     "all" 为全部 default 频道；priority 频道不随下发暴露
  *
- * 响应：{ code, data: { version, channels } } —— 只含频道名，无总数、无 priority。
+ * 响应：{ code, data: { version, channels } } —— 只含频道名。
  * 防护：Origin 白名单 + 全局限流（rateLimiter /api/channels 条目）。
  */
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -23,7 +21,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 function isAllowedOrigin(event: any): boolean {
   const origin = getRequestHeader(event, "origin");
-  // fork 站是服务端 fetch（无 Origin），放行（交给限流与 key 配额）
+  // 服务端拉取场景（无 Origin）放行，交给限流与 key 分级
   if (!origin) return true;
   const allowRaw = process.env.CHANNELS_ALLOWED_ORIGINS;
   const allowed = allowRaw
