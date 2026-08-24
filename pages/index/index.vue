@@ -106,10 +106,6 @@
     </div>
 
     <!-- 搜索结果 -->
-    <!-- TEMP DEBUG: 显示 groupedResults 数量定位渲染问题 -->
-    <div v-if="hasResults" style="padding: 4px 0; font-size: 11px; color: #888; word-break: break-all;">
-      DBG: mergedKeys={{ Object.keys(searchState.merged || {}).join(",") || "(空)" }} | groups={{ groupedResults.length }} | paused={{ searchState.paused }} | loading={{ searchState.loading }}
-    </div>
     <section v-if="hasResults" class="results-section">
       <div class="results-grid">
         <ResultGroup

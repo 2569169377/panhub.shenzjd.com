@@ -498,9 +498,6 @@ export function useSearch() {
           if (evt.event === "chunk") {
             try {
               const payload = JSON.parse(evt.data);
-              if (import.meta.dev) {
-                console.log("[SSE chunk]", { done: payload.done, total: payload.total, mergedKeys: Object.keys(payload.merged || {}), mergedSizes: Object.fromEntries(Object.entries(payload.merged || {}).map(([k, v]: [string, any]) => [k, v.length])) });
-              }
               if (payload.merged) {
                 currentMerged = mergeMergedByType(currentMerged, payload.merged);
                 curTotal = Object.values(currentMerged).reduce(
@@ -509,15 +506,9 @@ export function useSearch() {
                 );
                 setMerged(currentMerged);
                 setTotal(curTotal);
-                if (import.meta.dev) {
-                  console.log("[SSE setMerged]", { keys: Object.keys(currentMerged), total: curTotal });
-                }
               }
               // SSE 模式：不自动暂停！服务端已受控并发（TG 池 + 插件池），
               // 没有"省前端请求"的意义；前端全收 chunk + done。
-              // 旧模式的自动暂停只适用于"前端发 N 个 batch 请求，到 90 条
-              // abort 剩余请求"的场景。SSE 下若暂停，用户点"继续"会重新连流
-              // （缓存秒回），但更自然的做法是让流自己跑完。
             } catch (e) {
               devWarn("[useSearch] SSE chunk 解析失败", e);
             }
