@@ -41,6 +41,10 @@ docker run -d -p 4000:4000 -v /root/panhub/data:/app/data \
 - 不存储、不传播任何受版权保护的内容；资源链接均来自公开网络
 - 请遵守当地法律法规与平台使用条款；侵权问题请联系源站处理
 
+## 🛡️ 运维
+
+- [Bot 防御与黑名单运维](./docs/bot-defense-and-tuning.md)：IP 黑名单机制、`WX_AUTH_ENFORCE=1` 启用方式、手工解封 SQL
+
 ## 📄 版权声明
 
 Copyright © 2025-2026 shenzjd. All rights reserved.
