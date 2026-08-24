@@ -143,6 +143,14 @@ export function useSearch() {
   let lastTotalTgBatches = 0;
   let lastCountedKeyword = "";
 
+  /**
+   * 断点续跑进度（2026-08-25 用户拍板）：已完成的 SSE 任务全局索引集合。
+   * - done 事件回传 completedIndices，这里累积
+   * - 「继续」时回传 skipTasks 给后端，后端只跑未搜过的任务
+   * - 重新搜索（performSearch / resetSearch）时清空
+   */
+  let completedTaskGidx = new Set<number>();
+
   /** 向后端问"有 N 批"，不实际搜索（响应只有数字，无频道明文） */
   async function fetchTgBatchCount(apiBase: string, keyword: string): Promise<number> {
     try {
@@ -434,6 +442,14 @@ export function useSearch() {
     });
     // 后端自己计数停止：首搜不传（后端默认 90），「继续」传目标总数
     if (maxResults != null && maxResults > 0) q.set("maxResults", String(maxResults));
+    // 断点续跑（2026-08-25）：回传已完成任务索引 + 前端已有结果数，
+    // 后端只跑未搜任务、按"已有+本轮新增"判断是否达上限
+    if (completedTaskGidx.size > 0) {
+      q.set("skipTasks", [...completedTaskGidx].join(","));
+    }
+    if (initialTotal > 0) {
+      q.set("initialTotal", String(initialTotal));
+    }
 
     const controller = new AbortController();
     activeControllers.push(controller);
@@ -522,9 +538,17 @@ export function useSearch() {
                 0
               );
               setTotal(curTotal);
+              // 断点续跑：累积后端回传的已完成任务索引（下次继续时回传
+              // skipTasks，后端只跑未搜过的任务）
+              if (Array.isArray(payload.completedIndices)) {
+                for (const i of payload.completedIndices) {
+                  const n = Number(i);
+                  if (Number.isFinite(n)) completedTaskGidx.add(n);
+                }
+              }
               // reachedLimit=true：后端已因结果达到上限停止剩余请求。
               // 前端只负责展示"已找到 N 条，点击继续"（服务端真的停了，
-              // 继续 = 重新连流，缓存秒回已搜 + 继续未搜）
+              // 继续 = 重新连流，只跑未搜任务 + 累积结果）
               if (payload.reachedLimit) {
                 autoPausedAtLimit.value = true;
                 setPaused(true);
@@ -590,6 +614,8 @@ export function useSearch() {
     setTotal(0);
     setMerged({});
     setDeepLoading(false);
+    // 新一轮搜索：清空断点续跑进度（已完成任务索引重新开始记录）
+    completedTaskGidx.clear();
 
     const mySeq = ++searchSeq;
     const start = performance.now();
@@ -636,6 +662,8 @@ export function useSearch() {
     cancelActiveRequests();
     searchSeq++;
     autoPausedAtLimit.value = false;
+    // 清空断点续跑进度（重置 = 新搜索从头开始）
+    completedTaskGidx.clear();
     setLoading(false);
     setDeepLoading(false);
     setPaused(false);
