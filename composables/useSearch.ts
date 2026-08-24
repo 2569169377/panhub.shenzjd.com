@@ -181,12 +181,14 @@ export function useSearch() {
 
     try {
       if (USE_STREAM_SEARCH && !isStreamDisabledByQuery()) {
-        // 流式：重新连 SSE（服务端已有缓存，已搜频道秒回；前端保留已有 merged 继续累加）
+        // 流式：重新连 SSE（服务端已有缓存，已搜频道秒回；前端保留已有 merged 继续累加）。
+        // 传目标总数 = 已收 + 90，后端自己计数到该值停止
         const { usedFallback } = await performStreamSearch(
           options,
           searchSeq,
           state.value.merged,
-          state.value.total
+          state.value.total,
+          maxResultsThreshold
         );
         if (usedFallback) {
           // fallback：旧批次模式续跑
@@ -430,7 +432,9 @@ export function useSearch() {
     options: SearchOptions,
     mySeq: number,
     initialMerged?: MergedLinks,
-    initialTotal = 0
+    initialTotal = 0,
+    /** 本轮目标结果上限（首搜不传=后端默认 90；「继续」传 已收+90，由后端自己计数停止） */
+    maxResults?: number
   ): Promise<{ usedFallback: boolean }> {
     const { apiBase, keyword, settings, onAuthRequired } = options;
 
@@ -445,6 +449,8 @@ export function useSearch() {
       conc: String(Math.min(16, Math.max(1, Number(settings.concurrency || 3)))),
     });
     if (enabledPlugins.length > 0) q.set("plugins", enabledPlugins.join(","));
+    // 后端自己计数停止：首搜不传（后端默认 90），「继续」传目标总数
+    if (maxResults != null && maxResults > 0) q.set("maxResults", String(maxResults));
 
     const controller = new AbortController();
     activeControllers.push(controller);
@@ -507,20 +513,9 @@ export function useSearch() {
                 setMerged(currentMerged);
                 setTotal(curTotal);
               }
-              // 自动暂停（用户拍板：节省服务器资源，结果 ≥ 阈值即停止请求）
-              // 正确实现要点：
-              // 1. setMerged 先执行 → 已收数据正常渲染（不会空白）
-              // 2. setLoading(false) → 状态不卡"加载中"
-              // 3. controller.abort() → 停止读流；服务端 onClosed 会
-              //    abort 内部剩余任务（真·不再请求，省资源）
-              // 4. 用户点"继续" → 重新连流（服务端缓存秒回已搜 + 继续未搜）
-              if (curTotal >= maxResultsThreshold) {
-                autoPausedAtLimit.value = true;
-                setPaused(true);
-                setLoading(false);
-                controller.abort();
-                return { usedFallback: false };
-              }
+              // 自动暂停由后端控制（2026-08-25 用户拍板：后端自己计数，
+              // 达到结果上限即停止剩余请求），前端不在 chunk 层 abort。
+              // 后端停止后推 done(reachedLimit=true)，前端在 done 处理暂停 UI。
             } catch (e) {
               devWarn("[useSearch] SSE chunk 解析失败", e);
             }
@@ -540,6 +535,14 @@ export function useSearch() {
                   0
                 );
                 setTotal(curTotal);
+              }
+              // reachedLimit=true：后端已因结果达到上限停止剩余请求。
+              // 前端只负责展示"已找到 N 条，点击继续"（服务端真的停了，
+              // 继续 = 重新连流，缓存秒回已搜 + 继续未搜）
+              if (payload.reachedLimit) {
+                autoPausedAtLimit.value = true;
+                setPaused(true);
+                setLoading(false);
               }
             } catch {}
             return { usedFallback: false };

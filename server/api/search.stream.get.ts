@@ -39,6 +39,8 @@ const TG_BATCH_SIZE = 6;
 const TG_BATCH_CONCURRENCY = 4;
 /** 客户端断开后，后端最多再等多久清理（防止挂起的 fetch 无限占资源） */
 const CLOSE_GRACE_MS = 2_000;
+/** 本轮结果上限默认值（用户拍板：结果 ≥ 此值即停止剩余请求节省资源） */
+const SEARCH_MAX_RESULTS_DEFAULT = 90;
 
 export default defineEventHandler(async (event: H3Event) => {
   // ---- 入口鉴权（只做一次）----
@@ -85,6 +87,13 @@ export default defineEventHandler(async (event: H3Event) => {
   const cloudTypes = parseList(q.cloud_types);
   const res = (q.res as any) || "merged_by_type";
   const refresh = String(q.refresh).trim() === "true";
+
+  // 本轮结果上限（2026-08-25 用户拍板：后端自己计数，达到即停止剩余请求）。
+  // - 首搜不传 = 默认 90（后端常量 SEARCH_MAX_RESULTS_DEFAULT）
+  // - 「继续」时前端传目标总数 = 已收 + 90（如 180/270…），后端累计到该值停止
+  // 服务端在每次任务完成后自检累计，达到即 abort 剩余任务 + push done(reachedLimit=true)
+  const maxResultsRaw = parseInt(String(q.maxResults ?? ""), 10);
+  const maxResults = Number.isFinite(maxResultsRaw) && maxResultsRaw >= 1 ? maxResultsRaw : SEARCH_MAX_RESULTS_DEFAULT;
 
   const conc = (() => {
     const n = q.conc ? parseInt(String(q.conc), 10) : NaN;
@@ -152,10 +161,14 @@ export default defineEventHandler(async (event: H3Event) => {
       const total = tgTasks.length + pluginTasks.length;
       let done = 0;
       let acc: MergedLinks = {};
+      /** 是否已因达到结果上限而触发停止（后端自己计数，2026-08-25 用户拍板） */
+      let limitReached = false;
       const warnings: string[] = [];
 
       const runTask = async (task: Task) => {
-        if (signal.aborted) return;
+        // 客户端断开 或 已达结果上限 → 跳过（limit 用独立标志，不 abort
+        // signal，保证 done 事件仍能推送 reachedLimit=true）
+        if (signal.aborted || limitReached) return;
         try {
           let batchMerged: MergedLinks = {};
           if (task.type === "tg") {
@@ -214,6 +227,16 @@ export default defineEventHandler(async (event: H3Event) => {
         }
         done++;
         if (!signal.aborted) {
+          // 后端自检结果上限（用户拍板：达到即停止剩余请求节省资源）。
+          // 只置 limitReached 标志让剩余任务跳过（不 abort signal），
+          // 这样 done 事件一定能推（带 reachedLimit=true）
+          const curTotal = Object.values(acc).reduce(
+            (sum, arr) => sum + arr.length,
+            0
+          );
+          if (curTotal >= maxResults) {
+            limitReached = true;
+          }
           // 累计快照推 chunk：前端简单 setMerged(acc) 即可，
           // 避免增量协议下"丢/重"的复杂合并逻辑
           await push("chunk", {
@@ -225,13 +248,15 @@ export default defineEventHandler(async (event: H3Event) => {
       };
 
       // 并发执行：TG 池 + 插件池互相独立，慢的 TG 不会"堵"插件
+      // 达到结果上限后 abortController.abort() 会让剩余任务跳过（signal.aborted）
       await Promise.all([
         ...tgTasks.map((task) => tgLimit(() => runTask(task))),
         ...pluginTasks.map((task) => pluginLimit(() => runTask(task))),
       ]);
 
       // 汇总事件：done 带 merged 作为最终兜底（即使 chunk 全部空，
-      // 插件结果也能保证送到前端）
+      // 插件结果也能保证送到前端）。reachedLimit 标记本轮是否因达到
+      // 结果上限而停止（前端据此显示"点击继续"）
       const finalTotal = Object.values(acc).reduce(
         (sum, arr) => sum + arr.length,
         0
@@ -242,6 +267,7 @@ export default defineEventHandler(async (event: H3Event) => {
           warnings,
           pluginCount: enabledPlugins.length,
           merged: acc,
+          reachedLimit: limitReached,
         });
       }
     } catch (err) {
