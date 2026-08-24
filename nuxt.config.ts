@@ -67,8 +67,9 @@ export default defineNuxtConfig({
   runtimeConfig: {
     // server-only 配置
     searchPassword: process.env.SEARCH_PASSWORD || "",
-    priorityChannels: channelsConfig.priorityChannels,
-    defaultChannels: channelsConfig.defaultChannels,
+    // 2026-08-24：频道清单已从仓库/配置移除，改由 ChannelConfigService
+    // 从 Turso 加密表拉取（见 server/core/services/channelConfigService.ts），
+    // 不再注入 runtimeConfig；前端经 /api/channels 下发获取。
     defaultConcurrency: channelsConfig.defaultConcurrency,
     pluginTimeoutMs: channelsConfig.pluginTimeoutMs,
     cacheEnabled: true,
@@ -76,8 +77,6 @@ export default defineNuxtConfig({
     public: {
       apiBase: "/api",
       siteUrl: "https://panhub.shenzjd.com",
-      // 向前端暴露默认频道清单
-      tgDefaultChannels: channelsConfig.defaultChannels,
     },
   },
 });

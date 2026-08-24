@@ -60,7 +60,7 @@ npm deploy:cf            # Deploy to Cloudflare Workers
 
 ### Configuration (`config/`)
 
-- **`channels.json`**: TG channel lists (`priorityChannels`, `defaultChannels`), concurrency, timeouts, cache TTL. Loaded into `nuxt.config.ts` runtimeConfig.
+- **`channels.json`**: 运行参数模板（concurrency, timeouts, cache TTL）。**真实频道清单已于 2026-08-24 迁出仓库**：AES-256-GCM 加密存入 Turso `channel_config` 表，由 `server/core/services/channelConfigService.ts` 拉取解密缓存，经 `server/api/channels.get.ts` 下发前端。修改频道：配好 `CHANNEL_KEY` 后运行 `scripts/sync-channels.mjs`。
 - **`plugins.ts`**: Plugin names (`ALL_PLUGIN_NAMES`), platform info (`PLATFORM_INFO` with colors/icons), `DEFAULT_USER_SETTINGS`, `STORAGE_KEYS`.
 - **`doubanHot.ts`**: Douban API configuration.
 - **`data/`**: SQLite database for hot search persistence (Docker/local only, not in git).
