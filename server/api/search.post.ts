@@ -24,6 +24,7 @@ import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
+import { getChannelConfigService } from "../core/services/channelConfigService";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
@@ -33,6 +34,8 @@ export default defineEventHandler(async (event) => {
   // 微信关注公众号登录态校验（WX_AUTH_ENFORCE=1 时启用，实时校验不缓存）
   await requireWxAuth(event);
   const config = useRuntimeConfig();
+  // 确保频道配置已加载（Turso 加密配置 → 解密缓存），幂等、带 TTL
+  await getChannelConfigService().ensureLoaded();
   const service = getOrCreateSearchService(config);
   const body = (await readBody<SearchRequest>(event)) || ({} as SearchRequest);
 
