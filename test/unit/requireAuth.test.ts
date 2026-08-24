@@ -28,7 +28,7 @@ vi.mock("../../server/utils/auth", () => ({
 // mock wxAuthCheck：避免测试触发远程 HTTP
 vi.mock("../../server/utils/wxAuthCheck", () => ({
   isWxAuthEnforced: vi.fn(() => false),
-  verifyWxAuthOnce: vi.fn(async () => true),
+  verifyWxAuthOnceCached: vi.fn(async () => true),
 }));
 
 // mock rateLimiter：避免加载 h3 defineEventHandler（getClientIp 供 requireAuth 日志用）
@@ -42,7 +42,7 @@ import * as auth from "../../server/utils/auth";
 import * as wxAuthCheck from "../../server/utils/wxAuthCheck";
 
 const mockedIsWxAuthEnforced = vi.mocked(wxAuthCheck.isWxAuthEnforced);
-const mockedVerifyWxAuthOnce = vi.mocked(wxAuthCheck.verifyWxAuthOnce);
+const mockedVerifyWxAuthOnce = vi.mocked(wxAuthCheck.verifyWxAuthOnceCached);
 
 const mockedGetHeader = vi.mocked(h3.getHeader);
 const mockedGetRequestHeader = vi.mocked(h3.getRequestHeader);

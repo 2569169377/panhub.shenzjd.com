@@ -4,7 +4,7 @@ import { isUnlocked } from "./auth";
 import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
 import { getClientIp } from "../middleware/rateLimiter";
-import { isWxAuthEnforced, verifyWxAuthOnce } from "./wxAuthCheck";
+import { isWxAuthEnforced, verifyWxAuthOnceCached } from "./wxAuthCheck";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 
 export function requireSearchAuth(event: H3Event): void {
@@ -75,7 +75,7 @@ export async function requireWxAuth(event: H3Event): Promise<void> {
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
   if ((auth && auth.startsWith("Bearer ")) || clientSecret) return;
 
-  const ok = await verifyWxAuthOnce(event);
+  const ok = await verifyWxAuthOnceCached(event);
   if (!ok) {
     const ip = getClientIp(event);
     loggers.search.warn(`拦截未关注公众号的搜索请求`, {

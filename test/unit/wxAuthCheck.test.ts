@@ -27,6 +27,8 @@ import {
   getWxAuthCredential,
   verifyWxAuthCredential,
   verifyWxAuthOnce,
+  verifyWxAuthOnceCached,
+  resetWxAuthCache,
 } from "../../server/utils/wxAuthCheck";
 
 const mockedGetCookie = vi.mocked(h3.getCookie);
@@ -160,5 +162,46 @@ describe("verifyWxAuthOnce（请求内去重）", () => {
     expect(await verifyWxAuthOnce(event)).toBe(true);
     expect(await verifyWxAuthOnce(event)).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("verifyWxAuthOnceCached（跨请求短 TTL 去重，2026-08-24）", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    process.env.WX_AUTH_API_BASE = "https://wx-auth.example.com";
+    fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ authenticated: true }) });
+    (globalThis as any).fetch = fetchMock;
+    mockedGetCookie.mockReset();
+    resetWxAuthCache();
+  });
+
+  it("同一 token 跨多个请求（如一次搜索 35+ 子请求）只调一次远程", async () => {
+    // 模拟一次搜索的 40 个并发子请求（各自独立 event，同 cookie）
+    for (let i = 0; i < 40; i++) {
+      const event = makeEvent({ "wxauth-token": "shared-token" });
+      expect(await verifyWxAuthOnceCached(event)).toBe(true);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("不同 token 各自独立校验", async () => {
+    await verifyWxAuthOnceCached(makeEvent({ "wxauth-token": "t1" }));
+    await verifyWxAuthOnceCached(makeEvent({ "wxauth-token": "t2" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("false 结果也缓存（10s 内同一 token 反复失败不重复打远程）", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) });
+    for (let i = 0; i < 10; i++) {
+      const event = makeEvent({ "wxauth-token": "bad-token" });
+      expect(await verifyWxAuthOnceCached(event)).toBe(false);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("无 cookie 不缓存不调远程（直接拒绝）", async () => {
+    expect(await verifyWxAuthOnceCached(makeEvent({}))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

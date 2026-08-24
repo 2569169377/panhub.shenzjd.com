@@ -81,3 +81,60 @@ export async function verifyWxAuthOnce(event: H3Event): Promise<boolean> {
   ctx.__wxAuthVerified = ok;
   return ok;
 }
+
+/**
+ * 跨请求短 TTL 缓存（2026-08-24 新增，修复 WX_AUTH_ENFORCE=1 时"认证后反复弹验证码"）
+ *
+ * 背景：一次搜索前端并发 35+ 子请求（countOnly + 各 batch + 各插件），每个子请求
+ * 都走 verifyWxAuthOnce → 实时调 wx-auth /api/auth/check。而 wx-auth 的 check 按 IP
+ * 限流 query 类型 30 次/分钟，一次搜索 40+ 次调用直接打爆 → rate_limited →
+ * authenticated:false → 后端 401 → 前端 forceVerify 反复弹验证码弹窗。
+ *
+ * 修复：同一 credential（token/openid）在 WX_AUTH_CACHE_TTL_MS 内只调一次远程，
+ * 其余子请求命中缓存（含 false 结果，10s 内同一 token 反复失败也按 401 处理，
+ * 前端 forceVerify 会重发新 token，天然绕开旧缓存）。
+ *
+ * 与"实时校验不缓存"（用户拍板：取消关注=退出登录）的取舍：TTL 仅 10s，
+ * 取消关注后最长 10s 内仍可搜，换取不打爆 wx-auth 限流。可接受。
+ */
+const WX_AUTH_CACHE_TTL_MS = 10_000;
+const wxAuthCache = new Map<string, { ok: boolean; expiresAt: number }>();
+
+/** 测试用：清空跨请求缓存 */
+export function resetWxAuthCache(): void {
+  wxAuthCache.clear();
+}
+
+export async function verifyWxAuthOnceCached(event: H3Event): Promise<boolean> {
+  const ctx = (event.context as Record<string, any>) || {};
+  if (typeof ctx.__wxAuthVerified === "boolean") return ctx.__wxAuthVerified;
+
+  const cred = getWxAuthCredential(event);
+  const cacheKey = cred.token
+    ? `token:${cred.token}`
+    : cred.openid
+    ? `openid:${cred.openid}`
+    : "";
+  const now = Date.now();
+
+  if (cacheKey) {
+    const hit = wxAuthCache.get(cacheKey);
+    if (hit && hit.expiresAt > now) {
+      ctx.__wxAuthVerified = hit.ok;
+      return hit.ok;
+    }
+  }
+
+  const ok = await verifyWxAuthCredential(event);
+  ctx.__wxAuthVerified = ok;
+  if (cacheKey) {
+    wxAuthCache.set(cacheKey, { ok, expiresAt: now + WX_AUTH_CACHE_TTL_MS });
+    // 防 Map 无限膨胀：超 10k 时清掉过期条目
+    if (wxAuthCache.size > 10_000) {
+      for (const [k, v] of wxAuthCache) {
+        if (v.expiresAt <= now) wxAuthCache.delete(k);
+      }
+    }
+  }
+  return ok;
+}
