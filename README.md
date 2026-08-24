@@ -20,17 +20,21 @@ docker run -d -p 4000:4000 -v /root/panhub/data:/app/data \
   ghcr.io/wu529778790/panhub.shenzjd.com:latest
 ```
 
-- Vercel / Cloudflare 均支持一键部署，构建命令 `npm run build`
-- **热搜依赖 Turso**：配置 `TURSO_URL` / `TURSO_AUTH_TOKEN`（libsql）后启用，未配置不影响搜索等核心功能
+## ⚡ 一键部署
+
+| 平台 | 部署方式 |
+|------|---------|
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fwu529778790%2Fpanhub.shenzjd.com&project-name=panhub) |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fwu529778790%2Fpanhub.shenzjd.com) |
+
+> Cloudflare Workers 构建命令使用 `npm run build:cf`（Nitro Cloudflare 预设）。
+> 可选环境变量：`TURSO_URL` / `TURSO_AUTH_TOKEN`（热搜存储）；未配置不影响搜索等核心功能。
+
 - 本地开发：`npm install && npm run dev`；测试：`npm test`
 
 ## 📦 支持平台
 
 阿里云盘 / 夸克 / 百度网盘 / 115 / 迅雷 / UC / 天翼云盘 / 123 网盘 / 移动云盘 / 磁力链接
-
-## 🤝 合作伙伴
-
-- [AI 全自动推广拓客 - 智能外呼机器人](https://bizbot.zvo.cn)
 
 ## 🛡️ 免责声明
 
