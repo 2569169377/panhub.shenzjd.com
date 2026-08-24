@@ -507,8 +507,20 @@ export function useSearch() {
                 setMerged(currentMerged);
                 setTotal(curTotal);
               }
-              // SSE 模式：不自动暂停！服务端已受控并发（TG 池 + 插件池），
-              // 没有"省前端请求"的意义；前端全收 chunk + done。
+              // 自动暂停（用户拍板：节省服务器资源，结果 ≥ 阈值即停止请求）
+              // 正确实现要点：
+              // 1. setMerged 先执行 → 已收数据正常渲染（不会空白）
+              // 2. setLoading(false) → 状态不卡"加载中"
+              // 3. controller.abort() → 停止读流；服务端 onClosed 会
+              //    abort 内部剩余任务（真·不再请求，省资源）
+              // 4. 用户点"继续" → 重新连流（服务端缓存秒回已搜 + 继续未搜）
+              if (curTotal >= maxResultsThreshold) {
+                autoPausedAtLimit.value = true;
+                setPaused(true);
+                setLoading(false);
+                controller.abort();
+                return { usedFallback: false };
+              }
             } catch (e) {
               devWarn("[useSearch] SSE chunk 解析失败", e);
             }
