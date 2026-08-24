@@ -116,8 +116,6 @@ export function useSearch() {
   let pausedAtTaskIndex = 0;
   /** 当前并搜已完成数，暂停时用于记录断点 */
   let parallelCompletedCount = 0;
-  /** 当前轮次结果上限（首搜 50，每次继续 +50，累进 50→100→150） */
-  let maxResultsThreshold = MAX_RESULTS_PER_ROUND;
   /** 是否因达到结果上限而自动暂停（区别于用户手动暂停，UI 文案用） */
   const autoPausedAtLimit = ref(false);
 
@@ -172,8 +170,10 @@ export function useSearch() {
     setPaused(false);
     setDeepLoading(true);
 
-    // 累进：继续搜索允许再收集一轮结果（50→100→150…）
-    maxResultsThreshold += MAX_RESULTS_PER_ROUND;
+    // 目标总数 = 上次已收数量 + 本轮增量（2026-08-25 修复：此前误传"每轮
+    // 累进倍数"，手动暂停时已收<90 会导致后端按错误上限多搜；
+    // 后端协议就是「目标总数 = 已收 + 90」，必须基于上次实际数量）
+    const targetMax = state.value.total + MAX_RESULTS_PER_ROUND;
     autoPausedAtLimit.value = false;
 
     try {
@@ -185,17 +185,23 @@ export function useSearch() {
           searchSeq,
           state.value.merged,
           state.value.total,
-          maxResultsThreshold
+          targetMax
         );
         if (usedFallback) {
-          // fallback：旧批次模式续跑
+          // fallback：旧批次模式续跑。SSE 全程从未 countOnly，批数必为 0，
+          // 需先补一次 countOnly 拿到总批数，否则旧模式无任务可跑
+          if (lastCountedKeyword !== keyword) {
+            lastTotalTgBatches = await fetchTgBatchCount(options.apiBase, keyword);
+            lastCountedKeyword = keyword;
+          }
           const startFrom = pausedAtTaskIndex;
           await performParallelSearch(
             options,
             searchSeq,
             startFrom,
             state.value.merged,
-            lastTotalTgBatches
+            lastTotalTgBatches,
+            targetMax
           );
         }
       } else {
@@ -205,7 +211,8 @@ export function useSearch() {
           searchSeq,
           startFrom,
           state.value.merged,
-          lastTotalTgBatches
+          lastTotalTgBatches,
+          targetMax
         );
       }
     } catch (error) {
@@ -285,12 +292,14 @@ export function useSearch() {
   // 并发搜索 - 每个源独立请求，支持从 startFromTaskIndex 断点续跑
   // initialMerged: continueSearch 时传入暂停前已累积的结果，避免覆盖
   // totalTgBatches: 由 performSearch 先 countOnly 拿到（前端无频道知识，后端切片）
+  // targetMax: 本轮累计结果上限（首搜默认 90；「继续」传 已收+90），达到自动暂停
   async function performParallelSearch(
     options: SearchOptions,
     mySeq: number,
     startFromTaskIndex = 0,
     initialMerged?: MergedLinks,
-    totalTgBatches = 0
+    totalTgBatches = 0,
+    targetMax = MAX_RESULTS_PER_ROUND
   ): Promise<void> {
     const { apiBase, keyword, settings } = options;
     const conc = Math.min(16, Math.max(1, Number(settings.concurrency || 3)));
@@ -377,7 +386,7 @@ export function useSearch() {
           (sum, arr) => sum + (arr?.length || 0),
           0
         );
-        if (curTotal >= maxResultsThreshold) {
+        if (curTotal >= targetMax) {
           autoPausedAtLimit.value = true;
           setPaused(true);
           pausedAtTaskIndex = completedCount;
@@ -623,7 +632,6 @@ export function useSearch() {
   function resetSearch(): void {
     cancelActiveRequests();
     searchSeq++;
-    maxResultsThreshold = MAX_RESULTS_PER_ROUND;
     autoPausedAtLimit.value = false;
     setLoading(false);
     setDeepLoading(false);
