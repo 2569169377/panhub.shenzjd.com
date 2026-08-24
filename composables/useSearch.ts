@@ -512,6 +512,7 @@ export function useSearch() {
                 if (import.meta.dev) {
                   console.log("[SSE setMerged]", { keys: Object.keys(currentMerged), total: curTotal });
                 }
+              }
               // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
               if (curTotal >= maxResultsThreshold) {
                 autoPausedAtLimit.value = true;
