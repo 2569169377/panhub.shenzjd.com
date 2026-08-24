@@ -268,4 +268,32 @@ describe("HotSearchService 读缓存", () => {
     await service.clearHotSearches();
     expect(((service as any).readCache as Map<string, unknown>).size).toBe(0);
   });
+
+  it("flush 成功后清「按日期聚合」缓存(calendar/day/daily)，但保留首页 hot/random 缓存", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("flush前词");
+    await service.flush(); // flush 后缓存空
+
+    // 填充三类缓存：日期聚合(calendar/day/daily) + 首页(hot/random)
+    await service.getCalendar(30);
+    await service.getDayItems("2026-08-25");
+    await service.getDailySearches("2026-08-25");
+    await service.getHotSearches(10);
+    await service.getRandomHotSearches(25);
+    const cache = (service as any).readCache as Map<string, unknown>;
+    expect(cache.has("calendar:30")).toBe(true);
+    expect(cache.has("day:2026-08-25")).toBe(true);
+    expect(cache.has("daily:2026-08-25")).toBe(true);
+    expect(cache.has("hot:10")).toBe(true);
+    expect(cache.has("random:25")).toBe(true);
+
+    // 新搜索再次 flush：日期聚合键应被清空，首页缓存保留（避免高频读次数徒增）
+    await service.recordSearch("flush后新词");
+    await service.flush();
+    expect(cache.has("calendar:30")).toBe(false);
+    expect(cache.has("day:2026-08-25")).toBe(false);
+    expect(cache.has("daily:2026-08-25")).toBe(false);
+    expect(cache.has("hot:10")).toBe(true); // 保留
+    expect(cache.has("random:25")).toBe(true); // 保留
+  });
 });

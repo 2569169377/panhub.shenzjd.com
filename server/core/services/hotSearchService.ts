@@ -17,8 +17,9 @@ const FLUSH_INTERVAL_MS =
  * 读缓存 TTL（2026-08-24 新增：热搜读接口不再每次请求都查库）
  * - READ_TTL_FAST：词云/榜单等高频且实时性要求中的接口
  * - READ_TTL_SLOW：日历/统计等低频变化的历史聚合数据
- * 写 flush 不清缓存（热搜为累计/当日聚合数据，延迟 TTL 可见可接受），
- * delete/clear 时主动清缓存保证删后立即可见。
+ * 写 flush 成功后会清「按日期聚合」的读缓存（calendar:/day:/daily:，保证"今日词数"
+ * 等聚合读及时反映新 flush 的数据，避免页头/列表口径在 TTL 内不一致的视觉 bug）；
+ * 但保留首页 hot:/random: 与累计统计缓存，不徒增高频读次数。delete/clear 时清全部。
  */
 const READ_TTL_FAST_MS = Number(process.env.HOT_SEARCH_READ_TTL_MS) || 60_000;
 const READ_TTL_SLOW_MS = 5 * 60_000;
@@ -125,9 +126,22 @@ export class HotSearchService {
     return value;
   }
 
-  /** 清空读缓存（delete/clear 后调用，保证删后立即可见） */
+  /** 清空全部读缓存（delete/clear 后调用，保证删后立即可见） */
   private clearReadCache(): void {
     this.readCache.clear();
+  }
+
+  /**
+   * 仅清「按日期聚合」的读缓存（calendar:/day:/daily:），保留首页 hot:/random:
+   * 与累计统计(total_*) 缓存——避免 flush 把高流量首页缓存也打掉导致读次数徒增，
+   * 同时解除页头"今日词数"与列表口径在 TTL 内不一致的视觉 bug。
+   */
+  private clearDateScopedReadCache(): void {
+    for (const key of this.readCache.keys()) {
+      if (key.startsWith("calendar:") || key.startsWith("day:") || key.startsWith("daily:")) {
+        this.readCache.delete(key);
+      }
+    }
   }
 
   /**
@@ -187,6 +201,10 @@ export class HotSearchService {
       for (const [day, delta] of dailyDelta) {
         await store.recordDailySearches(day, delta);
       }
+      // 落盘成功后只清「按日期聚合」的读缓存(calendar/day/daily)：
+      // 避免页头"今日词数"与列表口径在 5min TTL 内不一致（如页头 60 / 列表 5），
+      // 同时保留首页 hot/random 与累计统计缓存，不徒增高频读次数
+      this.clearDateScopedReadCache();
     })()
       .catch((err) => {
         console.log(
