@@ -191,3 +191,81 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     expect(await service.getTotalTerms()).toBe(2);
   });
 });
+
+describe("HotSearchService 读缓存", () => {
+  let service: HotSearchService;
+  let resetHotSearchService: () => void;
+
+  beforeAll(async () => {
+    process.env.TURSO_URL = "file::memory:";
+    delete process.env.TURSO_AUTH_TOKEN;
+    const mod = await import("../../server/core/services/hotSearchService");
+    resetHotSearchService = mod.resetHotSearchService;
+    service = mod.getOrCreateHotSearchService();
+    await service.clearHotSearches();
+  });
+
+  afterAll(() => {
+    resetHotSearchService();
+    delete process.env.TURSO_URL;
+  });
+
+  it("首次读取查库并写入缓存，TTL 内重复读取命中（不再查库）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("缓存词A");
+    await service.flush();
+
+    // 首次读取：缓存 miss → 查库 → 写入缓存
+    const first = await service.getHotSearches(10);
+    expect(first.some((s) => s.term === "缓存词A")).toBe(true);
+    const cacheAfterFirst = (service as any).readCache as Map<string, { value: unknown; expires: number }>;
+    expect(cacheAfterFirst.has("hot:10")).toBe(true);
+
+    // 二次读取：TTL 内命中缓存，缓存条目数不增加（未再查库）
+    const cacheSizeBefore = cacheAfterFirst.size;
+    const second = await service.getHotSearches(10);
+    expect(second).toEqual(first);
+    expect(cacheAfterFirst.size).toBe(cacheSizeBefore);
+    expect(cacheAfterFirst.get("hot:10")).toBeDefined();
+  });
+
+  it("词云随机抽样同样走缓存（60s 内结果稳定）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("词云缓存词");
+    await service.flush();
+
+    const a = await service.getRandomHotSearches(25);
+    const cache = (service as any).readCache as Map<string, unknown>;
+    expect(cache.has("random:25")).toBe(true);
+    const b = await service.getRandomHotSearches(25);
+    expect(b).toEqual(a);
+  });
+
+  it("deleteHotSearch 后读缓存立即失效（被删词不再出现）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("待删缓存词");
+    await service.flush();
+
+    // 先读一次填充缓存
+    const before = await service.getHotSearches(50);
+    expect(before.some((s) => s.term === "待删缓存词")).toBe(true);
+    expect(((service as any).readCache as Map<string, unknown>).size).toBeGreaterThan(0);
+
+    // 删除后缓存清空，再读走查库 → 不含被删词
+    await service.deleteHotSearch("待删缓存词");
+    expect(((service as any).readCache as Map<string, unknown>).size).toBe(0);
+    const after = await service.getHotSearches(50);
+    expect(after.some((s) => s.term === "待删缓存词")).toBe(false);
+  });
+
+  it("clearHotSearches 清空读缓存", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("清空缓存词");
+    await service.flush();
+    await service.getHotSearches(10); // 填充缓存
+    expect(((service as any).readCache as Map<string, unknown>).size).toBeGreaterThan(0);
+
+    await service.clearHotSearches();
+    expect(((service as any).readCache as Map<string, unknown>).size).toBe(0);
+  });
+});
