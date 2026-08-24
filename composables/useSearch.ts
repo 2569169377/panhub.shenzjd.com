@@ -498,6 +498,7 @@ export function useSearch() {
           if (evt.event === "chunk") {
             try {
               const payload = JSON.parse(evt.data);
+              devLog("[SSE] chunk", { done: payload.done, total: payload.total, mergedKeys: Object.keys(payload.merged || {}) });
               if (payload.merged) {
                 currentMerged = mergeMergedByType(currentMerged, payload.merged);
                 curTotal = Object.values(currentMerged).reduce(
@@ -506,6 +507,7 @@ export function useSearch() {
                 );
                 setMerged(currentMerged);
                 setTotal(curTotal);
+                devLog("[SSE] setMerged ok, total=", curTotal, "keys=", Object.keys(currentMerged));
               }
               // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
               if (curTotal >= maxResultsThreshold) {
