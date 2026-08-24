@@ -34,8 +34,6 @@ const RATE_LIMITS: Record<string, { limit: number; windowMs: number }> = {
   // 探活每次最多 50 个链接 → 对上游请求放大 50x，需单独收紧防打爆网盘接口
   "/api/check": { limit: 15, windowMs: 60_000 },
   "/api/hot-searches": { limit: 30, windowMs: 60_000 },
-  // 频道配置下发（前端 SSR 拉取，正常一次会话只请求几次；防裸抓频道清单）
-  "/api/channels": { limit: 120, windowMs: 60_000 },
 };
 
 const DEFAULT_LIMIT = { limit: 60, windowMs: 60_000 };

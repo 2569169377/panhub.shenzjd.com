@@ -13,16 +13,12 @@ export interface UseSettingsReturn {
   loadSettings: () => void;
 }
 
-/** /api/channels 下发的频道配置结构 */
-export interface ChannelConfigPayload {
-  version: number;
-  priorityChannels: string[];
-  defaultChannels: string[];
-}
-
-function getDefaultSettings(defaultTgChannels: string[]): UserSettings {
+function getDefaultSettings(): UserSettings {
   return {
-    enabledTgChannels: [...defaultTgChannels],
+    // 2026-08-24：频道清单彻底移出前端，前端不再持有。
+    // 搜索时由后端从 channelConfigService 切片（前端只传批次号），
+    // 详见 server/core/utils/batchChannels.ts。
+    enabledTgChannels: [],
     enabledPlugins: [...DEFAULT_USER_SETTINGS.enabledPlugins],
     concurrency: DEFAULT_USER_SETTINGS.concurrency,
     pluginTimeoutMs: DEFAULT_USER_SETTINGS.pluginTimeoutMs,
@@ -35,23 +31,12 @@ function getDefaultSettings(defaultTgChannels: string[]): UserSettings {
  * 2026-08-21：设置面板已移除 —— 频道/插件信息是核心资产，
  * 由服务端接口与广告一起下发；客户端不再提供可配置入口。
  *
- * 2026-08-24：频道清单彻底移出仓库/前端 bundle，改为 SSR 时
- * useFetch('/api/channels') 从服务端拉取（服务端从 Turso 解密缓存）。
- * 前端仍需要频道名用于分批搜索，但抓取/解析逻辑全在服务器。
+ * 2026-08-24：频道清单彻底移出前端（不再经 /api/channels 下发），
+ * 搜索时分批逻辑也由后端负责（前端只发"第几批"），前端永远见不到
+ * 完整频道清单。enabledTgChannels 字段保留为兼容历史，但永远空数组。
  */
 export function useSettings(): UseSettingsReturn {
-  const { data } = useFetch<ChannelConfigPayload>("/api/channels");
-
-  const defaultTgChannels = computed(() => {
-    const channels = data.value?.defaultChannels;
-    return Array.isArray(channels) && channels.length > 0 ? channels : [];
-  });
-
-  // 使用 Nuxt useState 替代模块级单例，SSR 安全
-  // （SSR 端 useFetch 已 resolve，defaultTgChannels 有值；客户端 hydration 复用）
-  const settings = useState<UserSettings>("user-settings", () =>
-    getDefaultSettings(defaultTgChannels.value)
-  );
+  const settings = useState<UserSettings>("user-settings", () => getDefaultSettings());
 
   // 保留函数签名以兼容现有调用方；不再做任何本地持久化
   function loadSettings(): void {}

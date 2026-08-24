@@ -33,6 +33,12 @@ export interface SearchOptions {
   onAuthRequired?: () => void;
 }
 
+/**
+ * 后端 TG 频道分批大小（2026-08-24 频道零落地改造后固定，
+ * 必须与 server/core/utils/batchChannels.ts 的默认一致）
+ */
+const TG_BATCH_SIZE = 2;
+
 export interface SearchState {
   loading: boolean;
   deepLoading: boolean;
@@ -112,6 +118,30 @@ export function useSearch() {
     }
   }
 
+  // 续跑时复用上次 countOnly 拿到的批数（同一关键词的搜索）
+  let lastTotalTgBatches = 0;
+  let lastCountedKeyword = "";
+
+  /** 向后端问"有 N 批"，不实际搜索（响应只有数字，无频道明文） */
+  async function fetchTgBatchCount(apiBase: string, keyword: string): Promise<number> {
+    try {
+      const q = new URLSearchParams({
+        kw: keyword,
+        countOnly: "1",
+        batchSize: String(TG_BATCH_SIZE),
+        src: "tg",
+      });
+      const resp = await $fetch<GenericResponse<{ totalBatches: number }>>(
+        `${apiBase}/search?${q.toString()}`,
+        { credentials: "include" } as any
+      );
+      return Number(resp.data?.totalBatches) || 0;
+    } catch (e) {
+      devWarn("fetchTgBatchCount 失败，TG 批数设为 0:", e);
+      return 0;
+    }
+  }
+
   // 继续搜索（从暂停处继续，与 performParallelSearch 同一套任务流）
   async function continueSearch(options: SearchOptions): Promise<void> {
     if (!state.value.paused || !state.value.searched) return;
@@ -125,7 +155,13 @@ export function useSearch() {
 
     const startFrom = pausedAtTaskIndex;
     try {
-      await performParallelSearch(options, searchSeq, startFrom, state.value.merged);
+      await performParallelSearch(
+        options,
+        searchSeq,
+        startFrom,
+        state.value.merged,
+        lastTotalTgBatches
+      );
     } catch (error) {
       // 忽略错误
     } finally {
@@ -143,7 +179,13 @@ export function useSearch() {
     keyword: string,
     conc: number,
     pluginTimeoutMs: number,
-    params: { src: "plugin" | "tg"; plugins?: string; channels?: string },
+    params: {
+      src: "plugin" | "tg";
+      plugins?: string;
+      /** TG 批次：传 batch 索引 + batchSize，后端从频道清单切片（前端无频道知识） */
+      batch?: number;
+      batchSize?: number;
+    },
     label: string,
     shouldSkip: () => boolean,
     onAuthRequired?: () => void,
@@ -167,7 +209,10 @@ export function useSearch() {
           ext: extParam,
         });
         if (params.plugins) q.set("plugins", params.plugins);
-        if (params.channels) q.set("channels", params.channels);
+        if (params.batch != null) {
+          q.set("batch", String(params.batch));
+          q.set("batchSize", String(params.batchSize || TG_BATCH_SIZE));
+        }
         const response = await $fetch<GenericResponse<SearchResponse>>(
           `${apiBase}/search?${q.toString()}`,
           { signal: ac.signal, credentials: "include" } as any
@@ -193,11 +238,13 @@ export function useSearch() {
 
   // 并发搜索 - 每个源独立请求，支持从 startFromTaskIndex 断点续跑
   // initialMerged: continueSearch 时传入暂停前已累积的结果，避免覆盖
+  // totalTgBatches: 由 performSearch 先 countOnly 拿到（前端无频道知识，后端切片）
   async function performParallelSearch(
     options: SearchOptions,
     mySeq: number,
     startFromTaskIndex = 0,
-    initialMerged?: MergedLinks
+    initialMerged?: MergedLinks,
+    totalTgBatches = 0
   ): Promise<void> {
     const { apiBase, keyword, settings } = options;
     const conc = Math.min(16, Math.max(1, Number(settings.concurrency || 3)));
@@ -206,9 +253,8 @@ export function useSearch() {
       ALL_PLUGIN_NAMES.includes(n as any)
     );
 
-    const enabledTgChannels = settings.enabledTgChannels || [];
-
-    if (enabledPlugins.length === 0 && enabledTgChannels.length === 0) {
+    // 2026-08-24：前端不再持有频道清单，TG 批数完全由后端通过 countOnly 告知
+    if (enabledPlugins.length === 0 && totalTgBatches === 0) {
       setError("请先在设置中选择至少一个搜索来源");
       return;
     }
@@ -235,22 +281,19 @@ export function useSearch() {
       );
     }
 
-    // 为 TG 频道创建搜索任务（每批 2 个频道作为一个任务）：
-    // 服务端单请求只等 2 个频道抓完（约 2~4s）就返回 → "边搜边出"更细粒度，
-    // 前面几条结果很快出现，后续批次陆续补齐；同时服务端单请求并发减半，
-    // 适配 2 核小服务器。结果集不变（全部频道都会搜到）。
-    const tgBatchSize = 2;
-    for (let i = 0; i < enabledTgChannels.length; i += tgBatchSize) {
-      const batch = enabledTgChannels.slice(i, i + tgBatchSize);
-      const isLastBatch = i + tgBatchSize >= enabledTgChannels.length;
+    // 为 TG 批次创建搜索任务（每批 batchSize 个频道作为一个任务）：
+    // 2026-08-24 频道零落地：前端只传批次号 batch=N，后端从 defaultChannels 切片抓取
+    // 服务端单请求只等这一批（2 频道）抓完就返回 → "边搜边出"更细粒度
+    for (let i = 0; i < totalTgBatches; i++) {
+      const isLastBatch = i === totalTgBatches - 1;
       searchTasks.push(
         createSearchTask(
           apiBase,
           keyword,
           conc,
           settings.pluginTimeoutMs,
-          { src: "tg", channels: batch.join(",") },
-          `TG batch ${Math.floor(i / tgBatchSize)}`,
+          { src: "tg", batch: i, batchSize: TG_BATCH_SIZE },
+          `TG batch ${i}`,
           shouldSkip,
           onAuth,
           // 深搜只允许最后一批触发，避免每批"结果<3"误触发翻页爆炸
@@ -343,14 +386,6 @@ export function useSearch() {
       ALL_PLUGIN_NAMES.includes(n as any)
     );
 
-    if (
-      (settings.enabledTgChannels?.length || 0) === 0 &&
-      enabledPlugins.length === 0
-    ) {
-      setError("请先在设置中选择至少一个搜索来源");
-      return;
-    }
-
     // iOS Safari 兼容性：确保输入框失去焦点
     if (
       typeof window !== "undefined" &&
@@ -373,9 +408,16 @@ export function useSearch() {
     const start = performance.now();
 
     try {
+      // 2026-08-24 频道零落地：先问后端"TG 有 N 批"（响应只有数字，无频道名），
+      // 再用 N 个 batch 任务去并发抓取；keyword 变化时重新 countOnly。
+      if (lastCountedKeyword !== keyword) {
+        lastTotalTgBatches = await fetchTgBatchCount(options.apiBase, keyword);
+        lastCountedKeyword = keyword;
+      }
+
       // 并行搜索 - 每个源独立请求，实时更新
-      await performParallelSearch(options, mySeq);
-      
+      await performParallelSearch(options, mySeq, 0, undefined, lastTotalTgBatches);
+
       if (mySeq !== searchSeq) return;
     } catch (error: any) {
       setError(error?.data?.message || error?.message || "请求失败");
