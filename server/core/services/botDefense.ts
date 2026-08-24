@@ -8,6 +8,36 @@ function normalizeIp(ip: string): string {
   return v;
 }
 
+/** 简单 IP 匹配：精确相等 + IPv4 CIDR 段。IPv6 CIDR 也支持（按 /64 简化为前缀匹配） */
+function ipMatches(ip: string, entry: string): boolean {
+  if (!entry) return false;
+  if (entry === ip) return true;
+  if (entry.includes("/")) {
+    // CIDR 段
+    const [base, bitsStr] = entry.split("/");
+    const bits = parseInt(bitsStr, 10);
+    if (isNaN(bits)) return false;
+    if (base.includes(":")) {
+      // IPv6 CIDR：仅按整段比较（前 bits/16 段）
+      const a = base.split(":");
+      const b = ip.split(":");
+      const n = Math.floor(bits / 16);
+      if (a.length < n || b.length < n) return false;
+      for (let i = 0; i < n; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+    // IPv4 CIDR
+    const toInt = (s: string) =>
+      s.split(".").reduce((acc, p) => (acc << 8) | Number(p), 0) >>> 0;
+    const ipNum = toInt(ip);
+    const baseNum = toInt(base);
+    if (isNaN(ipNum) || isNaN(baseNum)) return false;
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (ipNum & mask) === (baseNum & mask);
+  }
+  return false;
+}
+
 /**
  * Bot 防御服务（2026-08-24 用户拍板）
  *
@@ -25,18 +55,34 @@ function normalizeIp(ip: string): string {
  * - 阈值策略：同一 IP 在 60s 内累计 5 次 reject → 拉黑 24h
  *   既能逮住分布式低频攻击（被拦 5+ 次说明意图明显），也能容忍真人偶发误判
  * - recordRejection 静默吞错：拦截 hot path 不能因持久化失败拖慢搜索
+ *
+ * 2026-08-24 紧急调整（用户调试 WX_AUTH 时真人 IP 被累计拉黑）：
+ * - HOT_THRESHOLD 5→50：原 5 次门槛太敏感，真人调试 WX_AUTH 用 curl
+ *   触发 UA 拦截 7 次就被拉黑
+ * - HOT_WINDOW_MS 60s→300s：5min 累计 50 次才拉黑，分布式持续攻击仍能逮
+ *   （即使 1 req/6s 也能在 5min 内累积 50），调试期真人短时间多次不触发
+ * - 新增 BOT_DEFENSE_WHITELIST 环境变量（逗号分隔 IP/CIDR），命中跳过
+ *   一切 recordRejection（owner 本机/IPv6 段豁免）
+ * - 新增 BOT_DEFENSE_ENFORCE=1 开关：未开启时 isBlocked 恒返回 false
+ *   （只累计、不拦截）。**2026-08-24 22:53 紧急恢复线上：用户真人 IP 被
+ *   误拉黑后所有搜索 403，先默认关闭拦截恢复搜索，等机制稳定再开**
  */
 
 /** 黑名单内存缓存 TTL（热 path 长期命中） */
 const POS_CACHE_TTL_MS = 5 * 60_000;
 /** 负缓存 TTL（短时间内不再查同一个非黑名单 IP） */
 const NEG_CACHE_TTL_MS = 30_000;
-/** 拉黑阈值：同一 IP 累计拒绝次数 */
-const HOT_THRESHOLD = 5;
-/** 拉黑阈值时间窗（毫秒）：跨越此窗口累计的拒绝不算持续攻击 */
-const HOT_WINDOW_MS = 60_000;
+/** 拉黑阈值：同一 IP 累计拒绝次数（2026-08-24 从 5 调到 50） */
+const HOT_THRESHOLD = 50;
+/** 拉黑阈值时间窗（毫秒，2026-08-24 从 60s 调到 300s） */
+const HOT_WINDOW_MS = 5 * 60_000;
 /** prune 周期 */
 const PRUNE_INTERVAL_MS = 5 * 60_000;
+
+/** 是否开启 IP 黑名单拦截（默认关闭，显式设 BOT_DEFENSE_ENFORCE=1 才拦截） */
+export function isBotDefenseEnforced(): boolean {
+  return process.env.BOT_DEFENSE_ENFORCE === "1";
+}
 
 interface CacheEntry {
   expiresAt: number;
@@ -101,7 +147,14 @@ export class BotDefenseService {
   private isUsableIp(ip: string): boolean {
     if (!ip || ip === "unknown") return false;
     const n = normalizeIp(ip);
-    return n.length > 0;
+    if (n.length === 0) return false;
+    // 白名单 IP 跳过（owner 本机/CIDR，环境变量逗号分隔；命中后直接视为"非攻击源"）
+    const whitelist = (process.env.BOT_DEFENSE_WHITELIST || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (whitelist.some((entry) => ipMatches(n, entry))) return false;
+    return true;
   }
 
   /**
@@ -110,6 +163,7 @@ export class BotDefenseService {
    * 任何错误一律放行（fail-open），避免持久化故障误伤真人。
    */
   async isBlocked(ip: string, now: number = Date.now()): Promise<boolean> {
+    if (!isBotDefenseEnforced()) return false; // 2026-08-24 紧急恢复：开关关闭时不拦截
     if (!this.isUsableIp(ip)) return false;
     await this.waitForInit();
     const nip = normalizeIp(ip);

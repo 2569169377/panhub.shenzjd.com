@@ -48,12 +48,14 @@ vi.mock("../../server/core/services/tursoBotDefenseStore", () => ({
 }));
 
 // 必须在 mock 后 import service
-import { BotDefenseService } from "../../server/core/services/botDefense";
+import { BotDefenseService, isBotDefenseEnforced } from "../../server/core/services/botDefense";
 
 describe("BotDefenseService.isBlocked", () => {
   let svc: BotDefenseService;
 
   beforeEach(async () => {
+    // 测试 isBlocked 行为需要开启 enforce（默认关闭 = 只累计不拦截，已另有用例覆盖）
+    process.env.BOT_DEFENSE_ENFORCE = "1";
     fake = makeFakeStore();
     svc = new BotDefenseService();
     // 等 initPromise（rejection 调用 store）
@@ -62,9 +64,30 @@ describe("BotDefenseService.isBlocked", () => {
     fake.isBlocked.mockClear();
   });
 
+  afterEach(() => {
+    delete process.env.BOT_DEFENSE_ENFORCE;
+  });
+
   it("无效 IP（空串/'unknown'）一律视为不在黑名单", async () => {
     expect(await svc.isBlocked("")).toBe(false);
     expect(await svc.isBlocked("unknown")).toBe(false);
+  });
+
+  it("BOT_DEFENSE_ENFORCE 未设置时 isBlocked 恒 false（2026-08-24 紧急恢复：只累计不拦截）", async () => {
+    delete process.env.BOT_DEFENSE_ENFORCE;
+    fake.isBlocked.mockResolvedValue(true); // 即使 store 说有黑名单也不拦
+    expect(await svc.isBlocked("1.2.3.4")).toBe(false);
+    expect(await svc.isBlocked("9.9.9.9")).toBe(false);
+    expect(fake.isBlocked).not.toHaveBeenCalled(); // 开关关时连 store 都不查
+  });
+
+  it("isBotDefenseEnforced 开关读取（未设置/0 = 关，1 = 开）", () => {
+    delete process.env.BOT_DEFENSE_ENFORCE;
+    expect(isBotDefenseEnforced()).toBe(false);
+    process.env.BOT_DEFENSE_ENFORCE = "0";
+    expect(isBotDefenseEnforced()).toBe(false);
+    process.env.BOT_DEFENSE_ENFORCE = "1";
+    expect(isBotDefenseEnforced()).toBe(true);
   });
 
   it("Turso 返回 blocked → 缓存为 pos，5min 内复用不查 store", async () => {
@@ -106,39 +129,36 @@ describe("BotDefenseService.recordRejection", () => {
     expect(fake.recordRejection).not.toHaveBeenCalled();
   });
 
-  it("同一 IP 累计 ≥5 → 调 extendBlock 拉黑", async () => {
-    for (let i = 0; i < 5; i++) {
+  it("同一 IP 累计 ≥50 → 调 extendBlock 拉黑（2026-08-24 阈值 5→50，防误伤真人）", async () => {
+    for (let i = 0; i < 50; i++) {
       await svc.recordRejection("1.1.1.1", "bot_ua", 1000 + i * 10);
     }
     expect(fake.extendBlock).toHaveBeenCalledTimes(1);
     expect(fake.extendBlock).toHaveBeenCalledWith("1.1.1.1", "bot_ua", expect.any(Number));
   });
 
-  it("累计 <5 不触发 extendBlock", async () => {
-    for (let i = 0; i < 4; i++) {
+  it("累计 <50 不触发 extendBlock", async () => {
+    for (let i = 0; i < 49; i++) {
       await svc.recordRejection("2.2.2.2", "rate_limit", 2000 + i * 10);
     }
     expect(fake.extendBlock).not.toHaveBeenCalled();
   });
 
-  it("滑动窗口：超过 60s 的旧 hit 不连续触发前次拉黑", async () => {
+  it("滑动窗口：超过 300s 的旧 hit 不连续触发前次拉黑", async () => {
     // 第 1 次：t=0（旧）
     await svc.recordRejection("3.3.3.3", "bot_ua", 1000);
-    // 第 2 次：t=200s，远离窗口，旧 hit 被清
-    await svc.recordRejection("3.3.3.3", "bot_ua", 201000);
-    // 至此 hitTimestamps 只剩 [201000]，storedCount = 2。
-    // 再 4 次快速打到 6，但前 4 次都在窗口内连续累计，永远不会"5 次 retry"才拉黑
-    // 因为 storedCount 已经 6，达不到"刚好 5"边界断言
-    // 改成：手动验证 storedCount = 5 时的边界
+    // 第 2 次：t=400s，远离窗口，旧 hit 被清
+    await svc.recordRejection("3.3.3.3", "bot_ua", 401000);
+    // 至此 hitTimestamps 只剩 [401000]，storedCount = 2。
     fake.extendBlock.mockClear();
     fake.recordRejection.mockClear();
     fake.hitCount.clear();
 
-    // 5 次连续快打（窗口内）：
-    for (let i = 0; i < 5; i++) {
-      await svc.recordRejection("4.4.4.4", "bot_ua", 300000 + i * 100);
+    // 50 次连续快打（窗口内）：
+    for (let i = 0; i < 50; i++) {
+      await svc.recordRejection("4.4.4.4", "bot_ua", 500000 + i * 100);
     }
-    // storedCount = 5, recent.length = 5 → 至少一边满足 → extendBlock 1 次
+    // storedCount = 50, recent.length = 50 → 至少一边满足 → extendBlock 1 次
     expect(fake.extendBlock).toHaveBeenCalledTimes(1);
   });
 
