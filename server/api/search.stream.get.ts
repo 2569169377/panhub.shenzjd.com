@@ -125,7 +125,11 @@ export default defineEventHandler(async (event: H3Event) => {
       // 任务统一进并发池：TG 批次 + 各插件源，谁先完成谁先 push chunk
       // → 前端"边搜边出"，不等所有任务完成
       const pLimit = (await import("p-limit")).default;
-      const limit = pLimit(TG_BATCH_CONCURRENCY);
+      // 按类型分两个并发池（TG_BATCH_CONCURRENCY 各自一份）：
+      // 插件池和 TG 池互相独立，避免慢的 TG 占满限流槽位"堵死"插件
+      // （生产 TG 通道很快，dev 环境 TG 受限超时，会让插件晚到 9+ 秒）
+      const tgLimit = pLimit(TG_BATCH_CONCURRENCY);
+      const pluginLimit = pLimit(TG_BATCH_CONCURRENCY);
 
       const totalBatches = Math.max(1, Math.ceil(allChannels.length / TG_BATCH_SIZE));
       // src=all 或 src=plugin 时都跑插件（与 search.get.ts 行为一致）
@@ -139,12 +143,13 @@ export default defineEventHandler(async (event: H3Event) => {
         type: "tg" | "plugin";
         index: number;
       }
-      const allTasks: Task[] = [];
-      for (let i = 0; i < totalBatches; i++) allTasks.push({ type: "tg", index: i });
+      const tgTasks: Task[] = [];
+      for (let i = 0; i < totalBatches; i++) tgTasks.push({ type: "tg", index: i });
+      const pluginTasks: Task[] = [];
       for (let i = 0; i < enabledPlugins.length; i++)
-        allTasks.push({ type: "plugin", index: i });
+        pluginTasks.push({ type: "plugin", index: i });
 
-      const total = allTasks.length;
+      const total = tgTasks.length + pluginTasks.length;
       let done = 0;
       let acc: MergedLinks = {};
       const warnings: string[] = [];
@@ -219,10 +224,11 @@ export default defineEventHandler(async (event: H3Event) => {
         }
       };
 
-      // 并发执行所有任务（TG 批 + 插件）—— 谁先完成谁先 push
-      await Promise.all(
-        allTasks.map((task) => limit(() => runTask(task)))
-      );
+      // 并发执行：TG 池 + 插件池互相独立，慢的 TG 不会"堵"插件
+      await Promise.all([
+        ...tgTasks.map((task) => tgLimit(() => runTask(task))),
+        ...pluginTasks.map((task) => pluginLimit(() => runTask(task))),
+      ]);
 
       // 汇总事件：done 带 merged 作为最终兜底（即使 chunk 全部空，
       // 插件结果也能保证送到前端）
