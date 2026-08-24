@@ -58,6 +58,9 @@ export default defineNuxtConfig({
     "/api/auth/**": { swr: false, cache: false },
     // 搜索接口依赖 Cookie 鉴权，禁止缓存避免 401 被缓存
     "/api/search": { swr: false, cache: false },
+    // SSE 搜索流（2026-08-24 架构改造）：长连接逐批推送，禁止缓存
+    // （默认 /** swr:3600 会把流缓存成 204 空响应）
+    "/api/search.stream": { swr: false, cache: false },
     // 链接检测接口需要读 POST body，禁止缓存避免 body 被中间件消费
     "/api/check": { swr: false, cache: false },
     // 图片代理依赖豆瓣，禁止 SWR 缓存避免错误响应被缓存
