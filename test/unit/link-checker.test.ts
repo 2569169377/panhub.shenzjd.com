@@ -236,6 +236,10 @@ describe("linkChecker / classify115", () => {
     ).toBe("locked");
   });
 
+  it("share_state 2 但 forbid_reason 为空 => locked（不漏判为失效）", () => {
+    expect(classify115({ state: true, errno: 0, data: { share_state: 2, shareinfo: {} } }).status).toBe("locked");
+  });
+
   it("error 含 不存在 => bad", () => {
     expect(classify115({ state: false, error: "分享不存在或已被删除" }).status).toBe("bad");
   });

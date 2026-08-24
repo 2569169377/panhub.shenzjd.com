@@ -167,9 +167,9 @@ function formatDate(d?: string) {
   const now = Date.now();
   const diff = now - dt.getTime();
   const days = Math.floor(diff / 86400000);
-  if (days === 0) return "今天";
+  if (days <= 0) return "今天";
   if (days === 1) return "昨天";
-  if (days < 7) return `${days}天前`;
+  if (days < 30) return `${days}天前`;
   if (days < 365) return `${Math.floor(days / 30)}个月前`;
   return dt.toLocaleDateString("zh-CN");
 }

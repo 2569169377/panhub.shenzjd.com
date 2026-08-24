@@ -663,6 +663,11 @@ export function classify115(rsp: any): CheckOutcome {
     let shareState = data.share_state;
     if (shareState === 0) shareState = data.shareinfo?.share_state;
     if (shareState === 1) return { status: "ok", reason: "链接有效" };
+    // share_state=2 表示分享需要访问码/密码，直接判 locked（不依赖 forbid_reason
+    // 关键词），避免 115 返回空 forbid_reason 时把"需密码"误判为"已失效"
+    if (shareState === 2) {
+      return { status: "locked", reason: data.shareinfo?.forbid_reason?.trim() || "需要访问码" };
+    }
     const reason = (data.shareinfo?.forbid_reason || "").trim() || `链接状态异常(share_state=${shareState})`;
     if (containsAny(reason, ["密码", "提取码"])) {
       return { status: "locked", reason };
