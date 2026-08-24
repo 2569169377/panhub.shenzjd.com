@@ -25,6 +25,11 @@ import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
+import {
+  buildBatchPlan,
+  sliceBatchChannels,
+  parseBatchQuery,
+} from "../core/utils/batchChannels";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
@@ -76,9 +81,35 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const requestedChannels = parseList(q.channels);
+  const { batch, batchSize, countOnly } = parseBatchQuery(q as any);
+
+  // countOnly：前端用于"问后端有 N 批"，不实际搜索，立即返回
+  // （返回的只是数字，不含频道名，零落地）
+  if (countOnly) {
+    const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+    const plan = buildBatchPlan(allChannels, batchSize);
+    const resp: GenericResponse<typeof plan> = {
+      code: 0,
+      message: "ok",
+      data: plan,
+    };
+    return resp;
+  }
+
+  // 决定本次要搜的频道（优先级：前端显式 channels > batch 切片 > 一次性全量）
+  // 切片逻辑在 batchChannels.ts，便于测试
+  const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+  const effChannels: string[] =
+    requestedChannels && requestedChannels.length > 0
+      ? requestedChannels
+      : batch != null
+      ? sliceBatchChannels(allChannels, batch, batchSize)
+      : allChannels;
+
   const req: SearchRequest = {
     kw,
-    channels: parseList(q.channels),
+    channels: effChannels,
     conc: (() => {
       const n = q.conc ? parseInt(String(q.conc), 10) : NaN;
       return Number.isFinite(n) && n >= 1 && n <= 16 ? n : undefined;

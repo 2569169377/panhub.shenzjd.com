@@ -25,6 +25,11 @@ import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
+import {
+  buildBatchPlan,
+  sliceBatchChannels,
+  parseBatchQuery,
+} from "../core/utils/batchChannels";
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
@@ -59,6 +64,29 @@ export default defineEventHandler(async (event) => {
   if (!body.src) body.src = "all";
   if (body.src === "tg") body.plugins = undefined;
   else if (body.src === "plugin") body.channels = undefined;
+
+  // countOnly：前端"问后端有 N 批"，不实际搜索，立即返回（零落地）
+  const requestedChannels = body.channels;
+  const { batch, batchSize, countOnly } = parseBatchQuery(body as any);
+  if (countOnly) {
+    const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+    const plan = buildBatchPlan(allChannels, batchSize);
+    const resp: GenericResponse<typeof plan> = {
+      code: 0,
+      message: "ok",
+      data: plan,
+    };
+    return resp;
+  }
+
+  // 决定本次要搜的频道（channels 显式 > batch 切片 > 一次性全量）
+  const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+  body.channels =
+    requestedChannels && requestedChannels.length > 0
+      ? requestedChannels
+      : batch != null
+      ? sliceBatchChannels(allChannels, batch, batchSize)
+      : allChannels;
 
   const signal = getClientAbortSignal(event);
 
