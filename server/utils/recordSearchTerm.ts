@@ -1,4 +1,5 @@
 import { getOrCreateHotSearchService } from "../core/services/hotSearchService";
+import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 import { loggers } from "../core/utils/logger";
 
 /**
@@ -78,6 +79,9 @@ export async function recordSearchTerm(term: string, ip?: string | null): Promis
     } else {
       loggers.hotSearch.warn(`跳过记录（词条非法）: ${JSON.stringify(term)}`, ip ? { ip } : undefined);
     }
+    // 词条非法（URL/控制字符/纯符号）多半是脚本探测，真人不会发这类内容
+    // 异步累积到 IP 黑名单，与 UA 拦截 + 限流形成三层独立证据
+    if (ip) void getOrCreateBotDefenseService().recordRejection(ip, "bad_term");
     return;
   }
   const t = term.trim();
