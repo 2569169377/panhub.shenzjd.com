@@ -128,7 +128,7 @@
       <div class="empty-card">
         <div class="empty-icon">🔍</div>
         <h3>未找到相关资源</h3>
-        <p>试试其他关键词，或检查设置中的搜索来源是否已启用</p>
+        <p>试试其他关键词，或稍后再试</p>
         <div v-if="hotTerms.length > 0" class="empty-suggestions">
           <span class="empty-suggestions__label">大家都在搜：</span>
           <button
@@ -285,8 +285,6 @@ function getSearchOptions() {
     keyword: kw.value,
     settings: {
       // 2026-08-25：插件/频道知识全在后端，前端设置只保留并发与超时
-      enabledPlugins: settings.value.enabledPlugins,
-      enabledTgChannels: settings.value.enabledTgChannels,
       concurrency: settings.value.concurrency,
       pluginTimeoutMs: settings.value.pluginTimeoutMs,
     },

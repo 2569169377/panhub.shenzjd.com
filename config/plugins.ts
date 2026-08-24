@@ -1,20 +1,3 @@
-// 插件名称常量
-// 警告：此名单同时用于 Web 前端（设置面板勾选）与后端（默认启用列表）
-// 修改时请同时检查：
-//   - server/core/services/index.ts 中的插件注册
-//   - server/core/plugins/ 下的插件实现
-export const ALL_PLUGIN_NAMES = [
-  "pansearch",
-  "melost",
-  "quark4k",
-  "ouge",
-  "wanou",
-  "yunso",
-  "u3c3",
-  // 2026-08-07 新增：dyyjv（电影云集）
-  "dyyjv",
-] as const;
-
 // 平台信息配置 — icon 为官方 favicon 图片路径
 export const PLATFORM_INFO: Record<
   string,
@@ -33,9 +16,8 @@ export const PLATFORM_INFO: Record<
   magnet: { name: "磁力链接", color: "#22c55e", icon: "/icons/magnet.png" },
 };
 
-// 默认用户设置
+// 默认用户设置（仅并发/超时；搜索源全在后端，前端不再配置）
 export const DEFAULT_USER_SETTINGS = {
-  enabledPlugins: [...ALL_PLUGIN_NAMES],
   concurrency: 4,
   pluginTimeoutMs: 5000,
 } as const;

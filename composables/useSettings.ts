@@ -2,8 +2,6 @@ import type { Ref } from "vue";
 import { DEFAULT_USER_SETTINGS } from "~/config/plugins";
 
 export interface UserSettings {
-  enabledTgChannels: string[];
-  enabledPlugins: string[];
   concurrency: number;
   pluginTimeoutMs: number;
 }
@@ -15,11 +13,8 @@ export interface UseSettingsReturn {
 
 function getDefaultSettings(): UserSettings {
   return {
-    // 2026-08-24：频道清单彻底移出前端，前端不再持有。
-    // 搜索时由后端从 channelConfigService 切片（前端只传批次号），
-    // 详见 server/core/utils/batchChannels.ts。
-    enabledTgChannels: [],
-    enabledPlugins: [...DEFAULT_USER_SETTINGS.enabledPlugins],
+    // 2026-08-24：频道清单彻底移出前端，搜索源（频道/插件）全在后端，
+    // 前端不再配置；仅保留并发/超时默认值供 fallback 逃生通道使用。
     concurrency: DEFAULT_USER_SETTINGS.concurrency,
     pluginTimeoutMs: DEFAULT_USER_SETTINGS.pluginTimeoutMs,
   };
@@ -33,7 +28,7 @@ function getDefaultSettings(): UserSettings {
  *
  * 2026-08-24：频道清单彻底移出前端（不再经 /api/channels 下发），
  * 搜索时分批逻辑也由后端负责（前端只发"第几批"），前端永远见不到
- * 完整频道清单。enabledTgChannels 字段保留为兼容历史，但永远空数组。
+ * 完整频道清单；插件亦全在后端注册启用。前端不再持有任何搜索源配置。
  */
 export function useSettings(): UseSettingsReturn {
   const settings = useState<UserSettings>("user-settings", () => getDefaultSettings());

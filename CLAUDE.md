@@ -61,7 +61,7 @@ npm deploy:cf            # Deploy to Cloudflare Workers
 ### Configuration (`config/`)
 
 - **`channels.json`**: 运行参数模板（concurrency, timeouts, cache TTL）。**真实频道清单已于 2026-08-24 迁出仓库**：AES-256-GCM 加密存入 Turso `channel_config` 表，由 `server/core/services/channelConfigService.ts` 拉取解密缓存。修改频道：配好 `CHANNEL_KEY` 后运行 `scripts/sync-channels.mjs`。
-- **`plugins.ts`**: Plugin names (`ALL_PLUGIN_NAMES`), platform info (`PLATFORM_INFO` with colors/icons), `DEFAULT_USER_SETTINGS`, `STORAGE_KEYS`.
+- **`plugins.ts`**: Platform info (`PLATFORM_INFO` with colors/icons) used by the frontend to render source icons; `DEFAULT_USER_SETTINGS` (concurrency/timeout defaults). Plugin names are now owned by the backend `PluginManager` (frontend no longer holds a plugin list).
 - **`doubanHot.ts`**: Douban API configuration.
 - **`data/`**: SQLite database for hot search persistence (Docker/local only, not in git).
 

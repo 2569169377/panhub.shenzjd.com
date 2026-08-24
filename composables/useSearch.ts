@@ -23,8 +23,6 @@ export interface SearchOptions {
   apiBase: string;
   keyword: string;
   settings: {
-    enabledPlugins: string[];
-    enabledTgChannels: string[];
     concurrency: number;
     pluginTimeoutMs: number;
   };
