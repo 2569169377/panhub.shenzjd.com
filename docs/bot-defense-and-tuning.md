@@ -103,7 +103,61 @@ DELETE FROM rejected_ips WHERE ip = '1.2.3.4';
 - API Key 持有者（小程序 / 已授权 client）不受影响（requireAuth 有 Bearer/client-secret 放行）
 - 测试环境先开，确认无误再上生产
 
+### ⚠️ 上线前必做：本地验证手册
+
+上次打开 `WX_AUTH_ENFORCE=1` 时出过问题（用户描述），这次必须**先本地端到端验证**再上：
+
+#### 步骤 1：启动本地 mock wx-auth 服务
+
+```bash
+node scripts/mock-wx-auth.mjs &
+# [mock-wx-auth] listening on http://localhost:8899
+# [mock-wx-auth] 白名单 token: test-fake-token  openid: test-fake-openid
+```
+
+默认会接受 `Cookie: wxauth-token=test-fake-token` 当作"已登录真人"。要扩展白名单，创建 `scripts/.wx-auth-mock.json`：
+
+```json
+{
+  "tokens": ["test-fake-token", "browser-copied-real-token"],
+  "openids": ["test-fake-openid"]
+}
+```
+
+#### 步骤 2：启动 dev server（开启开关 + 指向 mock）
+
+```bash
+WX_AUTH_ENFORCE=1 WX_AUTH_API_BASE=http://localhost:8899 npm run dev
+```
+
+#### 步骤 3：本地 curl 验证四种场景
+
+```bash
+# A. 已登录 token → 应 200 + 搜索结果
+curl -i -H "Cookie: wxauth-token=test-fake-token" \
+  'http://localhost:4000/api/search?kw=凡人修仙传'
+
+# B. 无 cookie → 应 401 wx auth required
+curl -i 'http://localhost:4000/api/search?kw=凡人修仙传'
+
+# C. 错误 token → 应 401 + 累积 IP bad_term
+curl -i -H "Cookie: wxauth-token=garbage" \
+  'http://localhost:4000/api/search?kw=凡人修仙传'
+
+# D. Bearer 凭证（小程序）→ 应 200（已授权 client 不受 wxauth 影响）
+curl -i -H 'Authorization: Bearer dev-bearer' \
+  'http://localhost:4000/api/search?kw=凡人修仙传'
+```
+
+**预期**：A=D=200 且有搜索结果，B=C=401。如果 A 失败 → 立刻关停本地 mock + 回到 WX_AUTH_ENFORCE=0 状态，调查通过路径。
+
+#### 步骤 4：试产前再用真实 cookie 测一次
+
+复制浏览器真实登录态的 `wxauth-token`，修改 `scripts/.wx-auth-mock.json` 加上这个 token，重启 mock 服务，然后 curl 复测。验证走真实 `https://wx-auth.shenzjd.com` 时也没问题（默认 `WX_AUTH_API_BASE` 不设也能跑）。
+
 ### Worker 启用
+
+确认 A/D 路径都好之后：
 
 ```bash
 wrangler secret put WX_AUTH_ENFORCE
