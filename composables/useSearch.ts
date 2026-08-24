@@ -39,6 +39,32 @@ export interface SearchOptions {
  */
 const TG_BATCH_SIZE = 2;
 
+/**
+ * 是否启用 SSE 流式搜索（2026-08-24 架构改造）：
+ * - true：1 个 /api/search.stream 长连接承载整个搜索，服务端逐批推送增量
+ *   → wx-auth 只验 1 次，不反复弹验证码
+ * - false：回退旧的"countOnly + 多 batch 并发"模式
+ * 运行时可被 URL 参数 ?stream=0 强制关闭（灰度/故障逃生）
+ */
+const USE_STREAM_SEARCH = true;
+
+/** 解析一行 SSE 原始事件块（event:xxx\ndata:yyy） */
+interface ParsedSSEEvent {
+  event: string;
+  data: string;
+}
+function parseSSEEventBlock(raw: string): ParsedSSEEvent | null {
+  const lines = raw.split("\n");
+  let event = "message";
+  let data = "";
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  if (!data) return null;
+  return { event, data };
+}
+
 export interface SearchState {
   loading: boolean;
   deepLoading: boolean;
@@ -153,15 +179,36 @@ export function useSearch() {
     maxResultsThreshold += MAX_RESULTS_PER_ROUND;
     autoPausedAtLimit.value = false;
 
-    const startFrom = pausedAtTaskIndex;
     try {
-      await performParallelSearch(
-        options,
-        searchSeq,
-        startFrom,
-        state.value.merged,
-        lastTotalTgBatches
-      );
+      if (USE_STREAM_SEARCH && !isStreamDisabledByQuery()) {
+        // 流式：重新连 SSE（服务端已有缓存，已搜频道秒回；前端保留已有 merged 继续累加）
+        const { usedFallback } = await performStreamSearch(
+          options,
+          searchSeq,
+          state.value.merged,
+          state.value.total
+        );
+        if (usedFallback) {
+          // fallback：旧批次模式续跑
+          const startFrom = pausedAtTaskIndex;
+          await performParallelSearch(
+            options,
+            searchSeq,
+            startFrom,
+            state.value.merged,
+            lastTotalTgBatches
+          );
+        }
+      } else {
+        const startFrom = pausedAtTaskIndex;
+        await performParallelSearch(
+          options,
+          searchSeq,
+          startFrom,
+          state.value.merged,
+          lastTotalTgBatches
+        );
+      }
     } catch (error) {
       // 忽略错误
     } finally {
@@ -372,9 +419,147 @@ export function useSearch() {
     devLog('[performParallelSearch] 所有任务完成');
   }
 
+  /**
+   * SSE 流式搜索（2026-08-24 架构改造）：
+   * - 1 个 /api/search.stream 长连接承载整个搜索，服务端逐批推送 chunk
+   * - 前端边收边增量合并渲染 → 视觉上和旧分批模式一样"持续出结果"
+   * - 自动暂停 90 条：收到 chunk 后检查累计总数，达阈值 abort 流 + 暂停
+   * - 返回 { usedFallback }：true 表示流式不可用，调用方应回退旧分批模式
+   */
+  async function performStreamSearch(
+    options: SearchOptions,
+    mySeq: number,
+    initialMerged?: MergedLinks,
+    initialTotal = 0
+  ): Promise<{ usedFallback: boolean }> {
+    const { apiBase, keyword, settings, onAuthRequired } = options;
+
+    const enabledPlugins = settings.enabledPlugins.filter((n) =>
+      ALL_PLUGIN_NAMES.includes(n as any)
+    );
+
+    const q = new URLSearchParams({
+      kw: keyword,
+      res: "merged_by_type",
+      src: "all",
+      conc: String(Math.min(16, Math.max(1, Number(settings.concurrency || 3)))),
+    });
+    if (enabledPlugins.length > 0) q.set("plugins", enabledPlugins.join(","));
+
+    const controller = new AbortController();
+    activeControllers.push(controller);
+
+    let currentMerged: MergedLinks = initialMerged ? { ...initialMerged } : {};
+    let curTotal = initialTotal;
+
+    try {
+      const resp = await fetch(`${apiBase}/search.stream?${q.toString()}`, {
+        credentials: "include",
+        signal: controller.signal,
+        headers: { accept: "text/event-stream" },
+      });
+
+      if (resp.status === 401) {
+        onAuthRequired?.();
+        return { usedFallback: false };
+      }
+      if (!resp.ok) {
+        devWarn(`[useSearch] SSE HTTP ${resp.status}，回退分批模式`);
+        return { usedFallback: true };
+      }
+      if (!resp.body) {
+        devWarn("[useSearch] SSE 无 body，回退分批模式");
+        return { usedFallback: true };
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // 循环读流，按 \n\n 分割事件块
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let sepIdx = -1;
+        while ((sepIdx = buffer.indexOf("\n\n")) >= 0) {
+          const raw = buffer.slice(0, sepIdx);
+          buffer = buffer.slice(sepIdx + 2);
+          const evt = parseSSEEventBlock(raw);
+          if (!evt) continue;
+
+          // 搜索被重置/暂停时中断读流
+          if (mySeq !== searchSeq || state.value.paused) {
+            controller.abort();
+            return { usedFallback: false };
+          }
+
+          if (evt.event === "chunk") {
+            try {
+              const payload = JSON.parse(evt.data);
+              if (payload.merged) {
+                currentMerged = mergeMergedByType(currentMerged, payload.merged);
+                curTotal = Object.values(currentMerged).reduce(
+                  (sum, arr) => sum + (arr?.length || 0),
+                  0
+                );
+                setMerged(currentMerged);
+                setTotal(curTotal);
+              }
+              // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
+              if (curTotal >= maxResultsThreshold) {
+                autoPausedAtLimit.value = true;
+                setPaused(true);
+                controller.abort();
+                return { usedFallback: false };
+              }
+            } catch (e) {
+              devWarn("[useSearch] SSE chunk 解析失败", e);
+            }
+          } else if (evt.event === "done") {
+            try {
+              const payload = JSON.parse(evt.data);
+              if (typeof payload.total === "number") {
+                curTotal = payload.total;
+                setTotal(curTotal);
+              }
+            } catch {}
+            return { usedFallback: false };
+          } else if (evt.event === "error") {
+            try {
+              const payload = JSON.parse(evt.data);
+              setError(payload.message || "搜索异常");
+            } catch {}
+            return { usedFallback: false };
+          }
+        }
+      }
+
+      return { usedFallback: false };
+    } catch (error: any) {
+      // 主动 abort（暂停/重置）不算失败
+      const isAbort =
+        error?.name === "AbortError" ||
+        error?.cause?.name === "AbortError" ||
+        error?.cause?.cause?.name === "AbortError";
+      if (isAbort) return { usedFallback: false };
+      devWarn("[useSearch] SSE 流异常，回退分批模式:", error);
+      return { usedFallback: true };
+    } finally {
+      const idx = activeControllers.indexOf(controller);
+      if (idx >= 0) activeControllers.splice(idx, 1);
+    }
+  }
+
+  /** URL ?stream=0 强制走旧分批模式（故障逃生） */
+  function isStreamDisabledByQuery(): boolean {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("stream") === "0";
+  }
+
   // 主搜索函数
-  async function performSearch(options: SearchOptions): Promise<void> {
-    const { keyword, settings } = options;
+  async function performSearch(options: SearchOptions): Promise<void> {    const { keyword, settings } = options;
 
     // 验证
     if (!keyword || keyword.trim().length === 0) {
@@ -408,15 +593,28 @@ export function useSearch() {
     const start = performance.now();
 
     try {
-      // 2026-08-24 频道零落地：先问后端"TG 有 N 批"（响应只有数字，无频道名），
-      // 再用 N 个 batch 任务去并发抓取；keyword 变化时重新 countOnly。
-      if (lastCountedKeyword !== keyword) {
-        lastTotalTgBatches = await fetchTgBatchCount(options.apiBase, keyword);
-        lastCountedKeyword = keyword;
+      if (USE_STREAM_SEARCH && !isStreamDisabledByQuery()) {
+        // SSE 流式（2026-08-24 架构改造）：1 个长连接，服务端逐批推送
+        const { usedFallback } = await performStreamSearch(options, mySeq, undefined, 0);
+        if (!usedFallback) {
+          if (mySeq !== searchSeq) return;
+        } else {
+          // fallback：流式不可用（404/网络异常）→ 回退旧的 countOnly + batch 并发
+          devWarn("[useSearch] SSE 流式不可用，回退分批模式");
+          if (lastCountedKeyword !== keyword) {
+            lastTotalTgBatches = await fetchTgBatchCount(options.apiBase, keyword);
+            lastCountedKeyword = keyword;
+          }
+          await performParallelSearch(options, mySeq, 0, undefined, lastTotalTgBatches);
+        }
+      } else {
+        // 旧模式：countOnly + N 个 batch 并发
+        if (lastCountedKeyword !== keyword) {
+          lastTotalTgBatches = await fetchTgBatchCount(options.apiBase, keyword);
+          lastCountedKeyword = keyword;
+        }
+        await performParallelSearch(options, mySeq, 0, undefined, lastTotalTgBatches);
       }
-
-      // 并行搜索 - 每个源独立请求，实时更新
-      await performParallelSearch(options, mySeq, 0, undefined, lastTotalTgBatches);
 
       if (mySeq !== searchSeq) return;
     } catch (error: any) {
