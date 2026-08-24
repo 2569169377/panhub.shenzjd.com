@@ -5,6 +5,7 @@ import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
 import { getClientIp } from "../middleware/rateLimiter";
 import { isWxAuthEnforced, verifyWxAuthOnce } from "./wxAuthCheck";
+import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 
 export function requireSearchAuth(event: H3Event): void {
   const config = useRuntimeConfig();
@@ -42,12 +43,15 @@ export function requireHumanOrCredential(event: H3Event): void {
   const auth = getRequestHeader(event, "authorization");
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
   if ((auth && auth.startsWith("Bearer ")) || clientSecret) return;
+  const ip = getClientIp(event);
   loggers.search.warn(`拦截 bot UA 搜索请求`, {
-    ip: getClientIp(event),
+    ip,
     ua: ua?.slice(0, 200),
     path: event.path,
     method: event.method,
   });
+  // 累积到 IP 黑名单（异步、不阻塞 hot path 拒绝）；同一 IP 多次命中阈值后自动 24h 拉黑
+  void getOrCreateBotDefenseService().recordRejection(ip, "bot_ua");
   throw createError({ statusCode: 403, statusMessage: "bot forbidden" });
 }
 
@@ -73,11 +77,14 @@ export async function requireWxAuth(event: H3Event): Promise<void> {
 
   const ok = await verifyWxAuthOnce(event);
   if (!ok) {
+    const ip = getClientIp(event);
     loggers.search.warn(`拦截未关注公众号的搜索请求`, {
-      ip: getClientIp(event),
+      ip,
       path: event.path,
       method: event.method,
     });
+    // 累积到 IP 黑名单：未关注公众号却直调搜索 API 的脚本行为，等同攻击意图
+    void getOrCreateBotDefenseService().recordRejection(ip, "bot_ua");
     throw createError({ statusCode: 401, statusMessage: "wx auth required" });
   }
 }

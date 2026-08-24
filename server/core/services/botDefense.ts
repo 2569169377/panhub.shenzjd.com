@@ -1,5 +1,12 @@
-import { normalizeIp } from "../../middleware/rateLimiter";
 import { loggers } from "../utils/logger";
+
+/** IPv4-mapped IPv6 规范化（独立内联，不反向依赖 middleware，
+ *  避免 service 被无 server 上下文时引用断链） */
+function normalizeIp(ip: string): string {
+  const v = ip.trim();
+  if (v.startsWith("::ffff:")) return v.slice(7);
+  return v;
+}
 
 /**
  * Bot 防御服务（2026-08-24 用户拍板）
