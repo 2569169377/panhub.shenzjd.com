@@ -83,7 +83,8 @@ export default defineEventHandler(async (event: H3Event) => {
 
   const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
   const src = (q.src as any) || "all";
-  const plugins = parseList(q.plugins);
+  // 2026-08-25 用户拍板：前端不传插件知识（插件在后端注册表，全部启用）。
+  // 前端 URL 里即使带 plugins 参数也忽略（防御：插件选择权完全在后端）。
   const cloudTypes = parseList(q.cloud_types);
   const res = (q.res as any) || "merged_by_type";
   const refresh = String(q.refresh).trim() === "true";
@@ -107,7 +108,7 @@ export default defineEventHandler(async (event: H3Event) => {
     refresh,
     res,
     src,
-    plugins,
+    plugins: undefined, // 插件由后端注册表决定（2026-08-25）
     cloud_types: cloudTypes,
     ext,
   };
@@ -141,10 +142,17 @@ export default defineEventHandler(async (event: H3Event) => {
       const pluginLimit = pLimit(TG_BATCH_CONCURRENCY);
 
       const totalBatches = Math.max(1, Math.ceil(allChannels.length / TG_BATCH_SIZE));
-      // src=all 或 src=plugin 时都跑插件（与 search.get.ts 行为一致）
+      // 插件列表由后端自己持有（2026-08-25 用户拍板：前端不传插件知识，
+      // 插件在后端注册表里，全部启用，与频道一样后端化）。
+      // service.getPluginManager().getPlugins() 返回全部已注册插件，
+      // 按名字切片交给 searchWithWarnings 逐源执行。
       const enabledPlugins =
-        (src === "all" || src === "plugin") && plugins && plugins.length > 0
-          ? plugins
+        src === "all" || src === "plugin"
+          ? service
+              .getPluginManager()
+              .getPlugins()
+              .map((p) => p.name())
+              .filter(Boolean)
           : [];
 
       // 构建任务列表

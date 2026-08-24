@@ -1,5 +1,4 @@
 import type { MergedLinks, GenericResponse, SearchResponse } from "~/types/search";
-import { ALL_PLUGIN_NAMES } from "~/config/plugins";
 import { extractMergedFromResponse } from "~/utils/extractMergedFromResponse";
 import { mergeMergedByType } from "~/utils/mergeMergedByType";
 
@@ -298,12 +297,11 @@ export function useSearch() {
     const { apiBase, keyword, settings } = options;
     const conc = Math.min(16, Math.max(1, Number(settings.concurrency || 3)));
 
-    const enabledPlugins = settings.enabledPlugins.filter((n) =>
-      ALL_PLUGIN_NAMES.includes(n as any)
-    );
-
     // 2026-08-24：前端不再持有频道清单，TG 批数完全由后端通过 countOnly 告知
-    if (enabledPlugins.length === 0 && totalTgBatches === 0) {
+    // 2026-08-25：前端不再持有插件知识（插件在后端注册表，全部启用）。
+    // 本 fallback（SSE 不可用时）简化为纯 TG 批次搜索 —— 插件结果由 SSE
+    // 主通道负责；逃生通道只保底频道搜索，前端零插件知识。
+    if (totalTgBatches === 0) {
       setError("请先在设置中选择至少一个搜索来源");
       return;
     }
@@ -313,22 +311,6 @@ export function useSearch() {
 
     const shouldSkip = () => mySeq !== searchSeq || state.value.paused;
     const onAuth = options.onAuthRequired;
-
-    // 为每个插件创建独立的搜索任务
-    for (const plugin of enabledPlugins) {
-      searchTasks.push(
-        createSearchTask(
-          apiBase,
-          keyword,
-          conc,
-          settings.pluginTimeoutMs,
-          { src: "plugin", plugins: plugin },
-          `Plugin ${plugin}`,
-          shouldSkip,
-          onAuth
-        )
-      );
-    }
 
     // 为 TG 批次创建搜索任务（每批 batchSize 个频道作为一个任务）：
     // 2026-08-24 频道零落地：前端只传批次号 batch=N，后端从 defaultChannels 切片抓取
@@ -436,19 +418,13 @@ export function useSearch() {
     /** 本轮目标结果上限（首搜不传=后端默认 90；「继续」传 已收+90，由后端自己计数停止） */
     maxResults?: number
   ): Promise<{ usedFallback: boolean }> {
-    const { apiBase, keyword, settings, onAuthRequired } = options;
+    const { apiBase, keyword, onAuthRequired } = options;
 
-    const enabledPlugins = settings.enabledPlugins.filter((n) =>
-      ALL_PLUGIN_NAMES.includes(n as any)
-    );
-
+    // 2026-08-25 用户拍板：前端不传插件/并发/源类型（插件与频道都在后端，
+    // 前端只传搜索词 + 继续时的目标总数）。后端自己决定插件与频道、并发与停止。
     const q = new URLSearchParams({
       kw: keyword,
-      res: "merged_by_type",
-      src: "all",
-      conc: String(Math.min(16, Math.max(1, Number(settings.concurrency || 3)))),
     });
-    if (enabledPlugins.length > 0) q.set("plugins", enabledPlugins.join(","));
     // 后端自己计数停止：首搜不传（后端默认 90），「继续」传目标总数
     if (maxResults != null && maxResults > 0) q.set("maxResults", String(maxResults));
 
@@ -586,10 +562,6 @@ export function useSearch() {
       setError("请输入搜索关键词");
       return;
     }
-
-    const enabledPlugins = settings.enabledPlugins.filter((n) =>
-      ALL_PLUGIN_NAMES.includes(n as any)
-    );
 
     // iOS Safari 兼容性：确保输入框失去焦点
     if (

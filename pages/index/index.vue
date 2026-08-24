@@ -284,6 +284,7 @@ function getSearchOptions() {
     apiBase,
     keyword: kw.value,
     settings: {
+      // 2026-08-25：插件/频道知识全在后端，前端设置只保留并发与超时
       enabledPlugins: settings.value.enabledPlugins,
       enabledTgChannels: settings.value.enabledTgChannels,
       concurrency: settings.value.concurrency,
