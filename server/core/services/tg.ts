@@ -137,7 +137,9 @@ export function parseChannelPage(
     const seenUrls = new Set<string>();
     // 匹配 http(s) 链接和 magnet 链接（磁力链接无 hostname，需单独匹配）
     const urlPattern = /https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+|magnet:\?[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+/g;
-    const passwdPattern = /(?:提取码|密码|pwd|pass)[:：\s]*([a-zA-Z0-9]{3,6})/i;
+    // 115 原生访问码术语"访问码"此前漏匹配，导致频道写成"访问码: xxxx"时
+    // 提取码被静默丢弃（角标亮但无码可填）。补上 访问码，并把长度上限放宽到 8。
+    const passwdPattern = /(?:提取码|密码|访问码|pwd|pass)[:：\s]*([a-zA-Z0-9]{3,8})/i;
 
     // 解析原始 URL 为 { url, type }；展开 r.jina.ai 代理，以及 t.me 分享/跳转链接
     // 里嵌套的真实网盘地址（如 https://t.me/share/url?url=https://pan.quark.cn/...）。
@@ -214,7 +216,7 @@ export function parseChannelPage(
       content = content.replace(new RegExp(escaped, "g"), "");
       if (link.password) {
         content = content.replace(
-          new RegExp(`(?:提取码|密码|pwd|pass)[:：\\s]*${link.password}`, "gi"),
+          new RegExp(`(?:提取码|密码|访问码|pwd|pass)[:：\\s]*${link.password}`, "gi"),
           ""
         );
       }

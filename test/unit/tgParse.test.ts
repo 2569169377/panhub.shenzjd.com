@@ -35,4 +35,30 @@ describe("parseChannelPage 链接提取", () => {
     expect(quarkLinks).toHaveLength(1);
     expect(quarkLinks[0].url).toBe("https://pan.quark.cn/s/xyz");
   });
+
+  it("115 频道用「访问码」术语时也能提取密码（修复前被静默丢弃）", () => {
+    const html = wrapMessage(
+      "豆瓣电影Top250[刮削] https://115.com/s/abcdef 访问码：x7k2"
+    );
+    const $ = load(html);
+    const results = parseChannelPage($, "testchan", "", 10);
+
+    expect(results).toHaveLength(1);
+    const links = results[0].links.filter((l) => l.type === "115");
+    expect(links).toHaveLength(1);
+    expect(links[0].url).toBe("https://115.com/s/abcdef");
+    expect(links[0].password).toBe("x7k2");
+  });
+
+  it("访问码不带标点也能提取（如「访问码 x7k2」）", () => {
+    const html = wrapMessage(
+      "资源 https://115.com/s/abcdef 访问码 x7k2 其他说明"
+    );
+    const $ = load(html);
+    const results = parseChannelPage($, "testchan", "", 10);
+
+    const links = results[0].links.filter((l) => l.type === "115");
+    expect(links).toHaveLength(1);
+    expect(links[0].password).toBe("x7k2");
+  });
 });
