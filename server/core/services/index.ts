@@ -1,4 +1,5 @@
 import { SearchService, type SearchServiceOptions } from "./searchService";
+import { getChannelConfigService } from "./channelConfigService";
 import {
   PluginManager,
   registerGlobalPlugin,
@@ -67,11 +68,17 @@ function createPluginManager(): PluginManager {
 
 /**
  * 创建搜索服务选项
+ *
+ * 2026-08-24：频道清单不再来自 runtimeConfig（明文已从仓库移除），
+ * 改由 ChannelConfigService 提供（Turso 加密存储 → 解密缓存快照）。
+ * 调用方（搜索 API 入口）应先 await getChannelConfigService().ensureLoaded()，
+ * 保证首次请求时快照已就绪；未加载时返回空数组，由隔离闸 B 降级。
  */
 function createServiceOptions(runtimeConfig: any): SearchServiceOptions {
+  const channelSnapshot = getChannelConfigService().getSnapshot();
   return {
-    priorityChannels: runtimeConfig.priorityChannels || [],
-    defaultChannels: runtimeConfig.defaultChannels || [],
+    priorityChannels: channelSnapshot.priorityChannels,
+    defaultChannels: channelSnapshot.defaultChannels,
     defaultConcurrency: runtimeConfig.defaultConcurrency || 10,
     pluginTimeoutMs: runtimeConfig.pluginTimeoutMs || 15000,
     cacheEnabled: !!runtimeConfig.cacheEnabled,
