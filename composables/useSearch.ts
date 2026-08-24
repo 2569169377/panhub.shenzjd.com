@@ -498,7 +498,9 @@ export function useSearch() {
           if (evt.event === "chunk") {
             try {
               const payload = JSON.parse(evt.data);
-              devLog("[SSE] chunk", { done: payload.done, total: payload.total, mergedKeys: Object.keys(payload.merged || {}) });
+              if (import.meta.dev) {
+                console.log("[SSE chunk]", { done: payload.done, total: payload.total, mergedKeys: Object.keys(payload.merged || {}), mergedSizes: Object.fromEntries(Object.entries(payload.merged || {}).map(([k, v]: [string, any]) => [k, v.length])) });
+              }
               if (payload.merged) {
                 currentMerged = mergeMergedByType(currentMerged, payload.merged);
                 curTotal = Object.values(currentMerged).reduce(
@@ -507,15 +509,8 @@ export function useSearch() {
                 );
                 setMerged(currentMerged);
                 setTotal(curTotal);
-                // TEMP DEBUG：dev 模式 alert，方便用户看到 setMerged 真设了值
-                if (import.meta.dev && typeof window !== "undefined" && (window as any).__SSE_DEBUG__) {
-                  console.log("[SSE setMerged]", {
-                    keys: Object.keys(currentMerged),
-                    perKey: Object.fromEntries(
-                      Object.entries(currentMerged).map(([k, v]) => [k, v.length])
-                    ),
-                    total: curTotal,
-                  });
+                if (import.meta.dev) {
+                  console.log("[SSE setMerged]", { keys: Object.keys(currentMerged), total: curTotal });
                 }
               // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
               if (curTotal >= maxResultsThreshold) {
