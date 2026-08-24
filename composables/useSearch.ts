@@ -552,7 +552,12 @@ export function useSearch() {
               if (payload.reachedLimit) {
                 autoPausedAtLimit.value = true;
                 setPaused(true);
-                setLoading(false);
+                // ⚠️ 修复（2026-08-25）：这里绝不能 setLoading(false)！
+                // "继续"按钮显示条件是 loading && paused（SearchBox.vue:86），
+                // 置 false 后按钮消失，页面只剩"搜索"按钮；用户以为点的
+                // "继续"实际是 onSearch → resetSearch → 清空进度重新从头搜
+                // （无 skipTasks/initialTotal）→ 第二次结果漂移/重复首轮。
+                // paused 时保持 loading=true 让"继续"按钮可见可点。
               }
             } catch {}
             return { usedFallback: false };
