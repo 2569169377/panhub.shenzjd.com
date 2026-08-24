@@ -505,20 +505,23 @@ export function useSearch() {
           } else if (evt.event === "done") {
             try {
               const payload = JSON.parse(evt.data);
-              if (typeof payload.total === "number") {
-                curTotal = payload.total;
-                setTotal(curTotal);
-              }
-              // done 事件带 merged：覆盖完整结果（处理插件结果合并的场景，
-              // 因为插件是 SSE 端点最后追加的，前面 chunk 流只包含 TG 增量）
+              // done 事件带 merged：与 chunk 一样做合并去重，绝不直接覆盖
+              // —— 后端 acc 是本次连接从头累积的快照，继续搜索时缓存部分
+              // 失效会导致 acc < 前端已有，直接 setMerged 会丢数据
+              // （用户反馈 126 → 97）。
+              // 首搜时 currentMerged={}，合并空集 = 插件结果，兜底语义不变。
               if (payload.merged && Object.keys(payload.merged).length > 0) {
-                setMerged(payload.merged);
-                curTotal = Object.values(payload.merged).reduce(
-                  (sum, arr) => sum + (arr?.length || 0),
-                  0
-                );
-                setTotal(curTotal);
+                currentMerged = mergeMergedByType(currentMerged, payload.merged);
+                setMerged(currentMerged);
               }
+              // total 始终用前端真实 currentMerged 重算，不信后端
+              // payload.total（继续搜索时 payload.total 是后端本次 acc
+              // 视角，可能 < 前端已有），避免数字被覆盖变小
+              curTotal = Object.values(currentMerged).reduce(
+                (sum, arr) => sum + (arr?.length || 0),
+                0
+              );
+              setTotal(curTotal);
               // reachedLimit=true：后端已因结果达到上限停止剩余请求。
               // 前端只负责展示"已找到 N 条，点击继续"（服务端真的停了，
               // 继续 = 重新连流，缓存秒回已搜 + 继续未搜）
