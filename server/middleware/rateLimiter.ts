@@ -1,5 +1,6 @@
 import { defineEventHandler, getHeader, createError, setHeader } from "h3";
 import { isIP } from "node:net";
+import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 
 /**
  * 全局限流中间件（IP 级，固定窗口）
@@ -139,6 +140,9 @@ export function createRateLimitMiddleware(config: RateLimitConfig = {}) {
     if (entry.count > limit) {
       const retryAfter = Math.ceil((entry.resetTime - now) / 1000);
       setHeader(event, "Retry-After", String(retryAfter));
+      // 累积到 IP 黑名单（异步、不阻塞 429 抛出）：单 IP 短时间内反复触发限流，
+      // 大概率是脚本/爬虫在试探阈值；与 UA 拦截共同构成两层证据
+      void getOrCreateBotDefenseService().recordRejection(ip, "rate_limit");
       throw createError({
         statusCode: 429,
         message: `请求过于频繁，请${retryAfter}秒后重试`,
