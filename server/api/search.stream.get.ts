@@ -122,110 +122,120 @@ export default defineEventHandler(async (event: H3Event) => {
   // 后台执行搜索并逐批推送；主 handler 返回 stream.send() 保持连接
   void (async () => {
     try {
+      // 任务统一进并发池：TG 批次 + 各插件源，谁先完成谁先 push chunk
+      // → 前端"边搜边出"，不等所有任务完成
+      const pLimit = (await import("p-limit")).default;
+      const limit = pLimit(TG_BATCH_CONCURRENCY);
+
       const totalBatches = Math.max(1, Math.ceil(allChannels.length / TG_BATCH_SIZE));
+      // src=all 或 src=plugin 时都跑插件（与 search.get.ts 行为一致）
+      const enabledPlugins =
+        (src === "all" || src === "plugin") && plugins && plugins.length > 0
+          ? plugins
+          : [];
+
+      // 构建任务列表
+      interface Task {
+        type: "tg" | "plugin";
+        index: number;
+      }
+      const allTasks: Task[] = [];
+      for (let i = 0; i < totalBatches; i++) allTasks.push({ type: "tg", index: i });
+      for (let i = 0; i < enabledPlugins.length; i++)
+        allTasks.push({ type: "plugin", index: i });
+
+      const total = allTasks.length;
       let done = 0;
       let acc: MergedLinks = {};
       const warnings: string[] = [];
 
-      // 服务端分批 + 受控并发：一次只跑 TG_BATCH_CONCURRENCY 批，
-      // 每完成一批 push chunk，前端增量渲染 → "像一直在搜"
-      const runBatch = async (batchIndex: number) => {
+      const runTask = async (task: Task) => {
         if (signal.aborted) return;
-        const batchChannels = sliceBatchChannels(
-          allChannels,
-          batchIndex,
-          TG_BATCH_SIZE
-        );
-        if (batchChannels.length === 0) return;
-
         try {
-          const { response, warnings: w } = await service.searchWithWarnings(
-            kw,
-            batchChannels,
-            conc,
-            refresh,
-            "merged_by_type",
-            "tg",
-            undefined, // src=tg 时不用 plugins
-            undefined,
-            // 深搜只允许最后一批触发（同前端分批逻辑：每批都深搜 = CPU 炸弹）
-            { ...(ext || {}), __deep_search: batchIndex === totalBatches - 1 },
-            signal
-          );
-          if (w.length > 0) warnings.push(...w);
-          if (response.merged_by_type) {
-            acc = mergeMergedByType(acc, response.merged_by_type);
+          let batchMerged: MergedLinks = {};
+          if (task.type === "tg") {
+            const batchChannels = sliceBatchChannels(
+              allChannels,
+              task.index,
+              TG_BATCH_SIZE
+            );
+            if (batchChannels.length > 0) {
+              const { response, warnings: w } = await service.searchWithWarnings(
+                kw,
+                batchChannels,
+                conc,
+                refresh,
+                "merged_by_type",
+                "tg",
+                undefined,
+                undefined,
+                // 深搜只允许最后一批触发（防每批都翻页 CPU 炸弹）
+                { ...(ext || {}), __deep_search: task.index === totalBatches - 1 },
+                signal
+              );
+              if (w.length > 0) warnings.push(...w);
+              if (response.merged_by_type) {
+                batchMerged = response.merged_by_type;
+              }
+            }
+          } else {
+            // 单个插件独立成任务（plugins 传 [name] 让 searchPlugins 内部只跑这个）
+            const { response, warnings: w } = await service.searchWithWarnings(
+              kw,
+              undefined,
+              conc,
+              refresh,
+              "merged_by_type",
+              "plugin",
+              [enabledPlugins[task.index]],
+              cloudTypes,
+              ext || {},
+              signal
+            );
+            if (w.length > 0) warnings.push(...w);
+            if (response.merged_by_type) {
+              batchMerged = response.merged_by_type;
+            }
+          }
+          if (Object.keys(batchMerged).length > 0) {
+            acc = mergeMergedByType(acc, batchMerged);
           }
         } catch (err) {
-          loggers.search.warn("SSE TG 批次失败", {
+          loggers.search.warn(`SSE ${task.type} 任务失败`, {
             keyword: kw,
-            batchIndex,
+            task,
             error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        done++;
+        if (!signal.aborted) {
+          // 累计快照推 chunk：前端简单 setMerged(acc) 即可，
+          // 避免增量协议下"丢/重"的复杂合并逻辑
+          await push("chunk", {
+            done,
+            total,
+            merged: acc,
           });
         }
       };
 
-      // 受控并发执行所有 TG 批次
-      const pLimit = (await import("p-limit")).default;
-      const limit = pLimit(Math.min(TG_BATCH_CONCURRENCY, totalBatches));
-      const tasks = [];
-      for (let i = 0; i < totalBatches; i++) {
-        tasks.push(limit(async () => {
-          await runBatch(i);
-          done++;
-          if (!signal.aborted) {
-            await push("chunk", {
-              done,
-              total: totalBatches,
-              merged: acc,
-            });
-          }
-        }));
-      }
-      await Promise.all(tasks);
+      // 并发执行所有任务（TG 批 + 插件）—— 谁先完成谁先 push
+      await Promise.all(
+        allTasks.map((task) => limit(() => runTask(task)))
+      );
 
-      // 插件结果（若有）— 全量一次抓取（插件是独立源，无需切片）
-      let pluginResults: MergedLinks = {};
-      if (src === "all" || src === "plugin") {
-        try {
-          const { response, warnings: w } = await service.searchWithWarnings(
-            kw,
-            undefined,
-            conc,
-            refresh,
-            "merged_by_type",
-            "plugin",
-            plugins,
-            cloudTypes,
-            ext || {},
-            signal
-          );
-          if (w.length > 0) warnings.push(...w);
-          if (response.merged_by_type) {
-            pluginResults = response.merged_by_type;
-            acc = mergeMergedByType(acc, pluginResults);
-          }
-        } catch (err) {
-          loggers.search.warn("SSE 插件搜索失败", {
-            keyword: kw,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      // 汇总事件：总条数 = acc 各类型长度之和
-      // 注意：done 必须带 merged 字段！插件结果是最后追加的，前面 chunk 流
-      // 只有 TG 部分；如果 done 不推 merged，前端只拿到 TG 的空 merged +
-      // total=96 但 state.merged={}，渲染"未找到相关资源"。
-      // 优化方向：插件搜索完成后单独 push 一个 chunk（包含 pluginResults），
-      // 前端继续增量合并，done 仅发 total —— 但当前结构最简，先 done 带 merged。
-      const total = Object.values(acc).reduce((sum, arr) => sum + arr.length, 0);
+      // 汇总事件：done 带 merged 作为最终兜底（即使 chunk 全部空，
+      // 插件结果也能保证送到前端）
+      const finalTotal = Object.values(acc).reduce(
+        (sum, arr) => sum + arr.length,
+        0
+      );
       if (!signal.aborted) {
         await push("done", {
-          total,
+          total: finalTotal,
           warnings,
-          pluginCount: Object.keys(pluginResults).length,
-          merged: acc, // 完整合并快照（含 TG + 插件），前端覆盖 setMerged
+          pluginCount: enabledPlugins.length,
+          merged: acc,
         });
       }
     } catch (err) {
