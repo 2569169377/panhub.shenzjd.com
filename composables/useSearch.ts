@@ -524,6 +524,16 @@ export function useSearch() {
                 curTotal = payload.total;
                 setTotal(curTotal);
               }
+              // done 事件带 merged：覆盖完整结果（处理插件结果合并的场景，
+              // 因为插件是 SSE 端点最后追加的，前面 chunk 流只包含 TG 增量）
+              if (payload.merged && Object.keys(payload.merged).length > 0) {
+                setMerged(payload.merged);
+                curTotal = Object.values(payload.merged).reduce(
+                  (sum, arr) => sum + (arr?.length || 0),
+                  0
+                );
+                setTotal(curTotal);
+              }
             } catch {}
             return { usedFallback: false };
           } else if (evt.event === "error") {

@@ -214,12 +214,18 @@ export default defineEventHandler(async (event: H3Event) => {
       }
 
       // 汇总事件：总条数 = acc 各类型长度之和
+      // 注意：done 必须带 merged 字段！插件结果是最后追加的，前面 chunk 流
+      // 只有 TG 部分；如果 done 不推 merged，前端只拿到 TG 的空 merged +
+      // total=96 但 state.merged={}，渲染"未找到相关资源"。
+      // 优化方向：插件搜索完成后单独 push 一个 chunk（包含 pluginResults），
+      // 前端继续增量合并，done 仅发 total —— 但当前结构最简，先 done 带 merged。
       const total = Object.values(acc).reduce((sum, arr) => sum + arr.length, 0);
       if (!signal.aborted) {
         await push("done", {
           total,
           warnings,
           pluginCount: Object.keys(pluginResults).length,
+          merged: acc, // 完整合并快照（含 TG + 插件），前端覆盖 setMerged
         });
       }
     } catch (err) {
