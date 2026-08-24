@@ -96,6 +96,20 @@ export default defineEventHandler(async (event: H3Event) => {
   const maxResultsRaw = parseInt(String(q.maxResults ?? ""), 10);
   const maxResults = Number.isFinite(maxResultsRaw) && maxResultsRaw >= 1 ? maxResultsRaw : SEARCH_MAX_RESULTS_DEFAULT;
 
+  // 断点续跑（2026-08-25 用户拍板：前端记录已搜任务进度，继续时回传，
+  // 后端只跑未搜过的任务——否则"继续"= 从头重跑所有任务，缓存失效时
+  // 结果数量会变，且已搜频道被重复抓取）：
+  // - skipTasks：上次已完成的任务全局索引 gidx（逗号分隔），本轮跳过
+  // - initialTotal：前端已有结果数，参与上限判断（目标 = 已有 + 本轮新增）
+  const skipSet = new Set(
+    String(q.skipTasks ?? "")
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n >= 0)
+  );
+  const initialTotalRaw = parseInt(String(q.initialTotal ?? ""), 10);
+  const initialTotal = Number.isFinite(initialTotalRaw) && initialTotalRaw >= 0 ? initialTotalRaw : 0;
+
   const conc = (() => {
     const n = q.conc ? parseInt(String(q.conc), 10) : NaN;
     return Number.isFinite(n) && n >= 1 && n <= 16 ? n : undefined;
@@ -155,20 +169,31 @@ export default defineEventHandler(async (event: H3Event) => {
               .filter(Boolean)
           : [];
 
-      // 构建任务列表
+      // 构建任务列表。gidx 为全局唯一任务索引（tg 批 0..N-1、plugin N..N+M-1），
+      // 用于断点续跑：前端回传已完成 gidx，本轮跳过这些任务只跑剩余
       interface Task {
         type: "tg" | "plugin";
+        /** 类型内索引（tg 批序号 / 插件序号），供切片与取插件名用 */
         index: number;
+        /** 全局唯一任务索引（跨类型），供 skipTasks 断点续跑用 */
+        gidx: number;
       }
+      let gidx = 0;
       const tgTasks: Task[] = [];
-      for (let i = 0; i < totalBatches; i++) tgTasks.push({ type: "tg", index: i });
+      for (let i = 0; i < totalBatches; i++)
+        tgTasks.push({ type: "tg", index: i, gidx: gidx++ });
       const pluginTasks: Task[] = [];
       for (let i = 0; i < enabledPlugins.length; i++)
-        pluginTasks.push({ type: "plugin", index: i });
+        pluginTasks.push({ type: "plugin", index: i, gidx: gidx++ });
 
-      const total = tgTasks.length + pluginTasks.length;
+      // 断点续跑：跳过前端回传的已完成任务（gidx 全局唯一，tg/plugin 不冲突）
+      const pendingTgTasks = tgTasks.filter((t) => !skipSet.has(t.gidx));
+      const pendingPluginTasks = pluginTasks.filter((t) => !skipSet.has(t.gidx));
+      const total = pendingTgTasks.length + pendingPluginTasks.length;
       let done = 0;
       let acc: MergedLinks = {};
+      /** 本次连接实际完成任务（gidx 集合），done 事件回传前端用于下次断点 */
+      const completedGidx: number[] = [];
       /** 是否已因达到结果上限而触发停止（后端自己计数，2026-08-25 用户拍板） */
       let limitReached = false;
       const warnings: string[] = [];
@@ -234,10 +259,14 @@ export default defineEventHandler(async (event: H3Event) => {
           });
         }
         done++;
+        // 记录已完成任务的全局索引，done 事件回传前端用于下次断点续跑
+        completedGidx.push(task.gidx);
         if (!signal.aborted) {
           // 后端自检结果上限（用户拍板：达到即停止剩余请求节省资源）。
           // 只置 limitReached 标志让剩余任务跳过（不 abort signal），
           // 这样 done 事件一定能推（带 reachedLimit=true）
+          // curTotal 是"本轮新增"（acc 只含本次连接结果），加上前端已有
+          // initialTotal 才是累计总数 → 与 maxResults（已有+90）对齐
           const curTotal = Object.values(acc).reduce(
             (sum, arr) => sum + arr.length,
             0
@@ -248,7 +277,7 @@ export default defineEventHandler(async (event: H3Event) => {
           // 会误报 reachedLimit → 前端显示无意义的"点击继续"，
           // 点继续后后端重跑全部任务（缓存秒回同样结果）→ 数量不变，
           // 用户感知"第二次重复了第一次"（无"已搜进度"记录）。
-          if (curTotal >= maxResults && done < total) {
+          if (curTotal + initialTotal >= maxResults && done < total) {
             limitReached = true;
           }
           // 累计快照推 chunk：前端简单 setMerged(acc) 即可，
@@ -261,11 +290,11 @@ export default defineEventHandler(async (event: H3Event) => {
         }
       };
 
-      // 并发执行：TG 池 + 插件池互相独立，慢的 TG 不会"堵"插件
-      // 达到结果上限后 abortController.abort() 会让剩余任务跳过（signal.aborted）
+      // 并发执行（断点续跑时只跑未完成任务）：TG 池 + 插件池互相独立，
+      // 慢的 TG 不会"堵"插件。达到结果上限后剩余任务在开头跳过
       await Promise.all([
-        ...tgTasks.map((task) => tgLimit(() => runTask(task))),
-        ...pluginTasks.map((task) => pluginLimit(() => runTask(task))),
+        ...pendingTgTasks.map((task) => tgLimit(() => runTask(task))),
+        ...pendingPluginTasks.map((task) => pluginLimit(() => runTask(task))),
       ]);
 
       // 汇总事件：done 带 merged 作为最终兜底（即使 chunk 全部空，
@@ -281,6 +310,8 @@ export default defineEventHandler(async (event: H3Event) => {
           warnings,
           pluginCount: enabledPlugins.length,
           merged: acc,
+          // 已完成任务全局索引（断点续跑：前端累积后下次继续时回传 skipTasks）
+          completedIndices: completedGidx,
           // 最终判定：只有"limitReached 且确有任务被跳过"才报 reachedLimit。
           // 并发槽位中的在途任务可能已把 done 追平 total（全部跑完），
           // 此时再报"继续"会让前端重复搜一遍相同结果
