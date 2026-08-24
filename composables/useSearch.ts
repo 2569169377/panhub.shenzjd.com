@@ -514,11 +514,16 @@ export function useSearch() {
                 }
               }
               // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
+              // SSE 模式：不 abort 流！请求已在服务端执行，abort 只会丢弃
+              // 已完成任务的结果（旧模式 abort 是省"前端发起"的请求，语义不同）。
+              // 只置 UI 暂停状态，流继续收完（继续按钮 = 重新连流，缓存秒回）。
               if (curTotal >= maxResultsThreshold) {
                 autoPausedAtLimit.value = true;
                 setPaused(true);
-                controller.abort();
-                return { usedFallback: false };
+                setLoading(false);
+                if (import.meta.dev) {
+                  console.log("[SSE autoPaused]", { total: curTotal, threshold: maxResultsThreshold });
+                }
               }
             } catch (e) {
               devWarn("[useSearch] SSE chunk 解析失败", e);
