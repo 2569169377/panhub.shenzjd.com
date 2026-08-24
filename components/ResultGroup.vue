@@ -7,7 +7,7 @@
       </div>
       <div class="header-info">
         <h3 class="platform-title">{{ title }}</h3>
-        <span class="resource-count">{{ items.length }} 个资源</span>
+        <span class="resource-count">{{ items.length }} 个资源 (DBG: visibleItems={{ visibleItems.length }})</span>
       </div>
       <button
         v-if="canToggleCollapse && !expanded && items.length > initialVisible"
