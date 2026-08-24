@@ -23,8 +23,10 @@ import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../u
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
+import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
+import { loggers } from "../core/utils/logger";
 import {
   buildBatchPlan,
   sliceBatchChannels,
@@ -34,6 +36,12 @@ import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
   requireSearchAuth(event);
+  // IP 黑名单拦截（2026-08-24）：累积到阈值的攻击源 24h 内拒绝所有搜索请求
+  const ip = getClientIp(event);
+  if (await getOrCreateBotDefenseService().isBlocked(ip)) {
+    loggers.search.warn(`拦截黑名单 IP 搜索请求`, { ip, method: event.method, path: event.path });
+    throw createError({ statusCode: 403, statusMessage: "ip blocked" });
+  }
   // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
   requireHumanOrCredential(event);
   // 微信关注公众号登录态校验（WX_AUTH_ENFORCE=1 时启用，实时校验不缓存）
@@ -54,7 +62,7 @@ export default defineEventHandler(async (event) => {
 
   // 记录搜索词（2026-08-22：只要搜索就记录，便于排查）。
   // 防刷由入口 requireHumanOrCredential 承担（bot UA 403），本层不再过滤。
-  await recordSearchTerm(kw, getClientIp(event));
+  await recordSearchTerm(kw, ip);
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
