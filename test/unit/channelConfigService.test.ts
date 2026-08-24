@@ -139,4 +139,131 @@ describe("ChannelConfigService", () => {
     await service.ensureLoaded();
     expect(service.getSnapshot().version).toBe(3);
   });
+
+  it("远程配额下发兜底（fork 站场景，无 Turso 无 env）", async () => {
+    // 用本地 HTTP server 模拟官方 /api/channels 响应
+    const { createServer } = await import("node:http");
+    const server = createServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          code: 0,
+          data: { version: 2, channels: ["remote1", "remote2", "remote3"] },
+        })
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve)
+    );
+    const address = server.address() as any;
+    const url = `http://127.0.0.1:${address.port}/api/channels`;
+
+    const service = new ChannelConfigService({ remoteUrl: url });
+    await service.ensureLoaded();
+    const snap = service.getSnapshot();
+    expect(snap.version).toBe(2);
+    expect(snap.defaultChannels).toEqual(["remote1", "remote2", "remote3"]);
+    expect(snap.priorityChannels).toEqual([]);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("远程配额接口 500 时静默降级（不抛错）", async () => {
+    const { createServer } = await import("node:http");
+    const server = createServer((_req, res) => {
+      res.statusCode = 500;
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as any;
+    const url = `http://127.0.0.1:${address.port}/api/channels`;
+
+    const service = new ChannelConfigService({ remoteUrl: url });
+    await service.ensureLoaded();
+    expect(service.getSnapshot().defaultChannels).toEqual([]);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+});
+
+describe("ChannelConfigService 配额下发", () => {
+  it("getGrantedChannels 只取 defaultChannels 前 N 个、不含 priority", async () => {
+    const service = new ChannelConfigService({
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: ["pri1", "pri2"],
+        defaultChannels: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+      }),
+    });
+    const granted = service.getGrantedChannels(10);
+    expect(granted.version).toBe(1);
+    expect(granted.channels).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+    expect(granted.channels).not.toContain("pri1");
+  });
+
+  it("getGrantedChannels 配额超界按实际数量返回、非法 limit 兜底 0", async () => {
+    const service = new ChannelConfigService({
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: [],
+        defaultChannels: ["a", "b"],
+      }),
+    });
+    expect(service.getGrantedChannels(100).channels).toEqual(["a", "b"]);
+    expect(service.getGrantedChannels(-1).channels).toEqual([]);
+  });
+
+  it("getGrantedChannels：priority 频道即使同时出现在 default 也被剔除", async () => {
+    const service = new ChannelConfigService({
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: ["pri1", "pri2"],
+        defaultChannels: ["pri1", "a", "pri2", "b", "c"],
+      }),
+    });
+    // 剔除 pri1/pri2 后剩 a/b/c，取前 10 → a/b/c
+    expect(service.getGrantedChannels(10).channels).toEqual(["a", "b", "c"]);
+    // 配额 2 → 剔除后取前 2
+    expect(service.getGrantedChannels(2).channels).toEqual(["a", "b"]);
+  });
+
+  it("resolveChannelGrant：无 key / 未注册 key 回落默认配额", async () => {
+    const service = new ChannelConfigService({
+      channelsKeys: "keyA:15|keyB:all",
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: [],
+        defaultChannels: Array.from({ length: 40 }, (_, i) => `ch${i}`),
+      }),
+    });
+    expect(service.resolveChannelGrant(null, 10)).toBe(10);
+    expect(service.resolveChannelGrant("unknown", 10)).toBe(10);
+  });
+
+  it("resolveChannelGrant：已注册 key 返回配置配额、all 返回全部 default", async () => {
+    const service = new ChannelConfigService({
+      channelsKeys: "keyA:15|keyB:all",
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: ["pri"],
+        defaultChannels: Array.from({ length: 40 }, (_, i) => `ch${i}`),
+      }),
+    });
+    expect(service.resolveChannelGrant("keyA", 10)).toBe(15);
+    expect(service.resolveChannelGrant("keyB", 10)).toBe(40); // 全部 default（不含 priority）
+  });
+
+  it("resolveChannelGrant：兼容 JSON 格式与非法配置回落默认", async () => {
+    const service = new ChannelConfigService({
+      channelsKeys: JSON.stringify({ keyA: "15", keyB: "all" }),
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: [],
+        defaultChannels: Array.from({ length: 40 }, (_, i) => `ch${i}`),
+      }),
+    });
+    expect(service.resolveChannelGrant("keyA", 10)).toBe(15);
+    const bad = new ChannelConfigService({ channelsKeys: "not-a-format" });
+    expect(bad.resolveChannelGrant("keyA", 10)).toBe(10);
+  });
 });

@@ -60,7 +60,8 @@ npm deploy:cf            # Deploy to Cloudflare Workers
 
 ### Configuration (`config/`)
 
-- **`channels.json`**: 运行参数模板（concurrency, timeouts, cache TTL）。**真实频道清单已于 2026-08-24 迁出仓库**：AES-256-GCM 加密存入 Turso `channel_config` 表，由 `server/core/services/channelConfigService.ts` 拉取解密缓存，经 `server/api/channels.get.ts` 下发前端。修改频道：配好 `CHANNEL_KEY` 后运行 `scripts/sync-channels.mjs`。
+- **`channels.json`**: 运行参数模板（concurrency, timeouts, cache TTL）。**真实频道清单已于 2026-08-24 迁出仓库**：AES-256-GCM 加密存入 Turso `channel_config` 表，由 `server/core/services/channelConfigService.ts` 拉取解密缓存。修改频道：配好 `CHANNEL_KEY` 后运行 `scripts/sync-channels.mjs`。
+- **fork 站配额下发（2026-08-24）**：`server/api/channels.get.ts` 对 fork 站公开，只下发 defaultChannels 前 N 个（**priority 频道一律剔除**）。无 key 默认 `CHANNELS_DEFAULT_GRANT`（10 个）；带 `Authorization: Bearer <key>` 按 `CHANNELS_KEYS` 分级（格式 `key1:grant1|key2:all`，`all`=全部 default）。fork 站接入：`CHANNELS_REMOTE_URL` + 可选 `CHANNELS_API_KEY`，ChannelConfigService 自动兜底拉取。
 - **`plugins.ts`**: Plugin names (`ALL_PLUGIN_NAMES`), platform info (`PLATFORM_INFO` with colors/icons), `DEFAULT_USER_SETTINGS`, `STORAGE_KEYS`.
 - **`doubanHot.ts`**: Douban API configuration.
 - **`data/`**: SQLite database for hot search persistence (Docker/local only, not in git).

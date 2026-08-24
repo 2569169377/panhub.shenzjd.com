@@ -31,6 +31,19 @@ export interface ChannelConfigServiceOptions {
   authToken?: string;
   channelKey?: string;
   envJson?: string;
+  /**
+   * fork 站接入：拉取官方配额频道下发的远程 URL（见 loadFromRemote）。
+   * 官方站不需要（有 Turso）；fork 站配置 CHANNELS_REMOTE_URL 即可。
+   */
+  remoteUrl?: string;
+  /** fork 站拉取远程配额时携带的 API Key（可选，见 CHANNELS_API_KEY） */
+  remoteKey?: string;
+  /**
+   * API Key 分级配额（JSON map，key → 配额数或 "all"）。
+   * 例：{"keyA":"15","keyB":"30","keyC":"all"}
+   * 无 key / key 未注册 → 默认配额；"all" → 全部 defaultChannels（不含 priority）
+   */
+  channelsKeys?: string;
 }
 
 /**
@@ -141,6 +154,81 @@ export class ChannelConfigService {
     return this.getSnapshot();
   }
 
+  /**
+   * 配额频道下发（2026-08-24 用户拍板：10 个固定同一批、不给 priority）。
+   *
+   * 给 fork 站/第三方提供"部分开源"能力：只下发 defaultChannels 前 N 个，
+   * 保证对方部署后能搜到东西（不至于空白），但永远比官方站搜得少。
+   * **priority 频道即使同时出现在 defaultChannels 也一律剔除**（核心优势保留）。
+   * 用于 /api/channels 配额接口；剔除后不足 limit 时按实际数量返回。
+   */
+  getGrantedChannels(limit: number): { version: number; channels: string[] } {
+    const snap = this.getSnapshot();
+    const safeLimit = Math.max(0, Math.floor(limit));
+    const prioritySet = new Set(snap.priorityChannels);
+    const granted = snap.defaultChannels.filter(
+      (channel) => !prioritySet.has(channel)
+    );
+    return {
+      version: snap.version,
+      channels: granted.slice(0, safeLimit),
+    };
+  }
+
+  /**
+   * API Key 分级配额解析（2026-08-24 用户拍板：key 由官方决定给谁、给多少）。
+   *
+   * CHANNELS_KEYS 格式：`key1:grant1|key2:grant2`（用 | 分隔、key:grant 配对，
+   * 避免花括号/引号在 .env（zsh source / docker --env-file）里被破坏）。
+   * grant 支持数字（如 "15"）或 "all"（全部 default 频道，priority 仍不下发）。
+   *
+   * - 无 key / key 未注册 / CHANNELS_KEYS 未配置 → 返回 defaultLimit（基础配额）
+   * - key 对应数值 → 返回该数；key 对应 "all" → 返回全部 defaultChannels 数量
+   * - 非法值 → 回落 defaultLimit
+   */
+  resolveChannelGrant(
+    apiKey: string | null | undefined,
+    defaultLimit: number
+  ): number {
+    const fallback = Math.max(0, Math.floor(defaultLimit));
+    if (!apiKey) return fallback;
+    const keysRaw = this.options.channelsKeys;
+    if (!keysRaw) return fallback;
+    try {
+      const grant = this.parseGrantValue(keysRaw, apiKey);
+      if (grant == null) return fallback;
+      if (String(grant).toLowerCase() === "all") {
+        return this.getSnapshot().defaultChannels.length;
+      }
+      const n = Number(grant);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private parseGrantValue(keysRaw: string, apiKey: string): string | null {
+    // 兼容 JSON 格式（历史配置）：{"keyA":"15","keyB":"all"}
+    const trimmed = keysRaw.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const map = JSON.parse(trimmed);
+        const v = map[apiKey];
+        return v == null ? null : String(v);
+      } catch {
+        return null;
+      }
+    }
+    // 推荐格式：key1:grant1|key2:grant2
+    for (const pair of trimmed.split("|")) {
+      const idx = pair.indexOf(":");
+      if (idx <= 0) continue;
+      const k = pair.slice(0, idx).trim();
+      if (k === apiKey) return pair.slice(idx + 1).trim() || null;
+    }
+    return null;
+  }
+
   private async load(): Promise<ChannelConfig | null> {
     // 1. Turso 加密配置（生产主路径）
     const fromTurso = await this.loadFromTurso();
@@ -158,8 +246,59 @@ export class ChannelConfigService {
       loggers.search.warn("频道配置来自 CHANNELS_JSON 兜底", { version: fromEnv.version });
       return fromEnv;
     }
-    loggers.search.warn("频道配置未加载：Turso 不可用且无 CHANNELS_JSON 兜底");
+    // 3. 远程配额下发兜底（fork 站：官方 /api/channels 的配额频道）
+    const fromRemote = await this.loadFromRemote();
+    if (fromRemote) {
+      this.config = fromRemote;
+      this.lastLoadAt = Date.now();
+      loggers.search.warn("频道配置来自远程配额下发", {
+        version: fromRemote.version,
+        channelCount: fromRemote.defaultChannels.length,
+      });
+      return fromRemote;
+    }
+    loggers.search.warn("频道配置未加载：Turso/CHANNELS_JSON/远程配额均不可用");
     return null;
+  }
+
+  /**
+   * fork 站兜底层：从 CHANNELS_REMOTE_URL 拉取官方配额频道。
+   * 响应格式与 /api/channels 一致：{ code: 0, data: { version, channels } }。
+   * 失败静默（不影响主链路），8s 超时。
+   */
+  private async loadFromRemote(): Promise<ChannelConfig | null> {
+    const url = this.options.remoteUrl;
+    if (!url) return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const resp = await fetch(url, {
+          headers: this.options.remoteKey
+            ? { authorization: `Bearer ${this.options.remoteKey}` }
+            : undefined,
+          signal: controller.signal,
+        });
+        if (!resp.ok) return null;
+        const body: any = await resp.json();
+        const channels = Array.isArray(body?.data?.channels)
+          ? body.data.channels.filter((x: unknown) => typeof x === "string")
+          : [];
+        if (channels.length === 0) return null;
+        return {
+          version: Number(body?.data?.version) || 0,
+          priorityChannels: [],
+          defaultChannels: channels,
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err) {
+      loggers.search.warn("远程配额频道拉取失败（走空配置）", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   private async loadFromTurso(): Promise<ChannelConfig | null> {
@@ -209,6 +348,9 @@ const globalChannelConfigService = new ChannelConfigService({
   authToken: process.env.TURSO_AUTH_TOKEN,
   channelKey: process.env.CHANNEL_KEY,
   envJson: process.env.CHANNELS_JSON,
+  remoteUrl: process.env.CHANNELS_REMOTE_URL,
+  remoteKey: process.env.CHANNELS_API_KEY,
+  channelsKeys: process.env.CHANNELS_KEYS,
 });
 
 export function getChannelConfigService(): ChannelConfigService {
