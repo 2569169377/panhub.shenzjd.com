@@ -102,11 +102,8 @@ function toChannelConfig(parsed: any): ChannelConfig | null {
 }
 
 export class ChannelConfigService {
-  private static readonly REFRESH_TTL = 5 * 60_000; // 5 分钟刷新一次
-
   private config: ChannelConfig | null = null;
   private loadPromise: Promise<ChannelConfig | null> | null = null;
-  private lastLoadAt = 0;
   private options: ChannelConfigServiceOptions;
 
   constructor(options: ChannelConfigServiceOptions = {}) {
@@ -129,17 +126,15 @@ export class ChannelConfigService {
   }
 
   /**
-   * 确保频道配置已加载（幂等，带 TTL 与并发去重）。
-   * 搜索 API 入口调用；Turso 不可用时静默降级到 env 兜底/空配置，
-   * 不影响搜索主链路（TG 无频道时由隔离闸 B 降级为空结果）。
+   * 确保频道配置已加载（幂等，并发去重）。
+   *
+   * 2026-08-24 用户拍板：频道清单几乎不变，**首次加载后永久缓存**，
+   * 不再按 TTL 定期重拉 Turso（改频道需重启服务/重新部署生效）。
+   * 首次加载失败（Turso 临时不可用）会在下次请求重试；成功后就固定。
+   * 搜索 API 入口调用；Turso 不可用时静默降级到 env 兜底/空配置。
    */
   async ensureLoaded(): Promise<ChannelConfig> {
-    if (
-      this.config &&
-      Date.now() - this.lastLoadAt < ChannelConfigService.REFRESH_TTL
-    ) {
-      return this.getSnapshot();
-    }
+    if (this.config) return this.getSnapshot();
     if (!this.loadPromise) {
       this.loadPromise = this.load()
         .catch((err) => {
@@ -230,24 +225,21 @@ export class ChannelConfigService {
     const fromTurso = await this.loadFromTurso();
     if (fromTurso) {
       this.config = fromTurso;
-      this.lastLoadAt = Date.now();
-      loggers.search.info("频道配置已从 Turso 加载", { version: fromTurso.version });
+            loggers.search.info("频道配置已从 Turso 加载", { version: fromTurso.version });
       return fromTurso;
     }
     // 2. CHANNELS_JSON 兜底（本地 dev / 服务器 .env）
     const fromEnv = this.parseEnvJson();
     if (fromEnv) {
       this.config = fromEnv;
-      this.lastLoadAt = Date.now();
-      loggers.search.warn("频道配置来自 CHANNELS_JSON 兜底", { version: fromEnv.version });
+            loggers.search.warn("频道配置来自 CHANNELS_JSON 兜底", { version: fromEnv.version });
       return fromEnv;
     }
     // 3. 远程频道源兜底
     const fromRemote = await this.loadFromRemote();
     if (fromRemote) {
       this.config = fromRemote;
-      this.lastLoadAt = Date.now();
-      loggers.search.warn("频道配置来自远程频道源", {
+            loggers.search.warn("频道配置来自远程频道源", {
         version: fromRemote.version,
         channelCount: fromRemote.defaultChannels.length,
       });
