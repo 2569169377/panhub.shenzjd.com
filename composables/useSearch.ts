@@ -513,18 +513,11 @@ export function useSearch() {
                   console.log("[SSE setMerged]", { keys: Object.keys(currentMerged), total: curTotal });
                 }
               }
-              // 自动暂停：达到本轮上限即停，剩留"继续"按钮（与旧模式同语义）
-              // SSE 模式：不 abort 流！请求已在服务端执行，abort 只会丢弃
-              // 已完成任务的结果（旧模式 abort 是省"前端发起"的请求，语义不同）。
-              // 只置 UI 暂停状态，流继续收完（继续按钮 = 重新连流，缓存秒回）。
-              if (curTotal >= maxResultsThreshold) {
-                autoPausedAtLimit.value = true;
-                setPaused(true);
-                setLoading(false);
-                if (import.meta.dev) {
-                  console.log("[SSE autoPaused]", { total: curTotal, threshold: maxResultsThreshold });
-                }
-              }
+              // SSE 模式：不自动暂停！服务端已受控并发（TG 池 + 插件池），
+              // 没有"省前端请求"的意义；前端全收 chunk + done。
+              // 旧模式的自动暂停只适用于"前端发 N 个 batch 请求，到 90 条
+              // abort 剩余请求"的场景。SSE 下若暂停，用户点"继续"会重新连流
+              // （缓存秒回），但更自然的做法是让流自己跑完。
             } catch (e) {
               devWarn("[useSearch] SSE chunk 解析失败", e);
             }
