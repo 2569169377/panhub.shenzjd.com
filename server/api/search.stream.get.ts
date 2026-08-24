@@ -242,7 +242,13 @@ export default defineEventHandler(async (event: H3Event) => {
             (sum, arr) => sum + arr.length,
             0
           );
-          if (curTotal >= maxResults) {
+          // ⚠️ 2026-08-25 修复：只有"仍有剩余任务"时才算提前停止。
+          // 此前只要 curTotal >= maxResults 就置 true —— 若最后一批刚好把
+          // 总数推过上限（如 126 ≥ 90）而全部任务已跑完（done===total），
+          // 会误报 reachedLimit → 前端显示无意义的"点击继续"，
+          // 点继续后后端重跑全部任务（缓存秒回同样结果）→ 数量不变，
+          // 用户感知"第二次重复了第一次"（无"已搜进度"记录）。
+          if (curTotal >= maxResults && done < total) {
             limitReached = true;
           }
           // 累计快照推 chunk：前端简单 setMerged(acc) 即可，
@@ -264,7 +270,7 @@ export default defineEventHandler(async (event: H3Event) => {
 
       // 汇总事件：done 带 merged 作为最终兜底（即使 chunk 全部空，
       // 插件结果也能保证送到前端）。reachedLimit 标记本轮是否因达到
-      // 结果上限而停止（前端据此显示"点击继续"）
+      // 结果上限而提前停止且有任务被跳过（前端据此显示"点击继续"）
       const finalTotal = Object.values(acc).reduce(
         (sum, arr) => sum + arr.length,
         0
@@ -275,7 +281,10 @@ export default defineEventHandler(async (event: H3Event) => {
           warnings,
           pluginCount: enabledPlugins.length,
           merged: acc,
-          reachedLimit: limitReached,
+          // 最终判定：只有"limitReached 且确有任务被跳过"才报 reachedLimit。
+          // 并发槽位中的在途任务可能已把 done 追平 total（全部跑完），
+          // 此时再报"继续"会让前端重复搜一遍相同结果
+          reachedLimit: limitReached && done < total,
         });
       }
     } catch (err) {
