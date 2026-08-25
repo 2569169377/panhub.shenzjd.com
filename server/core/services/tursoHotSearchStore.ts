@@ -317,6 +317,23 @@ export class TursoHotSearchStore implements IHotSearchStore {
     return (row?.s ?? 0) as number;
   }
 
+  /**
+   * 范围查询 daily_searches（2026-08-25：日历"有次数显示次数"数据源）。
+   * 返回 Map<date, searches>，仅含已记录的天（未记录的天不在 map 中）。
+   */
+  async getDailySearchesRange(startTs: number, days: number): Promise<Map<string, number>> {
+    await this.waitForInit();
+    const rows = await this.client.execute(
+      `SELECT date, searches FROM daily_searches
+       WHERE date >= ? AND date <= ?
+       ORDER BY date`,
+      [formatDateKey(startTs), formatDateKey(startTs + days * 86400000)]
+    );
+    const map = new Map<string, number>();
+    for (const r of rows.rows) map.set(r.date as string, (r.searches as number) ?? 0);
+    return map;
+  }
+
   async getDailySearchesDayCount(): Promise<number> {
     await this.waitForInit();
     const row = (
