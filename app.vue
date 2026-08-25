@@ -129,21 +129,30 @@
 </template>
 
 <script setup lang="ts">
-// 暗色模式 CSS（所有页面统一）
-const darkModeLink = [{ rel: "stylesheet", href: "/css/dark-mode.css" }];
-const darkModeScript = {
-  innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
-};
-// 悬浮二维码 Web Component（公众号/赞赏码）——管理页（/admin）不加载
-const floatingQrScript = {
-  src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
-  body: true,
-};
-// 函数式 useHead（响应式追踪 isAdmin）：管理页纯净后台，不加载 floating-qr
-useHead(() => ({
-  link: darkModeLink,
-  script: [darkModeScript, ...(isAdmin.value ? [] : [floatingQrScript])],
-}));
+// 2026-08-25：管理页（/admin）纯净后台模式——隐藏顶部导航/公告/密码门/弹窗。
+const route = useRoute();
+const isAdmin = computed(() => route.path.startsWith("/admin"));
+
+// 暗色模式 CSS + 阻塞脚本（普通 useHead，全站注入；⚠️ 不要用函数式工厂——
+// 曾触发 unhead "Cannot access 'h' before initialization" SSR 时序错误）
+useHead({
+  link: [{ rel: "stylesheet", href: "/css/dark-mode.css" }],
+  script: [
+    {
+      innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
+    },
+  ],
+});
+
+// 悬浮二维码 Web Component（公众号/赞赏码）——客户端动态注入，管理页（/admin）不注入
+let qrLoaded = false;
+watch(isAdmin, (admin) => {
+  if (admin || qrLoaded || typeof document === "undefined") return;
+  qrLoaded = true;
+  const s = document.createElement("script");
+  s.src = "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js";
+  document.body.appendChild(s);
+});
 
 const { settings, loadSettings } = useSettings();
 const { toast, showToast } = useToast();
@@ -151,10 +160,6 @@ const { isDark, toggle: toggleDark, init: initDarkMode } = useDarkMode();
 const auth = useAuth();
 const showPasswordGate = ref(false);
 const showNavMenu = ref(false);
-
-// 2026-08-25：管理页（/admin）纯净后台模式——隐藏顶部导航/公告/密码门/弹窗
-const route = useRoute();
-const isAdmin = computed(() => route.path.startsWith("/admin"));
 
 // 导航链接
 const navLinks = [
