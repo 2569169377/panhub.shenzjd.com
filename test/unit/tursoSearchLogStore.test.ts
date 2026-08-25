@@ -139,4 +139,40 @@ describe("TursoSearchLogStore", () => {
     expect(days[2].count).toBe(3);
     expect(days[2].top[0]).toBe("霸王别姬");
   });
+
+  it("searchByOpenid：某 openid 的搜索记录（时间倒序）", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-abc", ip: "1.1.1.1", term: "霸王别姬", now: now + 3000 });
+    await store.logSearch({ openid: "o-abc", ip: "2.2.2.2", term: "使徒行者", now: now + 1000 });
+    await store.logSearch({ openid: "o-xyz", ip: "3.3.3.3", term: "长津湖", now: now + 2000 });
+
+    const items = await store.searchByOpenid("o-abc", 50);
+    expect(items).toHaveLength(2);
+    // 时间倒序：霸王别姬（now+3000）在前
+    expect(items[0].term).toBe("霸王别姬");
+    expect(items[0].ip).toBe("1.1.1.1");
+    expect(items[1].term).toBe("使徒行者");
+  });
+
+  it("searchByOpenid 带 since 只返回该时间点之后", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-abc", term: "老词", now: now - 1000 });
+    await store.logSearch({ openid: "o-abc", term: "新词", now: now + 1000 });
+
+    const items = await store.searchByOpenid("o-abc", 50, now);
+    expect(items).toHaveLength(1);
+    expect(items[0].term).toBe("新词");
+  });
+
+  it("searchByTerm：搜过某词的所有 openid/ip", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-1", ip: "1.1.1.1", term: "霸王别姬", now: now + 1000 });
+    await store.logSearch({ openid: "o-2", ip: "2.2.2.2", term: "霸王别姬", now: now + 2000 });
+    await store.logSearch({ openid: "o-3", ip: "3.3.3.3", term: "使徒行者", now: now + 3000 });
+
+    const items = await store.searchByTerm("霸王别姬", 50);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.openid).sort()).toEqual(["o-1", "o-2"]);
+    expect(items.every((i) => i.ip !== "")).toBe(true);
+  });
 });
