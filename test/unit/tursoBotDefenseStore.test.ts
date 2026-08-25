@@ -118,4 +118,46 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     expect(entries[1].ip).toBe("hit-b");
     expect(entries[1].blockCount).toBe(0);
   });
+
+  it("manuallyBlock：管理页手动拉黑直接 30 天（block_count 从 0 跳到 3）", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    const bc = await store.manuallyBlock("5.5.5.5", "manual", now);
+
+    expect(bc).toBe(3); // 手动拉黑固定取最长档
+    const row = await rowOf("5.5.5.5");
+    expect(row?.blockCount).toBe(3);
+    expect(row?.expiresAt).toBe(now + 30 * day);
+  });
+
+  it("manuallyBlock：已有惯犯档案时在历史档位基础上 +1 且至少 3 档", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    // 先自动拉黑过一次（block_count=2，7 天档）
+    await store.extendBlock("recidivist-m", "bot_ua", now);
+    await store.extendBlock("recidivist-m", "bot_ua", now + 8 * day);
+
+    const bc = await store.manuallyBlock("recidivist-m", "manual", now + 9 * day);
+    expect(bc).toBe(3); // 2+1 → 3 档（30 天）
+    const row = await rowOf("recidivist-m");
+    expect(row?.expiresAt).toBe(now + 9 * day + 30 * day);
+  });
+
+  it("removeBlock：删除整行（含惯犯档案），返回是否删除", async () => {
+    const now = 1_700_000_000_000;
+    await store.extendBlock("doomed", "bot_ua", now);
+    expect(await rowOf("doomed")).not.toBeNull();
+
+    expect(await store.removeBlock("doomed")).toBe(true);
+    expect(await rowOf("doomed")).toBeNull();
+    // 已删除再删 → false
+    expect(await store.removeBlock("doomed")).toBe(false);
+  });
+
+  it("removeBlock：删除从未拉黑的计数记录同样生效", async () => {
+    const now = 1_700_000_000_000;
+    await store.recordRejection("soft-rm", "rate_limit", now);
+    expect(await store.removeBlock("soft-rm")).toBe(true);
+    expect(await rowOf("soft-rm")).toBeNull();
+  });
 });

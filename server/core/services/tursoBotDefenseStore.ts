@@ -196,6 +196,57 @@ export class TursoBotDefenseStore {
   }
 
   /**
+   * 手动拉黑（2026-08-25 管理页"加入黑名单"按钮）：
+   * - block_count +1（也算一次正式拉黑历史，惯犯延续）
+   * - 封禁时长直接取最长档 30 天（管理员显式拉黑，不按档位渐进）
+   * - 已有条目可能是封禁中 / 已解封 / 从未拉黑过的计数记录，统一覆盖
+   * @returns 新 block_count
+   */
+  async manuallyBlock(
+    ip: string,
+    reason: string,
+    now: number
+  ): Promise<number> {
+    await this.waitForInit();
+    const existing = (
+      await this.client.execute(
+        "SELECT block_count FROM rejected_ips WHERE ip = ?",
+        [ip]
+      )
+    ).rows[0];
+    const prev = (((existing?.block_count as number) ?? 0) || 0);
+    // 管理员手动拉黑按"再次重犯"算：+1，至少取 3 档（30 天）
+    const nextBlockCount = Math.max(prev + 1, 3);
+    const expiresAt = now + blockDurationMs(nextBlockCount); // 恒为 30 天
+
+    await this.client.execute(
+      `INSERT INTO rejected_ips (ip, first_at, last_at, hit_count, reason, expires_at, block_count)
+       VALUES (?, ?, ?, 0, ?, ?, ?)
+       ON CONFLICT(ip) DO UPDATE SET
+         last_at = excluded.last_at,
+         reason = excluded.reason,
+         expires_at = excluded.expires_at,
+         block_count = excluded.block_count`,
+      [ip, now, now, reason, expiresAt, nextBlockCount]
+    );
+    return nextBlockCount;
+  }
+
+  /**
+   * 手动移除黑名单（2026-08-25 管理页"移除"按钮）：
+   * 直接删掉整行（含惯犯档案）——管理员显式放行，不再保留计数。
+   * @returns 是否删除了条目
+   */
+  async removeBlock(ip: string): Promise<boolean> {
+    await this.waitForInit();
+    const result = await this.client.execute(
+      "DELETE FROM rejected_ips WHERE ip = ?",
+      [ip]
+    );
+    return (result.rowsAffected ?? 0) > 0;
+  }
+
+  /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案 + 未达阈值短记录），
    * 按最近活动倒序。返回 ip/reason/hitCount/blockCount/firstAt/lastAt/expiresAt，
    * 由调用方结合 now 计算"封禁中 / 剩余时长 / 已解封"。
