@@ -4,6 +4,7 @@ import channelsConfig from "./config/channels.json";
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: false },
+  css: ["~/assets/css/admin-shared.css"],
   devServer: {
     port: 4000,
   },
