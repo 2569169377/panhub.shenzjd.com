@@ -1,4 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
+import { formatDateKey } from "./hotSearchUtils";
 
 /**
  * Turso 搜索明细日志存储（2026-08-25 用户拍板）
@@ -113,6 +114,99 @@ export class TursoSearchLogStore {
       [now - retainMs]
     );
     return result.rowsAffected ?? 0;
+  }
+
+  /**
+   * 某天（北京时间 [start, end)）每词搜索次数，按次数降序 TOP N。
+   * 2026-08-25：热词/日历"每天次数"的真源（取代 search_terms 历史累计）。
+   */
+  async getDayTopTerms(
+    start: number,
+    end: number,
+    limit: number
+  ): Promise<{ term: string; count: number }[]> {
+    await this.waitForInit();
+    const rows = await this.client.execute(
+      `SELECT term, COUNT(*) AS c FROM search_log
+       WHERE created_at >= ? AND created_at < ?
+       GROUP BY term ORDER BY c DESC, term LIMIT ?`,
+      [start, end, Math.min(Math.max(1, limit), 500)]
+    );
+    return rows.rows.map((r) => ({
+      term: r.term as string,
+      count: (r.c as number) ?? 0,
+    }));
+  }
+
+  /** 某天词随机抽样（首页词云），带当天次数 */
+  async getRandomDayTerms(
+    start: number,
+    end: number,
+    limit: number
+  ): Promise<{ term: string; count: number }[]> {
+    await this.waitForInit();
+    const rows = await this.client.execute(
+      `SELECT term, COUNT(*) AS c FROM search_log
+       WHERE created_at >= ? AND created_at < ?
+       GROUP BY term ORDER BY RANDOM() LIMIT ?`,
+      [start, end, Math.min(Math.max(1, limit), 100)]
+    );
+    return rows.rows.map((r) => ({
+      term: r.term as string,
+      count: (r.c as number) ?? 0,
+    }));
+  }
+
+  /**
+   * 近 N 天每天词数 + top3（日历热力图）。
+   * 返回连续 N 天序列（无数据的天 count=0 / top=[]，宁缺毋滥不编造）。
+   */
+  async getDaySummaries(
+    startTs: number,
+    days: number
+  ): Promise<{ date: string; count: number; top: string[] }[]> {
+    await this.waitForInit();
+    const safeDays = Math.min(Math.max(1, days), 90);
+
+    // 每天词数（DISTINCT term）
+    const countRows = await this.client.execute(
+      `SELECT date((created_at + 8*3600*1000)/1000, 'unixepoch') AS day, COUNT(DISTINCT term) AS c
+       FROM search_log WHERE created_at >= ?
+       GROUP BY day`,
+      [startTs]
+    );
+    const countMap = new Map<string, number>();
+    for (const r of countRows.rows) countMap.set(r.day as string, r.c as number);
+
+    // 每天 top3（当天次数降序）
+    const topRows = await this.client.execute(
+      `SELECT day, term FROM (
+         SELECT date((created_at + 8*3600*1000)/1000, 'unixepoch') AS day, term,
+                ROW_NUMBER() OVER (
+                  PARTITION BY date((created_at + 8*3600*1000)/1000, 'unixepoch')
+                  ORDER BY COUNT(*) DESC, term
+                ) AS rn
+         FROM search_log WHERE created_at >= ?
+         GROUP BY day, term
+       ) WHERE rn <= 3`,
+      [startTs]
+    );
+    const topMap = new Map<string, string[]>();
+    for (const r of topRows.rows) {
+      const day = r.day as string;
+      const list = topMap.get(day) ?? [];
+      if (list.length < 3) list.push(r.term as string);
+      topMap.set(day, list);
+    }
+
+    // 补全连续 N 天序列（今天往前）
+    const out: { date: string; count: number; top: string[] }[] = [];
+    const dayMs = 86400000;
+    for (let i = safeDays - 1; i >= 0; i--) {
+      const date = formatDateKey(Date.now() - i * dayMs);
+      out.push({ date, count: countMap.get(date) ?? 0, top: topMap.get(date) ?? [] });
+    }
+    return out;
   }
 
   close(): void {
