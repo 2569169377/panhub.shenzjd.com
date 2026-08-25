@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { TursoSearchLogStore } from "../../server/core/services/tursoSearchLogStore";
+import { formatDateKey, beijingDayStart } from "../../server/core/services/hotSearchUtils";
 
 describe("TursoSearchLogStore", () => {
   let store: TursoSearchLogStore;
@@ -78,5 +79,64 @@ describe("TursoSearchLogStore", () => {
     ).rows;
     expect(rows).toHaveLength(1);
     expect(rows[0].term).toBe("新词");
+  });
+
+  it("getDayTopTerms：某天每词次数按降序（当天热词榜）", async () => {
+    const dayStart = 1_700_000_000_000;
+    const dayEnd = dayStart + 86400000;
+    await store.logSearch({ term: "霸王别姬", now: dayStart + 1000 });
+    await store.logSearch({ term: "霸王别姬", now: dayStart + 2000 });
+    await store.logSearch({ term: "霸王别姬", now: dayStart + 3000 });
+    await store.logSearch({ term: "使徒行者", now: dayStart + 4000 });
+    await store.logSearch({ term: "长津湖", now: dayStart + 5000 });
+    // 跨天数据（不应计入）
+    await store.logSearch({ term: "昨天的词", now: dayStart - 1000 });
+
+    const top = await store.getDayTopTerms(dayStart, dayEnd, 10);
+    expect(top).toEqual([
+      { term: "霸王别姬", count: 3 },
+      { term: "使徒行者", count: 1 },
+      { term: "长津湖", count: 1 },
+    ]);
+  });
+
+  it("getRandomDayTerms：只返回当天词（带次数）", async () => {
+    const dayStart = 1_700_000_000_000;
+    const dayEnd = dayStart + 86400000;
+    await store.logSearch({ term: "今天词A", now: dayStart + 1000 });
+    await store.logSearch({ term: "今天词B", now: dayStart + 2000 });
+    await store.logSearch({ term: "昨天词C", now: dayStart - 1000 });
+
+    const rand = await store.getRandomDayTerms(dayStart, dayEnd, 10);
+    const terms = rand.map((t) => t.term).sort();
+    expect(terms).toEqual(["今天词A", "今天词B"]);
+    expect(rand.every((t) => t.count >= 1)).toBe(true);
+  });
+
+  it("getDaySummaries：补全连续 N 天序列，每天词数与 top3", async () => {
+    const dayMs = 86400000;
+    // 以"真实今天"（北京 0 点）为基准，保证 SQL 的 date() 分组与
+    // store 内部 Date.now() 补序列在同一时间轴上
+    const todayStart = beijingDayStart(formatDateKey(Date.now()));
+    const now = todayStart + 3600_000;
+    // 今天：3 个词（霸王别姬 2 次排第一）
+    await store.logSearch({ term: "霸王别姬", now });
+    await store.logSearch({ term: "霸王别姬", now });
+    await store.logSearch({ term: "使徒行者", now });
+    await store.logSearch({ term: "长津湖", now });
+    // 昨天：1 个词
+    await store.logSearch({ term: "昨天的词", now: todayStart - dayMs + 1000 });
+
+    const days = await store.getDaySummaries(todayStart - 2 * dayMs, 3);
+    expect(days).toHaveLength(3);
+    // 前天无数据（不编造）
+    expect(days[0].count).toBe(0);
+    expect(days[0].top).toEqual([]);
+    // 昨天 1 词
+    expect(days[1].count).toBe(1);
+    expect(days[1].top).toEqual(["昨天的词"]);
+    // 今天 3 词，top1 是霸王别姬（次数最多）
+    expect(days[2].count).toBe(3);
+    expect(days[2].top[0]).toBe("霸王别姬");
   });
 });
