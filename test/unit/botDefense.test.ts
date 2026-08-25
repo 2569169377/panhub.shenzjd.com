@@ -30,10 +30,11 @@ function makeFakeStore(): FakeStore {
     recordRejection: vi.fn(async (ip: string, _r: string, _n: number) => {
       const c = (fake.hitCount.get(ip) ?? 0) + 1;
       fake.hitCount.set(ip, c);
-      return { hitCount: c, blocked: fake.blocked.has(ip) };
+      return { hitCount: c, blocked: fake.blocked.has(ip), blockCount: 0 };
     }),
     extendBlock: vi.fn(async (ip: string) => {
       fake.blocked.add(ip);
+      return 1; // 分级档位（store 层真实逻辑见 tursoBotDefenseStore.test.ts）
     }),
     pruneExpired: vi.fn(async () => 0),
     close: vi.fn(),
