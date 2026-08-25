@@ -260,33 +260,19 @@ export class HotSearchService {
   /**
    * 今日热搜词池随机抽样（首页词云展示用；TTL 内缓存同一批词，60s 刷新）
    *
-   * 2026-08-25 用户拍板：热词"次数"改为**当天次数**（search_log 按天聚合），
-   * 不再展示 search_terms 的历史累计（对"每天热搜"无意义）。
-   * 词云当天无明细（如刚上线/凌晨）→ 回退 search_terms 当天词兜底，避免空云。
-   * search_terms 同时保留服务 sitemap 选词（getTopTerms）。
+   * 2026-08-25 用户拍板：词云/词列表的"今天"用 search_terms today 活跃词
+   * （last_at 在今天 + count desc）作为主源，**保持丰满**（今天 ~350 个
+   * 活跃词）。search_log 上线当天去重仅 45 词，用于主页词云太稀。
+   *
+   * 后续：search_log 攒满一周后，再把 hover 次数切到 search_log 当天精确次数
+   * （getDayItems 同步）。search_log 的明细仍只用于管理页排查，不参与展示主源。
+   * search_terms 仍服务 sitemap 选词（getTopTerms）。
    */
   async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, async () => {
-      const logStore = getSearchLogStore();
-      const now = Date.now();
-      const dayStart = beijingDayStart(formatDateKey(now));
-      if (logStore) {
-        const terms = await logStore.getRandomDayTerms(dayStart, dayStart + 86400000, limit);
-        if (terms.length > 0) {
-          return terms.map((t, i) => ({
-            term: t.term,
-            score: t.count,
-            lastSearched: now,
-            createdAt: now,
-            rank: i + 1,
-            displayScore: t.count,
-          }));
-        }
-      }
-      // 回退：search_terms 当天词（历史累计 count 作为展示分数兜底）
-      return this.requireStore().getRandomHotSearches(limit);
-    });
+    return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, () =>
+      this.requireStore().getRandomHotSearches(limit)
+    );
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
@@ -367,25 +353,20 @@ export class HotSearchService {
   }
 
   /**
-   * 某天热词列表（次数 = 当天次数，2026-08-25 切 search_log）。
-   * search_log 无该天明细（历史日期）→ 回退 search_terms（last_at 当天
-   * 过滤 + 历史累计 count），历史数据照常展示（用户拍板）。
+   * 某天热词列表（2026-08-25 用户拍板：今天用 search_terms 活跃词为主源）
+   *
+   * 数据源选择：
+   * - search_terms 当天活跃词（last_at 当天 + count desc）—— 主源，丰满
+   * - search_log 攒满一周后，再把 hover 次数切到 search_log 当天精确次数
+   *
+   * 历史日期（search_log 上线 8-25 之前）天然由 search_terms last_at 过滤
+   * 给出，搜索行为连续，无空白期。
    */
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
-    return this.getCached(`day:${date}`, READ_TTL_SLOW_MS, async () => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
-      const logStore = getSearchLogStore();
-      if (logStore) {
-        const start = beijingDayStart(date);
-        const terms = await logStore.getDayTopTerms(start, start + 86400000, 500);
-        if (terms.length > 0) {
-          return terms.map((t, i) => ({ term: t.term, rank: i + 1, count: t.count }));
-        }
-      }
-      // 回退：search_terms 历史累计（未部署 search_log 之前的日期）
-      return this.requireStore().getDayItems(date);
-    });
+    return this.getCached(`day:${date}`, READ_TTL_SLOW_MS, () =>
+      this.requireStore().getDayItems(date)
+    );
   }
 
   async getTotalSearches(): Promise<number> {
