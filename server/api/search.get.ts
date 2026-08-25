@@ -20,6 +20,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   return undefined;
 }
 import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
@@ -40,8 +41,19 @@ export default defineEventHandler(async (event) => {
   // 放在 UA 校验之前：黑名单 IP 多半已多次触发拦截，连 UA 检查都跳过直接 403
   const ip = getClientIp(event);
   if (await getOrCreateBotDefenseService().isBlocked(ip)) {
-    loggers.search.warn(`拦截黑名单 IP 搜索请求`, { ip, method: event.method, path: event.path });
+    // 2026-08-25 降噪：命中即 403，无需逐条 warn（已拉黑 IP 的反复探测只会刷日志）。
+    // 封禁动作（IP 拉黑/分级档位）本身在 botDefense.ts 有 info 级记录。
+    loggers.search.debug(`拦截黑名单 IP`, { ip, method: event.method, path: event.path });
     throw createError({ statusCode: 403, statusMessage: "ip blocked" });
+  }
+  // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429。
+  // 独立于全局限流（按路径前缀），跨三个搜索端点共享同一计数，防换端点绕限。
+  if (await isSearchRateLimited(ip)) {
+    throw createError({
+      statusCode: 429,
+      statusMessage: "too many requests",
+      message: "请求过于频繁，请稍后重试",
+    });
   }
   // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
   requireHumanOrCredential(event);

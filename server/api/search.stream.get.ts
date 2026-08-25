@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, createError, createEventStream } from "h3";
 import type { H3Event } from "h3";
 import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
@@ -47,8 +48,13 @@ export default defineEventHandler(async (event: H3Event) => {
   requireSearchAuth(event);
   const ip = getClientIp(event);
   if (await getOrCreateBotDefenseService().isBlocked(ip)) {
-    loggers.search.warn(`拦截黑名单 IP 搜索请求`, { ip, method: event.method, path: event.path });
+    // 2026-08-25 降噪：命中即 403，无需逐条 warn（已拉黑 IP 的反复探测只会刷日志）
+    loggers.search.debug(`拦截黑名单 IP`, { ip, method: event.method, path: event.path });
     throw createError({ statusCode: 403, statusMessage: "ip blocked" });
+  }
+  // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429
+  if (await isSearchRateLimited(ip)) {
+    throw createError({ statusCode: 429, statusMessage: "too many requests" });
   }
   requireHumanOrCredential(event);
   await requireWxAuth(event);
