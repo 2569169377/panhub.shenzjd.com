@@ -1,39 +1,17 @@
+// 暗色模式：纯跟随系统 prefers-color-scheme，无手动切换、无本地存储覆盖。
+// 阻塞脚本（app.vue）负责首屏即时应用主题，这里仅负责响应系统主题实时变化。
 export function useDarkMode() {
-  const isDark = useState("dark-mode", () => false);
-
   function applyTheme(dark: boolean) {
-    if (import.meta.client) {
-      document.documentElement.classList.toggle("dark", dark);
-    }
-  }
-
-  function toggle() {
-    isDark.value = !isDark.value;
-    try {
-      localStorage.setItem("panhub:dark-mode", isDark.value ? "dark" : "light");
-    } catch {
-      // Safari 隐私模式 / 存储满时 localStorage 会抛错，降级为仅内存状态
-    }
-    applyTheme(isDark.value);
+    if (import.meta.server) return;
+    document.documentElement.classList.toggle("dark", dark);
   }
 
   function init() {
-    if (!import.meta.client) return;
-    try {
-      const saved = localStorage.getItem("panhub:dark-mode");
-      if (saved === "dark") {
-        isDark.value = true;
-      } else if (saved === "light") {
-        isDark.value = false;
-      } else {
-        isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      }
-    } catch {
-      // localStorage 不可用时使用系统默认偏好
-      isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    }
-    applyTheme(isDark.value);
+    if (import.meta.server || typeof window === "undefined") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    applyTheme(media.matches);
+    media.addEventListener("change", (e) => applyTheme(e.matches));
   }
 
-  return { isDark: readonly(isDark), toggle, init };
+  return { init };
 }

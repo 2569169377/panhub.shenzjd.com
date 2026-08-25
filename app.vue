@@ -30,11 +30,12 @@
 <script setup lang="ts">
 // 全站骨架：暗色模式 CSS + 阻塞脚本（普通 useHead，⚠️ 不要用函数式工厂——
 // 曾触发 unhead "Cannot access 'h' before initialization" SSR 时序错误）
+// 主题纯跟随系统（prefers-color-scheme），首屏即时生效，无需等待 JS
 useHead({
   link: [{ rel: "stylesheet", href: "/css/dark-mode.css" }],
   script: [
     {
-      innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
+      innerHTML: `(function(){if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.classList.add('dark')})();`,
     },
   ],
 });
