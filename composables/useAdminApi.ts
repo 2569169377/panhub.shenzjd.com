@@ -121,5 +121,5 @@ export function useAdminApi() {
     return request(`/api/blacklist?ip=${encodeURIComponent(ip)}`, { method: "DELETE" });
   }
 
-  return { authStatus, request, querySearchLog, loadBlacklist, blockIp, removeIp };
+  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp };
 }
