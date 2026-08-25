@@ -104,6 +104,13 @@
       <NuxtPage />
     </main>
 
+    <!-- 页脚（2026-08-25：隐私政策链接，声明搜索历史记录合规） -->
+    <footer class="site-footer">
+      <NuxtLink to="/privacy" class="footer-link">隐私政策</NuxtLink>
+      <span class="footer-sep">·</span>
+      <span class="footer-copy">© {{ new Date().getFullYear() }} PanHub</span>
+    </footer>
+
     <!-- Toast 通知 -->
     <div v-if="toast.show" class="toast" :class="toast.type" role="status" aria-live="polite">
       {{ toast.message }}
@@ -650,4 +657,25 @@ function dismissAnnouncement() {
     opacity: 1;
   }
 }
+/* 页脚（隐私政策链接） */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 16px 28px;
+  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+}
+.footer-link {
+  color: var(--text-secondary, #6b7280);
+  text-decoration: none;
+}
+.footer-link:hover {
+  color: var(--accent, #2563eb);
+}
+.footer-sep {
+  opacity: 0.5;
+}
+
 </style>
