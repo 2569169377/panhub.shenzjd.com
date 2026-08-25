@@ -62,8 +62,19 @@ export async function verifyWxAuthCredential(event: H3Event): Promise<boolean> {
       loggers.api.warn?.("wx-auth check 非 2xx，降级放行", { status: res.status });
       return true;
     }
-    const data = (await res.json()) as { authenticated?: boolean };
-    return data.authenticated === true;
+    const data = (await res.json()) as {
+      authenticated?: boolean;
+      user?: { openid?: string };
+    };
+    if (data.authenticated === true) {
+      // 2026-08-25：check 响应带回 openid，存请求上下文供搜索日志
+      // 关联"哪个 openid 搜了什么"（见 recordSearchTerm）
+      if (data.user?.openid) {
+        (event.context as Record<string, any>).__wxAuthOpenid = data.user.openid;
+      }
+      return true;
+    }
+    return false;
   } catch (err) {
     // 网络错误/超时 → 降级放行，不误伤真人（但打日志便于观察）
     loggers.api.warn?.("wx-auth check 请求失败，降级放行", {
@@ -98,7 +109,10 @@ export async function verifyWxAuthOnce(event: H3Event): Promise<boolean> {
  * 取消关注后最长 10s 内仍可搜，换取不打爆 wx-auth 限流。可接受。
  */
 const WX_AUTH_CACHE_TTL_MS = 10_000;
-const wxAuthCache = new Map<string, { ok: boolean; expiresAt: number }>();
+const wxAuthCache = new Map<
+  string,
+  { ok: boolean; openid?: string; expiresAt: number }
+>();
 
 /** 测试用：清空跨请求缓存 */
 export function resetWxAuthCache(): void {
@@ -121,6 +135,8 @@ export async function verifyWxAuthOnceCached(event: H3Event): Promise<boolean> {
     const hit = wxAuthCache.get(cacheKey);
     if (hit && hit.expiresAt > now) {
       ctx.__wxAuthVerified = hit.ok;
+      // 2026-08-25：缓存命中也要恢复 openid（搜索日志关联用）
+      if (hit.openid) ctx.__wxAuthOpenid = hit.openid;
       return hit.ok;
     }
   }
@@ -128,7 +144,11 @@ export async function verifyWxAuthOnceCached(event: H3Event): Promise<boolean> {
   const ok = await verifyWxAuthCredential(event);
   ctx.__wxAuthVerified = ok;
   if (cacheKey) {
-    wxAuthCache.set(cacheKey, { ok, expiresAt: now + WX_AUTH_CACHE_TTL_MS });
+    wxAuthCache.set(cacheKey, {
+      ok,
+      openid: ctx.__wxAuthOpenid,
+      expiresAt: now + WX_AUTH_CACHE_TTL_MS,
+    });
     // 防 Map 无限膨胀：超 10k 时清掉过期条目
     if (wxAuthCache.size > 10_000) {
       for (const [k, v] of wxAuthCache) {

@@ -66,7 +66,13 @@ export default defineEventHandler(async (event: H3Event) => {
     throw createError({ statusCode: 400, statusMessage: "kw too long (max 200)" });
   }
 
-  await recordSearchTerm(kw, ip);
+  await recordSearchTerm(
+    kw,
+    ip,
+    // 2026-08-25：WX_AUTH_ENFORCE=1 时 requireWxAuth 已把 openid 存进
+    // event.context（见 wxAuthCheck.ts），搜索日志用它关联"谁搜了什么"
+    ((event.context as Record<string, any>)?.__wxAuthOpenid as string) || ""
+  );
 
   let ext: Record<string, any> | undefined;
   const extStr = (q.ext as string | undefined)?.trim();

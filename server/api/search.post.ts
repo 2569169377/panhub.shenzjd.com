@@ -62,7 +62,13 @@ export default defineEventHandler(async (event) => {
 
   // 记录搜索词（2026-08-22：只要搜索就记录，便于排查）。
   // 防刷由入口 requireHumanOrCredential 承担（bot UA 403），本层不再过滤。
-  await recordSearchTerm(kw, ip);
+  // 2026-08-25：附带 openid（WX_AUTH_ENFORCE=1 时由 requireWxAuth 解出存
+  // event.context），供 search_log 明细关联"谁搜了什么"
+  await recordSearchTerm(
+    kw,
+    ip,
+    ((event.context as Record<string, any>)?.__wxAuthOpenid as string) || ""
+  );
 
   body.channels = parseList(body.channels);
   body.plugins = parseList(body.plugins);
