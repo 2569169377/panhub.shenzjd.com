@@ -209,6 +209,65 @@ export class TursoSearchLogStore {
     return out;
   }
 
+  /**
+   * 管理排查：某 openid 的搜索记录（谁搜了什么），按时间倒序。
+   * since（ms）可选：只返回该时间点之后的记录。
+   */
+  async searchByOpenid(
+    openid: string,
+    limit: number,
+    since?: number
+  ): Promise<{ term: string; ip: string; createdAt: number }[]> {
+    await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 500);
+    const rows = since
+      ? await this.client.execute(
+          `SELECT term, ip, created_at FROM search_log
+           WHERE openid = ? AND created_at >= ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [openid, since, safe]
+        )
+      : await this.client.execute(
+          `SELECT term, ip, created_at FROM search_log
+           WHERE openid = ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [openid, safe]
+        );
+    return rows.rows.map((r) => ({
+      term: r.term as string,
+      ip: r.ip as string,
+      createdAt: (r.created_at as number) ?? 0,
+    }));
+  }
+
+  /** 管理排查：搜过某词的所有记录（openid/ip/时间），按时间倒序 */
+  async searchByTerm(
+    term: string,
+    limit: number,
+    since?: number
+  ): Promise<{ openid: string; ip: string; createdAt: number }[]> {
+    await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 500);
+    const rows = since
+      ? await this.client.execute(
+          `SELECT openid, ip, created_at FROM search_log
+           WHERE term = ? AND created_at >= ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [term, since, safe]
+        )
+      : await this.client.execute(
+          `SELECT openid, ip, created_at FROM search_log
+           WHERE term = ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [term, safe]
+        );
+    return rows.rows.map((r) => ({
+      openid: r.openid as string,
+      ip: r.ip as string,
+      createdAt: (r.created_at as number) ?? 0,
+    }));
+  }
+
   close(): void {
     try {
       this.client.close();
