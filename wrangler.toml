@@ -11,9 +11,13 @@ binding = "ASSETS"
 [vars]
 LOG_LEVEL = "info"
 # 微信关注公众号登录态校验开关（2026-08-22）：1=服务端实时校验 wxauth cookie，
-# 未关注/取消关注的搜索请求 401。暂置 0 恢复线上（已认证用户被 401 的根因
-# 待查：wxauth cookie 未传到服务端或 token 失效），查清后再开。
+# 未关注/取消关注的搜索请求 401。
+# 2026-08-25：线上已通过 wrangler secret put WX_AUTH_ENFORCE=1 覆盖此值（生效中），
+# 此处保留 0 作为仓库默认（Docker .env 里为 1）。以 secret/服务器实际配置为准。
 WX_AUTH_ENFORCE = "0"
+# IP 黑名单拦截开关（2026-08-24）：1=拉黑生效（同一 IP 50 次/5min 触发分级封禁
+# 24h→7d→30d）；0=只记录不拦截。2026-08-25 用户确认 Docker 已配，Worker 同步开启。
+BOT_DEFENSE_ENFORCE = "1"
 # 热搜存储已迁移到 Turso（2026-08-18，D1 已删除）：
 # Worker 通过 `wrangler secret put TURSO_URL` / `wrangler secret put TURSO_AUTH_TOKEN` 注入连接信息，
 # Docker 侧在服务器 .env 配置同样的 TURSO_URL / TURSO_AUTH_TOKEN。
