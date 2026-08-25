@@ -1,6 +1,7 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
-import { normalize, formatDateKey } from "./hotSearchUtils";
+import { normalize, formatDateKey, beijingDayStart } from "./hotSearchUtils";
+import { getSearchLogStore } from "./tursoSearchLogStore";
 
 /**
  * 写聚合缓冲配置
@@ -256,12 +257,30 @@ export class HotSearchService {
     return items;
   }
 
-  /** 今日热搜词池随机抽样（首页词云展示用；TTL 内缓存同一批词，60s 刷新） */
+  /**
+   * 今日热搜词池随机抽样（首页词云展示用；TTL 内缓存同一批词，60s 刷新）
+   *
+   * 2026-08-25 用户拍板：热词"次数"改为**当天次数**（search_log 按天聚合），
+   * 不再展示 search_terms 的历史累计（对"每天热搜"无意义）。
+   * search_terms 保留仅服务 sitemap 选词（getTopTerms）。
+   */
   async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, () =>
-      this.requireStore().getRandomHotSearches(limit)
-    );
+    return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, async () => {
+      const logStore = getSearchLogStore();
+      if (!logStore) return [];
+      const now = Date.now();
+      const dayStart = beijingDayStart(formatDateKey(now));
+      const terms = await logStore.getRandomDayTerms(dayStart, dayStart + 86400000, limit);
+      return terms.map((t, i) => ({
+        term: t.term,
+        score: t.count,
+        lastSearched: now,
+        createdAt: now,
+        rank: i + 1,
+        displayScore: t.count,
+      }));
+    });
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
@@ -304,18 +323,36 @@ export class HotSearchService {
     );
   }
 
+  /**
+   * 每日榜单日历：近 N 天每天词数 + top3（日历热力图）。
+   * 2026-08-25：数据源切到 search_log 按天聚合（当天次数），
+   * 历史无明细数据的天 count=0/top=[]（宁缺毋滥，不编造）。
+   */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
-    return this.getCached(`calendar:${days}`, READ_TTL_SLOW_MS, () =>
-      this.requireStore().getCalendar(days)
-    );
+    return this.getCached(`calendar:${days}`, READ_TTL_SLOW_MS, async () => {
+      const logStore = getSearchLogStore();
+      if (!logStore) return [];
+      const safeDays = Math.min(Math.max(1, days), 90);
+      const startTs =
+        beijingDayStart(formatDateKey(Date.now())) - (safeDays - 1) * 86400000;
+      return logStore.getDaySummaries(startTs, safeDays);
+    });
   }
 
+  /**
+   * 某天热词列表（次数 = 当天次数，2026-08-25 切 search_log）。
+   * search_log 无该天明细 → 返回空数组（历史天不编造数据）。
+   */
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
-    return this.getCached(`day:${date}`, READ_TTL_SLOW_MS, () =>
-      this.requireStore().getDayItems(date)
-    );
+    return this.getCached(`day:${date}`, READ_TTL_SLOW_MS, async () => {
+      const logStore = getSearchLogStore();
+      if (!logStore || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+      const start = beijingDayStart(date);
+      const terms = await logStore.getDayTopTerms(start, start + 86400000, 500);
+      return terms.map((t, i) => ({ term: t.term, rank: i + 1, count: t.count }));
+    });
   }
 
   async getTotalSearches(): Promise<number> {
