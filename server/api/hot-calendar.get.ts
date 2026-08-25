@@ -55,7 +55,10 @@ export default defineEventHandler(async (event) => {
       totalTerms,
       todayTerms,
       todaySearches,
-      searchesReady: searchesDayCount >= 7,
+      // 2026-08-25 用户拍板：去掉"攒满 7 天才展示次数"门槛——
+      // 只要今日有搜索次数（>0）就展示（daily_searches 从部署起精确记录，
+      // 4 天数据已足够真实），避免页面显得数据少
+      searchesReady: todaySearches > 0,
       configured: true,
     },
   };

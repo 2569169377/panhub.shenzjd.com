@@ -7,16 +7,12 @@
         <h1 class="title">每一天，大家在搜什么</h1>
         <p class="desc">按天记录全网用户的真实搜索词 · 点击日期查看当天全部搜索词 · 点击词条立即搜索</p>
 
-        <!-- 量级统计：词数始终展示；搜索次数攒满一周后展示（searchesReady） -->
+        <!-- 量级统计：累计词数 + 今日搜索次数（2026-08-25：去掉"今日搜索
+             词数"——当天精确词数刚上线偏小；次数用 daily_searches 精确值） -->
         <div v-if="totalTerms > 0" class="hero-stats">
           <div class="hero-stat">
             <span class="hero-stat__num">{{ formatNum(totalTerms) }}</span>
             <span class="hero-stat__label">累计搜索词数</span>
-          </div>
-          <div class="hero-stat__sep"></div>
-          <div class="hero-stat">
-            <span class="hero-stat__num">{{ formatNum(todayCount) }}</span>
-            <span class="hero-stat__label">今日搜索词数</span>
           </div>
 
           <template v-if="searchesReady">
@@ -250,12 +246,6 @@ const canScrollRight = ref(false);
 const todayKey = computed(() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-});
-
-/** 今日搜索词数（日历最后一天，即今天；无今天数据时回退 0） */
-const todayCount = computed(() => {
-  const t = days.value.find((d) => d.date === todayKey.value);
-  return t?.count ?? 0;
 });
 
 /* ---------- sparkline（近 N 天每日搜索词数趋势） ---------- */
