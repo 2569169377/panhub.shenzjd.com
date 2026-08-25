@@ -191,4 +191,43 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     const row = await rowOf("manual-perm");
     expect(row?.expiresAt).toBe(4_100_000_000_000);
   });
+
+  it("并发 recordRejection 不撞 UNIQUE 且 hit_count 正确累加（2026-08-26 修复回归）", async () => {
+    // 复现线上 bug：同一 IP 短时间内多次频控命中，每次异步调 recordRejection
+    // 原两段式 SELECT-then-INSERT 在并发下 TOCTOU，多个请求各自 SELECT 都没查到
+    // 后都 INSERT，撞 PRIMARY KEY UNIQUE。原子 upsert 后应安全。
+    const now = 1_700_000_000_000;
+    const ip = "203.0.113.7";
+    const N = 20;
+    const results = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        store.recordRejection(ip, "rate_limit", now + i)
+      )
+    );
+    // 无一抛 UNIQUE 错（到这步说明全成功）
+    const hitCounts = results.map((r) => r.hitCount).sort((a, b) => a - b);
+    expect(hitCounts).toEqual(Array.from({ length: N }, (_, i) => i + 1));
+    // 最终 hit_count == N
+    const row = await rowOf(ip);
+    expect(row?.blockCount).toBe(0); // 仅累计，未达拉黑阈值不会被 extendBlock
+    const r2 = (
+      await (store as any).client.execute(
+        "SELECT hit_count FROM rejected_ips WHERE ip = ?",
+        [ip]
+      )
+    ).rows[0];
+    expect(r2?.hit_count as number).toBe(N);
+  });
+
+  it("recordRejection 对已拉黑条目：hit_count 在 extendBlock 的 0 基础上累加，block_count 不被覆盖", async () => {
+    // extendBlock 插入时 hit_count=0, block_count=1；后续 recordRejection 走
+    // ON CONFLICT 更新分支：hit_count=0+1=1，block_count 保留=1
+    const now = 1_700_000_000_000;
+    await store.extendBlock("9.9.9.9", "bot_ua", now);
+    const r = await store.recordRejection("9.9.9.9", "bot_ua", now + 25 * 60 * 60_000);
+    expect(r.hitCount).toBe(1);
+    expect(r.blockCount).toBe(1);
+    // 仍未被 extendBlock 改过 expires_at（保留拉黑时的 now+24h，已过期）
+    expect(r.blocked).toBe(false); // block_count>0 但 expires_at(now+24h) <= now+25h
+  });
 });
