@@ -18,6 +18,8 @@ interface FakeStore {
   isBlocked: ReturnType<typeof vi.fn>;
   recordRejection: ReturnType<typeof vi.fn>;
   extendBlock: ReturnType<typeof vi.fn>;
+  manuallyBlock: ReturnType<typeof vi.fn>;
+  removeBlock: ReturnType<typeof vi.fn>;
   pruneExpired: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
@@ -35,6 +37,13 @@ function makeFakeStore(): FakeStore {
     extendBlock: vi.fn(async (ip: string) => {
       fake.blocked.add(ip);
       return 1; // 分级档位（store 层真实逻辑见 tursoBotDefenseStore.test.ts）
+    }),
+    manuallyBlock: vi.fn(async (ip: string, _r: string, _n: number) => {
+      fake.blocked.add(ip);
+      return 3; // 管理页手动拉黑固定 30 天档
+    }),
+    removeBlock: vi.fn(async (ip: string) => {
+      return fake.blocked.delete(ip);
     }),
     pruneExpired: vi.fn(async () => 0),
     close: vi.fn(),
@@ -166,6 +175,76 @@ describe("BotDefenseService.recordRejection", () => {
   it("持久化失败时 recordRejection 不抛错（fail-soft）", async () => {
     fake.recordRejection.mockRejectedValueOnce(new Error("network"));
     await expect(svc.recordRejection("3.3.3.3", "bot_ua")).resolves.toBeUndefined();
+  });
+});
+
+describe("BotDefenseService.manuallyBlock / removeBlock（2026-08-25 管理页操作）", () => {
+  let svc: BotDefenseService;
+
+  beforeEach(async () => {
+    process.env.BOT_DEFENSE_ENFORCE = "1";
+    fake = makeFakeStore();
+    svc = new BotDefenseService();
+    await new Promise((r) => setTimeout(r, 0));
+    svc.reset();
+  });
+
+  afterEach(() => {
+    delete process.env.BOT_DEFENSE_ENFORCE;
+  });
+
+  it("manuallyBlock 调 store 并写 pos cache → 后续 isBlocked 不查 store 直接命中", async () => {
+    const blockCount = await svc.manuallyBlock("1.2.3.4", "manual");
+    expect(blockCount).toBe(3);
+    expect(fake.manuallyBlock).toHaveBeenCalledWith("1.2.3.4", "manual", expect.any(Number));
+
+    // 手动拉黑后立即拦截（pos cache 命中，不重复查 store）
+    fake.isBlocked.mockClear();
+    expect(await svc.isBlocked("1.2.3.4")).toBe(true);
+    expect(fake.isBlocked).not.toHaveBeenCalled();
+  });
+
+  it("manuallyBlock 前若有 neg cache，拉黑后立即失效（不再放行）", async () => {
+    // 先走一次 isBlocked=false → 写入 neg cache
+    expect(await svc.isBlocked("8.8.8.8")).toBe(false);
+    expect(fake.isBlocked).toHaveBeenCalledTimes(1);
+
+    // 手动拉黑 → neg cache 必须被清掉
+    await svc.manuallyBlock("8.8.8.8");
+    expect(await svc.isBlocked("8.8.8.8")).toBe(true);
+  });
+
+  it("removeBlock 删掉 pos cache（移除后立即放行不查 store）", async () => {
+    fake.blocked.add("9.9.9.9");
+    await svc.manuallyBlock("9.9.9.9"); // 先写入 pos cache
+    expect(await svc.isBlocked("9.9.9.9")).toBe(true);
+
+    const removed = await svc.removeBlock("9.9.9.9");
+    expect(removed).toBe(true);
+    expect(fake.removeBlock).toHaveBeenCalledWith("9.9.9.9");
+
+    // 移除后 isBlocked 立即 false；若无 neg cache，会 fallback 查 store（返回 false）
+    fake.isBlocked.mockClear();
+    expect(await svc.isBlocked("9.9.9.9")).toBe(false);
+  });
+
+  it("移除不存在的 IP → 返回 false 且不报错", async () => {
+    const removed = await svc.removeBlock("203.0.113.9");
+    expect(removed).toBe(false);
+  });
+
+  it("Turso 不可用时 manuallyBlock / removeBlock 抛错（管理侧不静默）", async () => {
+    vi.resetModules();
+    vi.doMock("../../server/core/services/tursoBotDefenseStore", () => ({
+      createTursoBotDefenseStore: () => {
+        throw new Error("no TURSO_URL");
+      },
+    }));
+    const mod = await import("../../server/core/services/botDefense");
+    const s2 = new mod.BotDefenseService();
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(s2.manuallyBlock("1.1.1.1")).rejects.toThrow();
+    await expect(s2.removeBlock("1.1.1.1")).rejects.toThrow();
   });
 });
 

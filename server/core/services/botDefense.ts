@@ -194,6 +194,45 @@ export class BotDefenseService {
   }
 
   /**
+   * 手动拉黑一个 IP（2026-08-25 管理页"加入黑名单"按钮）。
+   * 直接走 store.manuallyBlock（block_count +1 → 30 天），
+   * 并立刻刷新缓存使拦截立即生效：
+   * - 写 posCache（5min 内 isBlocked 直接命中）
+   * - 删 negCache / hitTimestamps（避免 30s 负缓存继续放行、避免历史计数干扰）
+   */
+  async manuallyBlock(ip: string, reason = "manual"): Promise<number> {
+    await this.waitForInit();
+    if (!this.store) throw new Error("黑名单持久化不可用，无法手动拉黑");
+    const nip = normalizeIp(ip);
+    const now = Date.now();
+    const blockCount = await this.store.manuallyBlock(nip, reason, now);
+    this.posCache.set(nip, { expiresAt: now + POS_CACHE_TTL_MS });
+    this.negCache.delete(nip);
+    this.hitTimestamps.delete(nip);
+    loggers.api?.info?.("IP 手动拉黑（管理页）", { ip: nip, reason, blockCount });
+    return blockCount;
+  }
+
+  /**
+   * 手动移除黑名单（2026-08-25 管理页"移除"按钮）。
+   * 删掉 Turso 行并清理缓存，确保下一次 isBlocked 立即放行。
+   * @returns 是否确实删除了条目
+   */
+  async removeBlock(ip: string): Promise<boolean> {
+    await this.waitForInit();
+    if (!this.store) throw new Error("黑名单持久化不可用，无法移除");
+    const nip = normalizeIp(ip);
+    const removed = await this.store.removeBlock(nip);
+    this.posCache.delete(nip);
+    this.negCache.delete(nip);
+    this.hitTimestamps.delete(nip);
+    if (removed) {
+      loggers.api?.info?.("IP 手动移除黑名单（管理）", { ip: nip });
+    }
+    return removed;
+  }
+
+  /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案），按最近活动倒序。
    * 不依赖 BOT_DEFENSE_ENFORCE 开关（管理侧只看数据，不拦截）。
    */
