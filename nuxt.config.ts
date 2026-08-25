@@ -63,6 +63,10 @@ export default defineNuxtConfig({
     "/api/search.stream": { swr: false, cache: false },
     // 搜索明细管理查询（2026-08-25）：敏感数据 + 需实时看到新增记录，禁缓存
     "/api/search-log": { swr: false, cache: false },
+    // IP 黑名单管理查询（2026-08-25）：同样禁缓存——
+    // ⚠️ 漏加此条曾导致首次 401 被 /** swr:3600 缓存 1 小时，之后请求
+    // 到不了后端，用户有 token 也永远 401（管理页看不到 userinfo 调用）
+    "/api/blacklist": { swr: false, cache: false },
     // 链接检测接口需要读 POST body，禁止缓存避免 body 被中间件消费
     "/api/check": { swr: false, cache: false },
     // 图片代理依赖豆瓣，禁止 SWR 缓存避免错误响应被缓存
