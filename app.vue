@@ -8,7 +8,8 @@
     </div>
 
     <!-- 顶部导航 -->
-    <header class="header">
+    <!-- 顶部导航 / 公告条 / 密码门：管理页（/admin）一律不展示（纯净后台） -->
+    <header v-if="!isAdmin" class="header">
       <nav class="nav">
         <NuxtLink to="/" class="brand">
           <span class="brand-icon">🔍</span>
@@ -91,7 +92,7 @@
     </header>
 
     <!-- 公告条（全站导航栏下方；关闭后不再显示，改公告内容时升级 key 版本号重新展示） -->
-    <div v-if="showAnnouncement" class="announce-bar" role="status">
+    <div v-if="showAnnouncement && !isAdmin" class="announce-bar" role="status">
       <span class="announce-bar__text">
         📢 为节省服务器资源，默认搜索 <strong>90 条</strong>结果即自动暂停；
         如需更多结果，点击「继续」即可继续搜索
@@ -116,8 +117,8 @@
       {{ toast.message }}
     </div>
 
-    <!-- 密码门（仅在用户发起搜索时弹出） -->
-    <ClientOnly>
+    <!-- 密码门（管理页不需要——管理鉴权走 isAdminUser） -->
+    <ClientOnly v-if="!isAdmin">
       <PasswordGate
         :show="showPasswordGate"
         :error="auth.error.value || ''"
@@ -128,21 +129,21 @@
 </template>
 
 <script setup lang="ts">
-// 暗色模式：阻塞脚本设置 class + CSS 文件引入；公众号/赞赏码浮窗由 CDN Web Component 自动注入
-useHead({
-  link: [{ rel: "stylesheet", href: "/css/dark-mode.css" }],
-  script: [
-    {
-      innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
-    },
-    {
-      // 悬浮二维码 Web Component：无需标签/JS，自动注入公众号 + 赞赏码浮窗。
-      // 组件包发布新版本（@latest）后本仓库无需任何改动即自动生效。
-      src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
-      body: true,
-    },
-  ],
-});
+// 暗色模式 CSS（所有页面统一）
+const darkModeLink = [{ rel: "stylesheet", href: "/css/dark-mode.css" }];
+const darkModeScript = {
+  innerHTML: `(function(){var s=localStorage.getItem('panhub:dark-mode');var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})();`,
+};
+// 悬浮二维码 Web Component（公众号/赞赏码）——管理页（/admin）不加载
+const floatingQrScript = {
+  src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
+  body: true,
+};
+// 函数式 useHead（响应式追踪 isAdmin）：管理页纯净后台，不加载 floating-qr
+useHead(() => ({
+  link: darkModeLink,
+  script: [darkModeScript, ...(isAdmin.value ? [] : [floatingQrScript])],
+}));
 
 const { settings, loadSettings } = useSettings();
 const { toast, showToast } = useToast();
@@ -150,6 +151,10 @@ const { isDark, toggle: toggleDark, init: initDarkMode } = useDarkMode();
 const auth = useAuth();
 const showPasswordGate = ref(false);
 const showNavMenu = ref(false);
+
+// 2026-08-25：管理页（/admin）纯净后台模式——隐藏顶部导航/公告/密码门/弹窗
+const route = useRoute();
+const isAdmin = computed(() => route.path.startsWith("/admin"));
 
 // 导航链接
 const navLinks = [
