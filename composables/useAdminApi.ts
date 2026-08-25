@@ -1,0 +1,125 @@
+/**
+ * 管理后台 API 封装（2026-08-25 admin 规范化重构）
+ *
+ * 统一处理：
+ * - /api/search-log：搜索记录查询（按 openid / 按词）
+ * - /api/blacklist：黑名单查询 / 手动拉黑 / 移除
+ * - 鉴权状态：401 → no-login（未登录）、403 → no-admin（非管理员）、
+ *   其他错误 → 抛出含 message 的 Error
+ *
+ * 页面只需关心返回数据，不用重复写状态码分支。
+ */
+
+export type AdminAuthStatus = "checking" | "ok" | "no-login" | "no-admin";
+
+/** 搜索记录条目 */
+export interface SearchLogItem {
+  term?: string;
+  openid?: string;
+  ip?: string;
+  createdAt?: number;
+}
+
+/** 黑名单条目 */
+export interface BlacklistItem {
+  ip: string;
+  reason?: string;
+  hitCount?: number;
+  blockCount?: number;
+  firstAt?: number;
+  lastAt?: number;
+  expiresAt?: number;
+  blocked?: boolean;
+  remainingMs?: number;
+}
+
+/** 409 之外的错误会被包装为 AdminApiError（serverMessage 来自后端 message） */
+export class AdminApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "AdminApiError";
+    this.status = status;
+  }
+}
+
+export function useAdminApi() {
+  const authStatus = ref<AdminAuthStatus>("checking");
+
+  async function request<T = any>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, init);
+    if (res.status === 401) {
+      authStatus.value = "no-login";
+      throw new AdminApiError(401, "未登录");
+    }
+    if (res.status === 403) {
+      authStatus.value = "no-admin";
+      throw new AdminApiError(403, "无权限");
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new AdminApiError(res.status, data?.message || `请求失败（HTTP ${res.status}）`);
+    }
+    const data = await res.json();
+    if (data?.code !== 0) {
+      throw new AdminApiError(200, data?.message || "业务处理失败");
+    }
+    return data.data as T;
+  }
+
+  /** 打开管理页即探测管理员权限（onMounted 调用：先看有没有 token，没有再兜底 silentCheck） */
+  async function probeAuth(): Promise<AdminAuthStatus> {
+    authStatus.value = "checking";
+    try {
+      // 无 token cookie → 先调 wx-auth SDK 静默登录写 cookie，再探测
+      const hasToken =
+        typeof document !== "undefined" && /(?:^|; )wxauth-token=/.test(document.cookie);
+      if (!hasToken) {
+        const { WxAuth } = await import("wx-auth-sdk");
+        await WxAuth.silentCheck().catch(() => {});
+      }
+      // 探测：拉一次黑名单（管理员接口），成功即管理员
+      await request("/api/blacklist?limit=1");
+      authStatus.value = "ok";
+    } catch (e: any) {
+      // 401/403 已被 request 写入 authStatus，其余（网络异常）保持 checking → 走 no-login 兜底
+      if (authStatus.value === "checking") authStatus.value = "no-login";
+    }
+    return authStatus.value;
+  }
+
+  /** 搜索记录查询 */
+  async function querySearchLog(opts: {
+    mode: "openid" | "term";
+    keyword: string;
+    days?: string;
+    limit?: number;
+  }): Promise<{ mode: string; items: SearchLogItem[]; total: number }> {
+    const q = new URLSearchParams();
+    q.set(opts.mode, opts.keyword.trim());
+    q.set("limit", String(opts.limit ?? 100));
+    if (opts.days) q.set("days", opts.days);
+    return request(`/api/search-log?${q.toString()}`);
+  }
+
+  /** 黑名单列表 */
+  async function loadBlacklist(limit = 200): Promise<{ now: number; items: BlacklistItem[]; total: number }> {
+    return request(`/api/blacklist?limit=${limit}`);
+  }
+
+  /** 手动拉黑 */
+  async function blockIp(ip: string, reason = "manual"): Promise<{ blockCount: number }> {
+    return request("/api/blacklist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, reason }),
+    });
+  }
+
+  /** 移除黑名单 */
+  async function removeIp(ip: string): Promise<{ removed: boolean }> {
+    return request(`/api/blacklist?ip=${encodeURIComponent(ip)}`, { method: "DELETE" });
+  }
+
+  return { authStatus, request, querySearchLog, loadBlacklist, blockIp, removeIp };
+}
