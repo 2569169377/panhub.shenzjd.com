@@ -29,6 +29,7 @@ import {
   verifyWxAuthOnce,
   verifyWxAuthOnceCached,
   resetWxAuthCache,
+  isAdminUser,
 } from "../../server/utils/wxAuthCheck";
 
 const mockedGetCookie = vi.mocked(h3.getCookie);
@@ -203,5 +204,54 @@ describe("verifyWxAuthOnceCached（跨请求短 TTL 去重，2026-08-24）", () 
   it("无 cookie 不缓存不调远程（直接拒绝）", async () => {
     expect(await verifyWxAuthOnceCached(makeEvent({}))).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("isAdminUser（管理权限校验，2026-08-25）", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    process.env.WX_AUTH_API_BASE = "https://wx-auth.example.com";
+    fetchMock = vi.fn();
+    (globalThis as any).fetch = fetchMock;
+    mockedGetCookie.mockReset();
+    resetWxAuthCache();
+  });
+
+  it("userinfo 返回 isAdmin:true → 管理员放行，且 10min 内缓存不重复打远程", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ authenticated: true, user: { openid: "o", isAdmin: true } }),
+    });
+    const event = makeEvent({ "wxauth-token": "admin-token" });
+    expect(await isAdminUser(event)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/auth/userinfo?token=admin-token"),
+      expect.anything()
+    );
+    // 缓存命中：第二次不再调远程
+    expect(await isAdminUser(makeEvent({ "wxauth-token": "admin-token" }))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("userinfo 返回 isAdmin:false → 非管理员拒绝", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ authenticated: true, user: { openid: "o", isAdmin: false } }),
+    });
+    expect(await isAdminUser(makeEvent({ "wxauth-token": "normal-token" }))).toBe(false);
+  });
+
+  it("无 token cookie → 拒绝且不调远程", async () => {
+    expect(await isAdminUser(makeEvent({}))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("userinfo 非 2xx / 网络异常 → fail-closed 拒绝（管理接口不裸奔）", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    expect(await isAdminUser(makeEvent({ "wxauth-token": "tok" }))).toBe(false);
+
+    fetchMock.mockRejectedValue(new Error("userinfo down"));
+    expect(await isAdminUser(makeEvent({ "wxauth-token": "tok2" }))).toBe(false);
   });
 });
