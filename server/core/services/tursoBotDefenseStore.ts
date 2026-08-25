@@ -115,11 +115,22 @@ export class TursoBotDefenseStore {
 
   /**
    * 记录一次拒绝事件（不直接进黑名单，仅累计 hit_count）。
-   * 已有条目：hit_count +1，更新 last_at / reason。
-   * 新条目：写入，初始 expires_at = now + 1h（短过期，未达阈值会被 prune）
    *
-   * 返回当前 hit_count 与「当前是否已经在正式封禁期内」（便于 service 层
-   * 决定是否要触发 extendBlock）。
+   * **原子 upsert（2026-08-26 修复 UNIQUE 冲突）**：原实现是 SELECT-then-INSERT/UPDATE
+   * 两段式，并发下（同一 IP 短时间内多次被频控命中）出现 TOCTOU 竞态——多个请求
+   * 各自 SELECT 都没查到，然后都试图 INSERT，第 1 个成功，其余撞 PRIMARY KEY
+   * UNIQUE 约束。现改为单条 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`，
+   * 与 extendBlock / manuallyBlock 风格统一，同时少一次 SELECT 往返。
+   *
+   * - 新条目：写入，hit_count=1，expires_at = now + 1h（短过期，未达阈值会被 prune），
+   *   block_count=0
+   * - 已有条目：hit_count +1，刷新 last_at / reason；**不动 expires_at 与
+   *   block_count**（这两个由 extendBlock / manuallyBlock 专管）
+   *
+   * 返回当前 hit_count 与「当前是否在正式封禁期内」。
+   * blocked 语义收紧（2026-08-26）：仅 `block_count > 0 且 expires_at > now`
+   * 才视为封禁中——原来只看 expires_at > now 会把"累计期间的 1h 短过期标记"
+   * 误判成封禁。service 层当前只用 hitCount，此收紧不影响热路径。
    */
   async recordRejection(
     ip: string,
@@ -127,31 +138,25 @@ export class TursoBotDefenseStore {
     now: number
   ): Promise<{ hitCount: number; blocked: boolean; blockCount: number }> {
     await this.waitForInit();
-    const existing = (
-      await this.client.execute(
-        "SELECT hit_count, expires_at, block_count FROM rejected_ips WHERE ip = ?",
-        [ip]
-      )
-    ).rows[0];
-
-    if (existing) {
-      const hitCount = ((existing.hit_count as number) ?? 0) + 1;
-      await this.client.execute(
-        "UPDATE rejected_ips SET hit_count = ?, last_at = ?, reason = ? WHERE ip = ?",
-        [hitCount, now, reason, ip]
-      );
-      return {
-        hitCount,
-        blocked: ((existing.expires_at as number) ?? 0) > now,
-        blockCount: ((existing.block_count as number) ?? 0) || 0,
-      };
-    }
-
-    await this.client.execute(
-      "INSERT INTO rejected_ips (ip, first_at, last_at, hit_count, reason, expires_at, block_count) VALUES (?, ?, ?, 1, ?, ?, 0)",
+    const res = await this.client.execute(
+      `INSERT INTO rejected_ips (ip, first_at, last_at, hit_count, reason, expires_at, block_count)
+       VALUES (?, ?, ?, 1, ?, ?, 0)
+       ON CONFLICT(ip) DO UPDATE SET
+         hit_count = hit_count + 1,
+         last_at = excluded.last_at,
+         reason = excluded.reason
+       RETURNING hit_count, expires_at, block_count`,
       [ip, now, now, reason, now + HIT_TTL_MS]
     );
-    return { hitCount: 1, blocked: false, blockCount: 0 };
+    const row = res.rows[0];
+    const hitCount = (row?.hit_count as number) ?? 1;
+    const expiresAt = (row?.expires_at as number) ?? 0;
+    const blockCount = (row?.block_count as number) ?? 0;
+    return {
+      hitCount,
+      blocked: blockCount > 0 && expiresAt > now,
+      blockCount,
+    };
   }
 
   /**
