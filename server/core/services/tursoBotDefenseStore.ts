@@ -34,16 +34,22 @@ import { createClient, type Client } from "@libsql/client";
 
 /** 单次被拒绝自动过期时间（首次累计期间短过期，给 1h 等待阈值判定） */
 const HIT_TTL_MS = 60 * 60_000;
-/** 分级封禁时长（按 block_count 取档：1→24h，2→7 天，>=3→30 天；2026-08-25 用户拍板） */
+/** 永久封禁的到期时间戳（采用 far-future，语义上视作永久) */
+const PERMANENT_EXPIRES_AT = 4_100_000_000_000; // 2100-01-01，远超任何真实年份
+/** 分级封禁时长（按 block_count 取档：1→24h，2→7 天，3→30 天，>=4→永久；2026-08-25 用户拍板）
+ *  永久档由 blockExpiresAt 单独处理（>=4 直接返回 PERMANENT_EXPIRES_AT） */
 const BLOCK_DURATIONS_MS = [
   24 * 60 * 60_000,
   7 * 24 * 60 * 60_000,
   30 * 24 * 60 * 60_000,
 ];
-/** 取封禁时长：blockCount>=1，越界取最长档 */
-function blockDurationMs(blockCount: number): number {
+/** 永久档所需最小 block_count（>=4 → 永久封禁） */
+const PERMANENT_BLOCK_COUNT = 4;
+/** 取封禁到期时间：block_count>=4 → 永久（绝对 far-future）；否则 now + 档位时长 */
+function blockExpiresAt(blockCount: number, now: number): number {
+  if (blockCount >= PERMANENT_BLOCK_COUNT) return PERMANENT_EXPIRES_AT;
   const idx = Math.min(Math.max(blockCount, 1), BLOCK_DURATIONS_MS.length) - 1;
-  return BLOCK_DURATIONS_MS[idx];
+  return now + BLOCK_DURATIONS_MS[idx];
 }
 
 export class TursoBotDefenseStore {
@@ -167,7 +173,7 @@ export class TursoBotDefenseStore {
       )
     ).rows[0];
     const nextBlockCount = (((existing?.block_count as number) ?? 0) || 0) + 1;
-    const expiresAt = now + blockDurationMs(nextBlockCount);
+    const expiresAt = blockExpiresAt(nextBlockCount, now);
 
     await this.client.execute(
       `INSERT INTO rejected_ips (ip, first_at, last_at, hit_count, reason, expires_at, block_count)
@@ -197,8 +203,9 @@ export class TursoBotDefenseStore {
 
   /**
    * 手动拉黑（2026-08-25 管理页"加入黑名单"按钮）：
-   * - block_count +1（也算一次正式拉黑历史，惯犯延续）
-   * - 封禁时长直接取最长档 30 天（管理员显式拉黑，不按档位渐进）
+   * - block_count 在历史基础上 +1（惯犯档案延续）
+   * - 封禁时长按新 block_count 取档（>=4 直接永久，管理员显式拉黑的
+   *   顽固来源不再给 30 天封顶，直接永久）
    * - 已有条目可能是封禁中 / 已解封 / 从未拉黑过的计数记录，统一覆盖
    * @returns 新 block_count
    */
@@ -215,9 +222,9 @@ export class TursoBotDefenseStore {
       )
     ).rows[0];
     const prev = (((existing?.block_count as number) ?? 0) || 0);
-    // 管理员手动拉黑按"再次重犯"算：+1，至少取 3 档（30 天）
+    // 管理员手动拉黑至少取 3 档（30 天）；历史查封 >=3 → 永久
     const nextBlockCount = Math.max(prev + 1, 3);
-    const expiresAt = now + blockDurationMs(nextBlockCount); // 恒为 30 天
+    const expiresAt = blockExpiresAt(nextBlockCount, now);
 
     await this.client.execute(
       `INSERT INTO rejected_ips (ip, first_at, last_at, hit_count, reason, expires_at, block_count)

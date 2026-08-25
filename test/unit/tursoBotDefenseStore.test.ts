@@ -160,4 +160,35 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     expect(await store.removeBlock("soft-rm")).toBe(true);
     expect(await rowOf("soft-rm")).toBeNull();
   });
+
+  it("第四次升级 → block_count=4，封禁时长变为永久（2026-08-25 用户拍板）", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    // 前三次按 24h/7d/30d 递增
+    await store.extendBlock("perm-a", "bot_ua", now);
+    await store.extendBlock("perm-a", "bot_ua", now + 1 * day);
+    await store.extendBlock("perm-a", "bot_ua", now + 8 * day);
+    const bc = await store.extendBlock("perm-a", "bot_ua", now + 38 * day);
+    expect(bc).toBe(4);
+
+    const row = await rowOf("perm-a");
+    expect(row?.blockCount).toBe(4);
+    // 永久 = far-future 时间戳（2100 年）
+    expect(row?.expiresAt).toBe(4_100_000_000_000);
+  });
+
+  it("manuallyBlock 已查封 >=4 次历史 → 永久（2026-08-25）", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    // 先自动升级到 block_count=4（永久档）
+    await store.extendBlock("manual-perm", "bot_ua", now);
+    await store.extendBlock("manual-perm", "bot_ua", now + 1 * day);
+    await store.extendBlock("manual-perm", "bot_ua", now + 8 * day);
+    await store.extendBlock("manual-perm", "bot_ua", now + 38 * day);
+    // 管理员再手动拉黑 → 仍是永久
+    const bc = await store.manuallyBlock("manual-perm", "manual", now + 39 * day);
+    expect(bc).toBeGreaterThanOrEqual(4);
+    const row = await rowOf("manual-perm");
+    expect(row?.expiresAt).toBe(4_100_000_000_000);
+  });
 });

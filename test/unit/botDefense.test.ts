@@ -121,6 +121,55 @@ describe("BotDefenseService.isBlocked", () => {
     fake.isBlocked.mockRejectedValue(new Error("turso down"));
     await expect(svc.isBlocked("9.9.9.9")).resolves.toBe(false);
   });
+
+  it("封禁期持续探查达到阈值 → 自动升级档位（2026-08-25 用户拍板）", async () => {
+    // 让 store 返回 blocked：命中缓存 / store 均视为封禁中
+    fake.isBlocked.mockResolvedValue(true);
+    fake.blocked.add("probe-ip");
+    fake.extendBlock.mockClear();
+
+    // 连续命中 PROBE_UPGRADE_THRESHOLD(60) 次 → 触发第一次升级
+    for (let i = 0; i < 60; i++) {
+      await svc.isBlocked("probe-ip");
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fake.extendBlock).toHaveBeenCalledWith(
+      "probe-ip",
+      "probe",
+      expect.any(Number)
+    );
+  });
+
+  it("持续探查不清零：再累计 60 次 → 连续第二次升级（持续累计直到永久）", async () => {
+    fake.isBlocked.mockResolvedValue(true);
+    fake.blocked.add("probe-ip");
+    fake.extendBlock.mockClear();
+
+    // 第一轮 60 次：升级一次
+    for (let i = 0; i < 60; i++) {
+      await svc.isBlocked("probe-ip");
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fake.extendBlock).toHaveBeenCalledTimes(1);
+
+    // 升级后计数保留（不清零）：同一进程内继续探测再 60 次 → 第二次升级
+    for (let i = 0; i < 60; i++) {
+      await svc.isBlocked("probe-ip");
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fake.extendBlock).toHaveBeenCalledTimes(2);
+  });
+
+  it("未达探测阈值不触发升级", async () => {
+    fake.isBlocked.mockResolvedValue(true);
+    fake.blocked.add("quiet-ip");
+    for (let i = 0; i < 59; i++) {
+      await svc.isBlocked("quiet-ip");
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    // 59 次未达 60 → 不应 extendBlock
+    expect(fake.extendBlock).not.toHaveBeenCalled();
+  });
 });
 
 describe("BotDefenseService.recordRejection", () => {

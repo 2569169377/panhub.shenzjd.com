@@ -78,6 +78,15 @@ const HOT_THRESHOLD = 50;
 const HOT_WINDOW_MS = 5 * 60_000;
 /** prune 周期 */
 const PRUNE_INTERVAL_MS = 5 * 60_000;
+/** 黑名单命中探查升级（2026-08-25 用户拍板"751 次就直接永久拉黑"）：
+ *  已拉黑 IP 在封禁期内仍持续探测 → 计数；同 IP 累计 PROBE_UPGRADE_THRESHOLD
+ *  次（默认 60）后自动调 extendBlock 升一档（24h→7d→30d→永久）。
+ *  **持续累计、升降后不清零**：同一攻击源持续探测会连续升级直到永久，
+ *  无需等解封重新计数。
+ */
+const PROBE_UPGRADE_THRESHOLD = 60;
+/** 探测升级统计的清理周期（与 POS_CACHE_TTL 一致，避免 Map 无限膨胀） */
+const PROBE_RESET_INTERVAL_MS = 5 * 60_000;
 
 /** 是否开启 IP 黑名单拦截（默认关闭，显式设 BOT_DEFENSE_ENFORCE=1 才拦截） */
 export function isBotDefenseEnforced(): boolean {
@@ -104,6 +113,8 @@ export class BotDefenseService {
   private negCache = new Map<string, CacheEntry>();
   /** hit 时间戳队列：判断是否在 HOT_WINDOW 内累计够了 HOT_THRESHOLD */
   private hitTimestamps = new Map<string, number[]>();
+  /** 黑名单命中探查计数（已拉黑 IP 封禁期内仍在探测 → 达到阈值自动升级档位） */
+  private probeCounts = new Map<string, { count: number; resetAt: number }>();
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -161,6 +172,12 @@ export class BotDefenseService {
    * IP 是否在黑名单内（命中即拦截）。
    * 缓存层级：posCache(5min) → negCache(30s) → Turso store。
    * 任何错误一律放行（fail-open），避免持久化故障误伤真人。
+   *
+   * 2026-08-25 新增（用户拍板"751 次就永久拉黑"）：命中黑名单的请求视为
+   * "封禁期内的持续探查"——反复探测是最明确的恶意信号。每命中一次，
+   * 内存累计 probeCount，达到 PROBE_UPGRADE_THRESHOLD（默认 60）后自动
+   * 调 extendBlock 把该 IP 升一档（24h→7d→30d→永久）。超高频探测数天内
+   * 即滚到永久档，无需人工干预。
    */
   async isBlocked(ip: string, now: number = Date.now()): Promise<boolean> {
     if (!isBotDefenseEnforced()) return false; // 2026-08-24 紧急恢复：开关关闭时不拦截
@@ -169,7 +186,13 @@ export class BotDefenseService {
     const nip = normalizeIp(ip);
 
     const pos = this.posCache.get(nip);
-    if (pos && pos.expiresAt > now) return true;
+    if (pos && pos.expiresAt > now) {
+      // 命中缓存 → 按升级规则处理（异步、静默）；避免把长存活 session 的
+      // 高频探测漏掉升级判定
+      void this.recordProbe(nip, now);
+      return true;
+    }
+
     const neg = this.negCache.get(nip);
     if (neg && neg.expiresAt > now) return false;
 
@@ -180,6 +203,7 @@ export class BotDefenseService {
       if (blocked) {
         this.posCache.set(nip, { expiresAt: now + POS_CACHE_TTL_MS });
         this.negCache.delete(nip);
+        this.recordProbe(nip, now);
       } else {
         this.negCache.set(nip, { expiresAt: now + NEG_CACHE_TTL_MS });
         this.posCache.delete(nip);
@@ -190,6 +214,56 @@ export class BotDefenseService {
         error: err instanceof Error ? err.message : String(err),
       });
       return false;
+    }
+  }
+
+  /**
+   * 记录一次"已拉黑 IP 的持续探查"，达到阈值自动升级档位。
+   * - 纯内存计数（无持久化；进程重启后重新累计，但 store 的 block_count
+   *   档案保留——跨 session 的"惯犯历史"不依赖本内存计数）
+   * - **持续累计、升级不清零（2026-08-25 用户拍板）**："只要一直在攻击就算次数"——
+   *   达阈值升一档后计数不清零重算，而是从阈值继续往上累加，
+   *   同一攻击源在窗口内若持续探测会**连续多档升级**（24h→7d→30d→永久），
+   *   751 次的流量不用等解封、几天内直接滚到永久
+   * - 任何异常静默（fail-open，不影响热路径拦截结果）
+   */
+  private recordProbe(ip: string, now: number): void {
+    try {
+      const e = this.probeCounts.get(ip);
+      if (e && now >= e.resetAt) {
+        this.probeCounts.delete(ip);
+      }
+      const cur = this.probeCounts.get(ip) ?? { count: 0, resetAt: now + PROBE_RESET_INTERVAL_MS };
+      cur.count++;
+      // 升级判定：cur.count 必须跨过"下一个阈值倍数"才升级。
+      // 例如阈值 60：第 60 次升第 1 档 → 计数保留 → 第 120 次升第 2 档（7 天）。
+      // 升级后不清零，但同一次累加不会重复触发同档（避免 cur.count 一直 >=
+      // 阈值导致每次命中都重复 extendBlock）。
+      if (cur.count >= PROBE_UPGRADE_THRESHOLD &&
+          cur.count % PROBE_UPGRADE_THRESHOLD === 0) {
+        void (async () => {
+          try {
+            await this.waitForInit();
+            if (!this.store) return;
+            const blockCount = await this.store.extendBlock(ip, "probe", now);
+            // 更新 posCache，让本次升级立即生效
+            this.posCache.set(ip, { expiresAt: now + POS_CACHE_TTL_MS });
+            loggers.search?.warn?.("黑名单升级（封禁期持续探查）", {
+              ip,
+              probeCount: cur.count,
+              blockCount,
+            });
+          } catch (err) {
+            loggers.api?.warn?.("黑名单升级失败", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })();
+      } else {
+        this.probeCounts.set(ip, cur);
+      }
+    } catch {
+      // 记录失败完全静默
     }
   }
 
@@ -209,6 +283,7 @@ export class BotDefenseService {
     this.posCache.set(nip, { expiresAt: now + POS_CACHE_TTL_MS });
     this.negCache.delete(nip);
     this.hitTimestamps.delete(nip);
+    this.probeCounts.delete(nip); // 重拉黑：清除历史探测计数，从新档位重新累计
     loggers.api?.info?.("IP 手动拉黑（管理页）", { ip: nip, reason, blockCount });
     return blockCount;
   }
@@ -226,6 +301,7 @@ export class BotDefenseService {
     this.posCache.delete(nip);
     this.negCache.delete(nip);
     this.hitTimestamps.delete(nip);
+    this.probeCounts.delete(nip);
     if (removed) {
       loggers.api?.info?.("IP 手动移除黑名单（管理）", { ip: nip });
     }
@@ -356,6 +432,7 @@ export class BotDefenseService {
     this.posCache.clear();
     this.negCache.clear();
     this.hitTimestamps.clear();
+    this.probeCounts.clear();
   }
 
   getStoreType(): "turso" | "unavailable" {
