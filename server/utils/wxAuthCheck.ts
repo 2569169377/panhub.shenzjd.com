@@ -102,13 +102,19 @@ export async function verifyWxAuthOnce(event: H3Event): Promise<boolean> {
  * authenticated:false → 后端 401 → 前端 forceVerify 反复弹验证码弹窗。
  *
  * 修复：同一 credential（token/openid）在 WX_AUTH_CACHE_TTL_MS 内只调一次远程，
- * 其余子请求命中缓存（含 false 结果，10s 内同一 token 反复失败也按 401 处理，
+ * 其余子请求命中缓存（含 false 结果，TTL 内同一 token 反复失败也按 401 处理，
  * 前端 forceVerify 会重发新 token，天然绕开旧缓存）。
  *
- * 与"实时校验不缓存"（用户拍板：取消关注=退出登录）的取舍：TTL 仅 10s，
- * 取消关注后最长 10s 内仍可搜，换取不打爆 wx-auth 限流。可接受。
+ * TTL 10s → 10min（2026-08-25 用户拍板）：
+ * - 用户关注+验证码后 token 本身 1 年有效，登录态稳定；会话级 10min 缓存
+ *   让同一用户任意连续搜索不再反复调远程（check 调用量从日 2-3k 降到
+ *   ~唯一用户数/10min）
+ * - 取舍：取消关注后最长 10min 内仍可搜（由"实时校验"放宽为"10min 内
+ *   生效"）；管理员标记变更同样最长 10min 生效（isAdminUser 独立 10min 缓存）
+ * - 攻击面不因缓存延长而增大：wxauth-token 本身 1 年有效，攻击者拿到
+ *   token 可直调 check 绕过本地缓存，缓存长短不影响 token 有效期
  */
-const WX_AUTH_CACHE_TTL_MS = 10_000;
+const WX_AUTH_CACHE_TTL_MS = 10 * 60_000;
 const wxAuthCache = new Map<
   string,
   { ok: boolean; openid?: string; expiresAt: number }
