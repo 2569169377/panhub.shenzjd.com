@@ -331,10 +331,12 @@ export class HotSearchService {
 
   /**
    * 每日榜单日历：近 N 天每天词数 + top3（日历热力图）。
-   * 2026-08-25：双源混合——search_log 有明细的日期（今天起）用当天
-   * 次数聚合；**历史日期（search_log 未上线）回退 search_terms**（按
-   * last_at 当天过滤 + 历史累计 count），避免历史天空白（用户拍板
-   * "历史数据还是要展示的"）。
+   * 2026-08-25 用户拍板：**有次数显示次数，没次数显示词数**——
+   * 数字优先级：
+   *   1. daily_searches 当天搜索次数（22 号起精确，量级最大）
+   *   2. search_log 当天词数（今天起精确）
+   *   3. search_terms 当天词数（历史全有，兜底展示不空白）
+   * 等 daily_searches 攒满 30 天后再全量切次数口径。
    */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
@@ -343,17 +345,23 @@ export class HotSearchService {
       const startTs =
         beijingDayStart(formatDateKey(Date.now())) - (safeDays - 1) * 86400000;
       const logStore = getSearchLogStore();
-      // search_log 聚合（当天次数，有数据才用）
+      // 1. daily_searches 当天次数（精确，有记录的天才在 map 中）
+      const dailyByDate = await this.requireStore().getDailySearchesRange(startTs, safeDays);
+      // 2. search_log 当天词数（今天起）
       const logDays = logStore
         ? await logStore.getDaySummaries(startTs, safeDays)
         : [];
       const logByDate = new Map(logDays.map((d) => [d.date, d]));
-      // search_terms 聚合（历史累计，作为历史天回退）
+      // 3. search_terms 当天词数（历史全有，最终兜底）
       const termDays = await this.requireStore().getCalendar(safeDays);
       return termDays.map((td) => {
+        const daily = dailyByDate.get(td.date);
+        if (daily !== undefined && daily > 0) {
+          return { ...td, count: daily }; // 有次数 → 显示次数
+        }
         const log = logByDate.get(td.date);
-        // search_log 有词 → 用当天次数口径；否则回退历史累计
-        return log && log.count > 0 ? log : td;
+        if (log && log.count > 0) return log; // 有 search_log 词数
+        return td; // search_terms 词数兜底
       });
     });
   }
