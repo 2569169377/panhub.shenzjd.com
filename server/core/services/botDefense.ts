@@ -194,6 +194,33 @@ export class BotDefenseService {
   }
 
   /**
+   * 管理排查：黑名单全部条目（封禁中 + 惯犯档案），按最近活动倒序。
+   * 不依赖 BOT_DEFENSE_ENFORCE 开关（管理侧只看数据，不拦截）。
+   */
+  async listEntries(limit = 100): Promise<
+    {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      firstAt: number;
+      lastAt: number;
+      expiresAt: number;
+    }[]
+  > {
+    await this.waitForInit();
+    if (!this.store) return [];
+    try {
+      return await this.store.listEntries(Date.now(), limit);
+    } catch (err) {
+      loggers.api?.warn?.("黑名单列表查询失败", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+  }
+
+  /**
    * 记录一次拒绝事件（IP 命中拦截规则时被调用）。
    * - 入 store 累计 hit_count
    * - 在 60s 滑动窗口内累计达 5 次 → 自动 extendBlock（24h 拉黑）

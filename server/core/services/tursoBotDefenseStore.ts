@@ -196,6 +196,43 @@ export class TursoBotDefenseStore {
   }
 
   /**
+   * 管理排查：黑名单全部条目（封禁中 + 惯犯档案 + 未达阈值短记录），
+   * 按最近活动倒序。返回 ip/reason/hitCount/blockCount/firstAt/lastAt/expiresAt，
+   * 由调用方结合 now 计算"封禁中 / 剩余时长 / 已解封"。
+   */
+  async listEntries(
+    now: number,
+    limit: number
+  ): Promise<
+    {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      firstAt: number;
+      lastAt: number;
+      expiresAt: number;
+    }[]
+  > {
+    await this.waitForInit();
+    const rows = await this.client.execute(
+      `SELECT ip, reason, hit_count, block_count, first_at, last_at, expires_at
+       FROM rejected_ips
+       ORDER BY last_at DESC LIMIT ?`,
+      [Math.min(Math.max(1, limit), 500)]
+    );
+    return rows.rows.map((r) => ({
+      ip: r.ip as string,
+      reason: r.reason as string,
+      hitCount: (r.hit_count as number) ?? 0,
+      blockCount: (r.block_count as number) ?? 0,
+      firstAt: (r.first_at as number) ?? 0,
+      lastAt: (r.last_at as number) ?? 0,
+      expiresAt: (r.expires_at as number) ?? 0,
+    }));
+  }
+
+  /**
    * 清掉过期条目，返回删除条数（用于周期 prune）。
    * 只删"从未被正式拉黑过（block_count=0）"的过期条目——
    * 惯犯档案（block_count>0）永久保留，跨周期记住封禁历史，
