@@ -230,7 +230,7 @@ export class BotDefenseService {
         storedCount >= HOT_THRESHOLD || recent.length >= HOT_THRESHOLD;
 
       if (shouldBlock) {
-        await this.store.extendBlock(nip, reason, now);
+        const blockCount = await this.store.extendBlock(nip, reason, now);
         // 立刻写 pos cache，5min 内 isBlocked 直接走缓存
         this.posCache.set(nip, { expiresAt: now + POS_CACHE_TTL_MS });
         this.negCache.delete(nip);
@@ -240,6 +240,8 @@ export class BotDefenseService {
           reason,
           hitCount: storedCount,
           recentInWindow: recent.length,
+          // 分级封禁档位（2026-08-25）：blockCount 1→24h，2→7 天，>=3→30 天
+          blockCount,
         });
       }
     } catch (err) {
