@@ -3,7 +3,11 @@
  * PanHub 管理面板（2026-08-25）
  * Tab 1：搜索记录排查（谁搜了什么 / 某词谁搜过）
  * Tab 2：IP 黑名单（哪些 IP 被拉黑、拉黑多久、解封时间）
- * 鉴权：后端 isAdminUser（wx-auth 管理员标记），非管理员 403 → 本页提示
+ *
+ * 鉴权（2026-08-25 用户拍板：打开管理页就请求 user info 看权限）：
+ * - onBeforeMount 触发 useWxAuth 静默登录（silentCheck 写/刷新 wxauth-token cookie）
+ * - silentCheck 完成后主动调 /api/blacklist 探测权限：
+ *   200 → 管理员，显示内容；401 → 未登录（提示先去首页）；403 → 非管理员
  */
 
 definePageMeta({
@@ -16,7 +20,12 @@ useSeoMeta({
 });
 
 const activeTab = ref<"search-log" | "blacklist">("search-log");
-const forbidden = ref(false);
+
+// 打开管理页即触发 SDK 静默登录（写/刷新 wxauth-token cookie）
+const { isVerified, isReady } = useWxAuth();
+
+/** 权限状态：checking=检测中 / ok=管理员 / no-login=未登录 / no-admin=非管理员 */
+const authStatus = ref<"checking" | "ok" | "no-login" | "no-admin">("checking");
 
 /* ---------- Tab 1: 搜索记录 ---------- */
 const mode = ref<"openid" | "term">("openid");
@@ -46,8 +55,8 @@ async function doSearchLog() {
     const d = days.value ? `&days=${encodeURIComponent(days.value)}` : "";
     const key = mode.value === "openid" ? "openid" : "term";
     const res = await fetch(`/api/search-log?${key}=${encodeURIComponent(kw)}&limit=100${d}`);
-    if (res.status === 403) { forbidden.value = true; items.value = []; total.value = 0; return; }
-    if (res.status === 401) { error.value = "未登录，请先在首页完成微信关注公众号验证"; items.value = []; total.value = 0; return; }
+    if (res.status === 403) { authStatus.value = "no-admin"; items.value = []; total.value = 0; return; }
+    if (res.status === 401) { authStatus.value = "no-login"; items.value = []; total.value = 0; return; }
     if (!res.ok) { error.value = `请求失败（HTTP ${res.status}）`; items.value = []; total.value = 0; return; }
     const data = await res.json();
     items.value = data.data?.items ?? [];
@@ -94,17 +103,30 @@ async function loadBlacklist() {
   blError.value = "";
   try {
     const res = await fetch("/api/blacklist?limit=200");
-    if (res.status === 403) { forbidden.value = true; blItems.value = []; blTotal.value = 0; return; }
+    if (res.status === 403) { authStatus.value = "no-admin"; blItems.value = []; blTotal.value = 0; return; }
+    if (res.status === 401) { authStatus.value = "no-login"; blItems.value = []; blTotal.value = 0; return; }
     if (!res.ok) { blError.value = `请求失败（HTTP ${res.status}）`; blItems.value = []; blTotal.value = 0; return; }
     const data = await res.json();
     blItems.value = data.data?.items ?? [];
     blTotal.value = data.data?.total ?? 0;
+    authStatus.value = "ok";
   } catch (e: any) {
     blError.value = e?.message || "请求异常";
   } finally {
     blLoading.value = false;
   }
 }
+
+// 打开管理页：等静默登录（silentCheck）收敛后，主动探测管理员权限
+watch([isReady, isVerified], async ([ready, verified]) => {
+  if (!ready) return;
+  if (!verified) {
+    authStatus.value = "no-login";
+    return;
+  }
+  // 已登录（cookie 有效）→ 主动鉴权探测
+  await loadBlacklist();
+}, { immediate: true });
 
 watch(activeTab, (t) => {
   if (t === "blacklist" && blItems.value.length === 0 && !blError.value) {
@@ -119,8 +141,13 @@ watch(activeTab, (t) => {
       <h1>PanHub 管理</h1>
       <p class="desc">仅管理员可见。</p>
 
-      <!-- 403 提示 -->
-      <div v-if="forbidden" class="notice error">
+      <!-- 权限状态（2026-08-25：打开页面即请求 user info 看权限） -->
+      <div v-if="authStatus === 'checking'" class="notice">正在检测登录状态…</div>
+      <div v-else-if="authStatus === 'no-login'" class="notice error">
+        <strong>请先登录</strong>：管理页需要微信关注公众号登录态。
+        <NuxtLink to="/" class="notice-link">去首页完成关注验证 →</NuxtLink>
+      </div>
+      <div v-else-if="authStatus === 'no-admin'" class="notice error">
         <strong>无权限访问</strong>：当前账号不是管理员。请在 wx-auth 后台将该账号标记为管理员后重试。
       </div>
 
@@ -170,7 +197,7 @@ watch(activeTab, (t) => {
           <span>共 {{ total }} 条记录（{{ modeLabel }}：{{ lastQuery }}）</span>
         </div>
         <div v-if="loading" class="notice">查询中…</div>
-        <div v-else-if="!forbidden && !error && lastQuery && items.length === 0" class="notice">
+        <div v-else-if="authStatus !== 'no-login' && authStatus !== 'no-admin' && !error && lastQuery && items.length === 0" class="notice">
           无记录（该时间范围内没有数据）
         </div>
 
@@ -263,6 +290,8 @@ watch(activeTab, (t) => {
 .admin-card .desc { color: var(--muted-color, #6b7280); font-size: 13px; margin: 0 0 16px; }
 .notice { padding: 10px 14px; border-radius: 8px; background: var(--bg-subtle, #f3f4f6); margin: 10px 0; font-size: 14px; }
 .notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger-color, #dc2626); border: 1px solid var(--danger-border, #fecaca); }
+.notice-link { margin-left: 6px; color: var(--accent, #2563eb); font-weight: 600; text-decoration: none; }
+.notice-link:hover { text-decoration: underline; }
 .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border-color, #e5e7eb); margin-bottom: 18px; }
 .tab { padding: 10px 18px; border: none; background: transparent; color: var(--text-secondary, #4b5563); font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab.active { color: var(--accent, #2563eb); border-bottom-color: var(--accent, #2563eb); font-weight: 600; }
