@@ -29,12 +29,21 @@ vi.mock("../../server/core/services/hotSearchService", () => ({
 
 import { getOrCreateHotSearchService } from "../../server/core/services/hotSearchService";
 
+// mock 搜索明细日志 store，避免测试触碰 Turso（2026-08-25：search_log 关联）
+const mockLogStore = {
+  logSearch: vi.fn().mockResolvedValue(undefined),
+};
+vi.mock("../../server/core/services/tursoSearchLogStore", () => ({
+  getSearchLogStore: vi.fn(() => mockLogStore),
+}));
+
 const mockedGetService = vi.mocked(getOrCreateHotSearchService);
 
 describe("recordSearchTerm", () => {
   beforeEach(() => {
     mockedGetService.mockClear();
     mockService.recordSearch.mockClear();
+    mockLogStore.logSearch.mockClear();
     resetTermDedup();
   });
 
@@ -112,5 +121,32 @@ describe("recordSearchTerm", () => {
       throw new Error("store unavailable");
     });
     await expect(recordSearchTerm("凡人修仙传")).resolves.toBeUndefined();
+  });
+
+  it("写搜索明细日志（openid/ip/term 关联，2026-08-25）", async () => {
+    await recordSearchTerm("霸王别姬", "1.2.3.4", "openid-test-abc");
+    expect(mockLogStore.logSearch).toHaveBeenCalledTimes(1);
+    expect(mockLogStore.logSearch).toHaveBeenCalledWith({
+      openid: "openid-test-abc",
+      ip: "1.2.3.4",
+      term: "霸王别姬",
+      now: expect.any(Number),
+    });
+  });
+
+  it("未登录（无 openid）时明细 openid 为空串，仅记 ip+term", async () => {
+    await recordSearchTerm("使徒行者", "9.9.9.9");
+    expect(mockLogStore.logSearch).toHaveBeenCalledTimes(1);
+    expect(mockLogStore.logSearch).toHaveBeenCalledWith({
+      openid: "",
+      ip: "9.9.9.9",
+      term: "使徒行者",
+      now: expect.any(Number),
+    });
+  });
+
+  it("非法词条不写明细日志（与统计一致）", async () => {
+    await recordSearchTerm("!!!@@@###");
+    expect(mockLogStore.logSearch).not.toHaveBeenCalled();
   });
 });
