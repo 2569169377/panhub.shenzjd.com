@@ -61,4 +61,20 @@ describe("parseChannelPage 链接提取", () => {
     expect(links).toHaveLength(1);
     expect(links[0].password).toBe("x7k2");
   });
+
+  it("title 清洗后只剩孤立标点（如 firstLine='《'）时，兜底用 text 含内容的有效行", () => {
+    // 模拟消息格式异常：第一行只剩孤立的"《"（被吞/截断/复制残留）
+    // 修复前 title="《"（纯标点下发，用户反馈截图）；修复后从 text
+    // 找含中文的有效行作为 title
+    const html = wrapMessage(
+      "《\n使徒行者》全集 高清\nhttps://www.aliyundrive.com/s/abc123"
+    );
+    const $ = load(html);
+    const results = parseChannelPage($, "testchan", "使徒行者", 10);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toContain("使徒行者");
+    // 不能是纯标点
+    expect(/^[\s《》【】\(\)]+$/.test(results[0].title)).toBe(false);
+  });
 });

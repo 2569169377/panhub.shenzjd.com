@@ -4,6 +4,13 @@ import type { SearchResult } from "../types/models";
 import { matchesSearchKeyword } from "../utils/searchKeyword";
 import { logger } from "../utils/logger";
 
+/**
+ * 至少含一个中文/字母/数字 —— 用于判定 title 是否"有信息量"。
+ * 纯标点/空白 title（如消息格式异常导致 firstLine="《"）视为无效，
+ * 走 text 兜底逻辑（见 2026-08-25 修复注释）。
+ */
+const HAS_CONTENT_RE = /[\u4e00-\u9fa5a-zA-Z0-9]/;
+
 export interface TgFetchOptions {
   limitPerChannel?: number;
   userAgent?: string;
@@ -208,7 +215,21 @@ export function parseChannelPage(
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 80);
-    if (!title) title = firstLine.slice(0, 80);
+    // ⚠️ 2026-08-25 修复：清洗正则只删 ASCII 标点/平台词，刻意保留中文
+    // 书名号（"《繁花》"等配对片名）。但当消息格式异常导致 firstLine 仅
+    // 留一个孤立标点（如 firstLine="《"），清洗后 title="《"——!title
+    // 为 false（"《" 是 truthy），纯标点 title 被原样下发（用户截图
+    // "使徒行者" 搜索结果里出现一条 title 就一个"《"）。
+    // 修复：title 必须含至少一个中文/字母/数字才算有效，否则从 text
+    // 全文找含内容字符的有效行兜底（这条消息已通过 matchesSearchKeyword
+    // 匹配，必有相关行）；都找不到再走 firstLine 兜底（保持原行为）。
+    if (!HAS_CONTENT_RE.test(title)) {
+      const validLine = text
+        .split("\n")
+        .map((s) => s.trim())
+        .find((s) => HAS_CONTENT_RE.test(s));
+      title = (validLine || firstLine).slice(0, 80);
+    }
 
     let content = text;
     for (const link of links) {
