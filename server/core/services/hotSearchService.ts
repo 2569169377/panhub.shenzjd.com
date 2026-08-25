@@ -262,24 +262,30 @@ export class HotSearchService {
    *
    * 2026-08-25 用户拍板：热词"次数"改为**当天次数**（search_log 按天聚合），
    * 不再展示 search_terms 的历史累计（对"每天热搜"无意义）。
-   * search_terms 保留仅服务 sitemap 选词（getTopTerms）。
+   * 词云当天无明细（如刚上线/凌晨）→ 回退 search_terms 当天词兜底，避免空云。
+   * search_terms 同时保留服务 sitemap 选词（getTopTerms）。
    */
   async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
     await this.waitForInit();
     return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, async () => {
       const logStore = getSearchLogStore();
-      if (!logStore) return [];
       const now = Date.now();
       const dayStart = beijingDayStart(formatDateKey(now));
-      const terms = await logStore.getRandomDayTerms(dayStart, dayStart + 86400000, limit);
-      return terms.map((t, i) => ({
-        term: t.term,
-        score: t.count,
-        lastSearched: now,
-        createdAt: now,
-        rank: i + 1,
-        displayScore: t.count,
-      }));
+      if (logStore) {
+        const terms = await logStore.getRandomDayTerms(dayStart, dayStart + 86400000, limit);
+        if (terms.length > 0) {
+          return terms.map((t, i) => ({
+            term: t.term,
+            score: t.count,
+            lastSearched: now,
+            createdAt: now,
+            rank: i + 1,
+            displayScore: t.count,
+          }));
+        }
+      }
+      // 回退：search_terms 当天词（历史累计 count 作为展示分数兜底）
+      return this.requireStore().getRandomHotSearches(limit);
     });
   }
 
@@ -325,33 +331,52 @@ export class HotSearchService {
 
   /**
    * 每日榜单日历：近 N 天每天词数 + top3（日历热力图）。
-   * 2026-08-25：数据源切到 search_log 按天聚合（当天次数），
-   * 历史无明细数据的天 count=0/top=[]（宁缺毋滥，不编造）。
+   * 2026-08-25：双源混合——search_log 有明细的日期（今天起）用当天
+   * 次数聚合；**历史日期（search_log 未上线）回退 search_terms**（按
+   * last_at 当天过滤 + 历史累计 count），避免历史天空白（用户拍板
+   * "历史数据还是要展示的"）。
    */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
     return this.getCached(`calendar:${days}`, READ_TTL_SLOW_MS, async () => {
-      const logStore = getSearchLogStore();
-      if (!logStore) return [];
       const safeDays = Math.min(Math.max(1, days), 90);
       const startTs =
         beijingDayStart(formatDateKey(Date.now())) - (safeDays - 1) * 86400000;
-      return logStore.getDaySummaries(startTs, safeDays);
+      const logStore = getSearchLogStore();
+      // search_log 聚合（当天次数，有数据才用）
+      const logDays = logStore
+        ? await logStore.getDaySummaries(startTs, safeDays)
+        : [];
+      const logByDate = new Map(logDays.map((d) => [d.date, d]));
+      // search_terms 聚合（历史累计，作为历史天回退）
+      const termDays = await this.requireStore().getCalendar(safeDays);
+      return termDays.map((td) => {
+        const log = logByDate.get(td.date);
+        // search_log 有词 → 用当天次数口径；否则回退历史累计
+        return log && log.count > 0 ? log : td;
+      });
     });
   }
 
   /**
    * 某天热词列表（次数 = 当天次数，2026-08-25 切 search_log）。
-   * search_log 无该天明细 → 返回空数组（历史天不编造数据）。
+   * search_log 无该天明细（历史日期）→ 回退 search_terms（last_at 当天
+   * 过滤 + 历史累计 count），历史数据照常展示（用户拍板）。
    */
   async getDayItems(date: string): Promise<DayTerm[]> {
     await this.waitForInit();
     return this.getCached(`day:${date}`, READ_TTL_SLOW_MS, async () => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
       const logStore = getSearchLogStore();
-      if (!logStore || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
-      const start = beijingDayStart(date);
-      const terms = await logStore.getDayTopTerms(start, start + 86400000, 500);
-      return terms.map((t, i) => ({ term: t.term, rank: i + 1, count: t.count }));
+      if (logStore) {
+        const start = beijingDayStart(date);
+        const terms = await logStore.getDayTopTerms(start, start + 86400000, 500);
+        if (terms.length > 0) {
+          return terms.map((t, i) => ({ term: t.term, rank: i + 1, count: t.count }));
+        }
+      }
+      // 回退：search_terms 历史累计（未部署 search_log 之前的日期）
+      return this.requireStore().getDayItems(date);
     });
   }
 
