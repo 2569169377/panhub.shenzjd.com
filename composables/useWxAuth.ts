@@ -27,38 +27,39 @@ export function useWxAuth() {
   onBeforeMount(() => {
     if (typeof window === "undefined") return;
 
+    // 完成收敛的兜底：silentCheck 失败时 onVerified 不会触发，
+    // 必须用超时强制置位，否则 isReady 永远 false → 调用方 await 挂起
+    const resolveReady = () => {
+      if (!silentCheckDone.value) silentCheckDone.value = true;
+      if (!isReady.value) isReady.value = true;
+    };
+    const failTimer = setTimeout(resolveReady, 5000);
+
     WxAuth.init({
       apiBase: "https://wx-auth.shenzjd.com",
       // silent: true —— init 内部 autoCheck 不会弹窗，只静默验证 cookie
+      // 2026-08-25 修复：此前 useWxAuth 在 init 后又手动调一次 silentCheck，
+      // 导致首页每次加载发 2 次 /api/auth/check 请求。改为依赖 init 内部
+      // 唯一一次 silentCheck，由 onVerified 回调置位 + 5s 超时兜底。
       silent: true,
       // required: true —— 强制认证：弹窗无关闭按钮，遮罩不可点穿
       required: true,
       onVerified: (user: any) => {
-        // init 内部 silentCheck + 下方手动 silentCheck 各触发一次，去重
         if (isVerified.value) return;
         console.log("[wx-auth] 认证成功", user);
         isVerified.value = true;
-        isReady.value = true;
-        silentCheckDone.value = true;
+        clearTimeout(failTimer);
+        resolveReady();
       },
       onError: (error: any) => {
         console.error("[wx-auth] 认证失败", error);
+        clearTimeout(failTimer);
+        resolveReady();
       },
       onClose: () => {
         console.log("[wx-auth] 弹窗关闭");
       },
     });
-
-    // init 内部已异步执行 silentCheck（无 cookie 时同步返回 false）。
-    // 再手动调一次拿"验证收敛"的 Promise：已关注用户等它确认 cookie 有效，
-    // 未关注用户（无 cookie）立即 resolve，零延迟。
-    // 幂等：重复验证只多一次轻量 GET /api/auth/check，副作用可忽略。
-    silentCheckPromise = WxAuth.silentCheck().finally(() => {
-      silentCheckDone.value = true;
-      if (!isReady.value) isReady.value = true;
-    });
-
-    if (!isReady.value) isReady.value = true;
   });
 
   /**
