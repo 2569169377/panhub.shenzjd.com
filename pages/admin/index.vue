@@ -435,8 +435,9 @@ watch(activeKey, (k) => {
 .sidebar-foot { font-size: 11px; color: var(--muted-color, #9ca3af); padding: 12px 10px 0; border-top: 1px solid var(--border-color, #eee); }
 
 /* ---------- 右侧内容 ---------- */
-.content { flex: 1; min-width: 0; padding: 28px 32px 64px; }
-.panel { max-width: 1080px; }
+.content { flex: 1; min-width: 0; padding: 24px 24px 48px; }
+/* 后台撑满，不限宽——用户要求"做成正规后台"：表格操作栏必须可见，不再横向滚动 */
+.panel { /* 无 max-width，跟随 .content 撑满 */ }
 .panel-head { margin-bottom: 18px; }
 .panel-head h2 { font-size: 20px; margin: 0 0 6px; }
 .panel-desc { color: var(--muted-color, #6b7280); font-size: 13px; margin: 0; }
@@ -460,11 +461,16 @@ watch(activeKey, (k) => {
 /* 结果区 */
 .result-head { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; font-size: 13px; color: var(--muted-color, #6b7280); }
 .refresh-btn { padding: 5px 12px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; background: transparent; color: var(--text-secondary, #4b5563); font-size: 12px; cursor: pointer; }
-.table-wrap { overflow-x: auto; margin-top: 8px; background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e5e7eb); border-radius: 10px; }
-.result-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.result-table th, .result-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border-color, #eee); white-space: nowrap; }
+/* 表格撑满；列紧凑；只有 IP/操作列保持不换行避免断 IP、保证按钮可见 */
+.table-wrap { margin-top: 8px; background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e5e7eb); border-radius: 10px; }
+.result-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
+.result-table th, .result-table td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border-color, #eee); vertical-align: middle; }
 .result-table tr:last-child td { border-bottom: none; }
 .result-table th { color: var(--muted-color, #6b7280); font-weight: 500; border-bottom: 1px solid var(--border-color, #e5e7eb); }
+/* IP/时间戳/操作列不换行：保证 IP 完整、按钮可见 */
+.result-table td.mono,
+.result-table td.op-cell,
+.result-table th.op-cell { white-space: nowrap; }
 .th-op { text-align: center; }
 .op-cell { text-align: center; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
