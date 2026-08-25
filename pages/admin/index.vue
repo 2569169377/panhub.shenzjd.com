@@ -12,6 +12,9 @@
 
 definePageMeta({
   title: "PanHub 管理",
+  // 2026-08-25：管理页走纯净后台布局（layouts/admin.vue），
+  // 与正常客户页面（layouts/default.vue）完全解耦，互不影响
+  layout: "admin",
 });
 
 useSeoMeta({
