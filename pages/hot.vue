@@ -38,7 +38,7 @@
     <section class="panel calendar-panel">
       <div class="panel-head">
         <h2 class="panel-title">搜索日历</h2>
-        <span class="panel-hint">最近 {{ days.length }} 天 · 数字为当天搜索词数</span>
+        <span class="panel-hint">最近 {{ days.length }} 天 · 数字为当天搜索次数（早期无次数数据时显示词数）</span>
       </div>
 
       <ClientOnly>
@@ -122,7 +122,7 @@
                 stroke="var(--bg-surface)"
                 stroke-width="1.5" />
             </svg>
-            <span class="sparkline__hint">近 {{ days.length }} 天搜索词数趋势</span>
+            <span class="sparkline__hint">近 {{ days.length }} 天搜索次数趋势</span>
           </div>
         </div>
 
