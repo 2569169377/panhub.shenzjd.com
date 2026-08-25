@@ -4,10 +4,10 @@
  * Tab 1：搜索记录排查（谁搜了什么 / 某词谁搜过）
  * Tab 2：IP 黑名单（哪些 IP 被拉黑、拉黑多久、解封时间）
  *
- * 鉴权（2026-08-25 用户拍板：打开管理页就请求 user info 看权限）：
- * - onBeforeMount 触发 useWxAuth 静默登录（silentCheck 写/刷新 wxauth-token cookie）
- * - silentCheck 完成后主动调 /api/blacklist 探测权限：
- *   200 → 管理员，显示内容；401 → 未登录（提示先去首页）；403 → 非管理员
+ * 鉴权（2026-08-25 用户拍板：打开管理页就查一次 user info 看权限）：
+ * - 子站在根域 .shenzjd.com 静默登录过 → wxauth-token cookie 共享
+ * - onMounted 主动调 /api/blacklist 探测：200→管理员显示内容；
+ *   401→未登录（提示去首页）；403→非管理员
  */
 
 definePageMeta({
@@ -20,9 +20,6 @@ useSeoMeta({
 });
 
 const activeTab = ref<"search-log" | "blacklist">("search-log");
-
-// 打开管理页即触发 SDK 静默登录（写/刷新 wxauth-token cookie）
-const { isVerified, isReady } = useWxAuth();
 
 /** 权限状态：checking=检测中 / ok=管理员 / no-login=未登录 / no-admin=非管理员 */
 const authStatus = ref<"checking" | "ok" | "no-login" | "no-admin">("checking");
@@ -117,16 +114,12 @@ async function loadBlacklist() {
   }
 }
 
-// 打开管理页：等静默登录（silentCheck）收敛后，主动探测管理员权限
-watch([isReady, isVerified], async ([ready, verified]) => {
-  if (!ready) return;
-  if (!verified) {
-    authStatus.value = "no-login";
-    return;
-  }
-  // 已登录（cookie 有效）→ 主动鉴权探测
-  await loadBlacklist();
-}, { immediate: true });
+// 打开管理页即探测管理员权限（2026-08-25 用户拍板：只查一次 user info）：
+// 子站在根域 .shenzjd.com 静默登录过，token cookie 共享，后端直接读 cookie
+// → userinfo → isAdmin 判定，无需前端再触发 silentCheck
+onMounted(() => {
+  loadBlacklist();
+});
 
 watch(activeTab, (t) => {
   if (t === "blacklist" && blItems.value.length === 0 && !blError.value) {
