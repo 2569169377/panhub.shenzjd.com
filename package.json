@@ -38,7 +38,7 @@
     "TagCloud": "^2.5.0",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1",
-    "wx-auth-sdk": "^1.2.12"
+    "wx-auth-sdk": "^1.2.13"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.10",
