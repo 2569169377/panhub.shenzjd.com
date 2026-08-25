@@ -98,4 +98,24 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     const bc = await store.extendBlock("recidivist", "bot_ua", now + 40 * day);
     expect(bc).toBe(2);
   });
+
+  it("listEntries：返回条目含档位/时间字段，按最近活动倒序", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    // 封禁中的惯犯（block_count=2）
+    await store.extendBlock("ban-a", "bot_ua", now - 1000);
+    await store.extendBlock("ban-a", "bot_ua", now - 1000);
+    // 短计数记录（未达阈值，block_count=0）
+    await store.recordRejection("hit-b", "bad_term", now - 2000);
+
+    const entries = await store.listEntries(now, 100);
+    expect(entries).toHaveLength(2);
+    // 最近活动倒序：ban-a(last_at=now-1000) 在 hit-b(last_at=now-2000) 前
+    expect(entries[0].ip).toBe("ban-a");
+    expect(entries[0].blockCount).toBe(2);
+    expect(entries[0].expiresAt).toBe(now - 1000 + 7 * day);
+    expect(entries[0].hitCount).toBe(0);
+    expect(entries[1].ip).toBe("hit-b");
+    expect(entries[1].blockCount).toBe(0);
+  });
 });
