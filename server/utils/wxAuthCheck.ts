@@ -117,6 +117,50 @@ const wxAuthCache = new Map<
 /** 测试用：清空跨请求缓存 */
 export function resetWxAuthCache(): void {
   wxAuthCache.clear();
+  adminCache.clear();
+}
+
+/** 管理权限 TTL 缓存（userinfo 注释建议 5~10 分钟；管理员标记变化极低频） */
+const WX_AUTH_USERINFO_TTL_MS = 10 * 60_000;
+const adminCache = new Map<string, { isAdmin: boolean; expiresAt: number }>();
+
+/**
+ * 管理权限校验（2026-08-25 用户拍板：不用密码/key/白名单配置，
+ * 直接用 wx-auth 返回的管理员标记）：
+ * 调 wx-auth /api/auth/userinfo（带 wxauth-token cookie）→ user.isAdmin。
+ * - 是管理员 → true；非管理员/未登录/服务异常 → false（fail-closed）
+ * - 10min TTL 缓存（同一 token 不重复打远程；管理员标记几乎不变）
+ */
+export async function isAdminUser(event: H3Event): Promise<boolean> {
+  const cred = getWxAuthCredential(event);
+  if (!cred.token) return false;
+  const now = Date.now();
+  const hit = adminCache.get(cred.token);
+  if (hit && hit.expiresAt > now) return hit.isAdmin;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WX_AUTH_CHECK_TIMEOUT_MS);
+    const res = await fetch(
+      `${WX_AUTH_API_BASE}/api/auth/userinfo?token=${encodeURIComponent(cred.token)}`,
+      { signal: controller.signal, headers: { accept: "application/json" } }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { user?: { isAdmin?: boolean } };
+    const isAdmin = data.user?.isAdmin === true;
+    adminCache.set(cred.token, { isAdmin, expiresAt: now + WX_AUTH_USERINFO_TTL_MS });
+    // 防 Map 无限膨胀：超 5k 时清掉过期条目
+    if (adminCache.size > 5_000) {
+      for (const [k, v] of adminCache) {
+        if (v.expiresAt <= now) adminCache.delete(k);
+      }
+    }
+    return isAdmin;
+  } catch {
+    // 管理接口 fail-closed：userinfo 不可达也拒绝（宁可不可用，不裸奔）
+    return false;
+  }
 }
 
 export async function verifyWxAuthOnceCached(event: H3Event): Promise<boolean> {
