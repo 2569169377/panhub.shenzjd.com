@@ -1,6 +1,6 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getSearchLogStore } from "../core/services/tursoSearchLogStore";
-import { isAdminUser } from "../utils/wxAuthCheck";
+import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
 
 /**
  * 搜索明细管理查询 API（2026-08-25 用户拍板：排查"哪个 openid 搜了什么"）
@@ -8,7 +8,9 @@ import { isAdminUser } from "../utils/wxAuthCheck";
  * 鉴权（用户拍板：**不用密码、不用 key、不用白名单配置**，
  * 直接用 wx-auth 返回的管理员标记）：
  * - 请求带 wxauth cookie → isAdminUser 调 wx-auth /api/auth/userinfo
- *   （返回 user.isAdmin，10min TTL 缓存）→ 管理员放行，否则 403
+ *   （返回 user.isAdmin，10min TTL 缓存）→ 管理员放行
+ * - 区分（2026-08-25）：无 wxauth-token cookie → 401（未登录，请先到
+ *   首页完成关注公众号）；是登录态但非管理员 → 403
  * - userinfo 不可达 → 403（fail-closed，管理接口宁可不可用不裸奔）
  *
  * 用法：
@@ -22,6 +24,9 @@ import { isAdminUser } from "../utils/wxAuthCheck";
 
 export default defineEventHandler(async (event) => {
   // ---- 鉴权：wx-auth 管理员标记（2026-08-25 用户拍板，无任何配置）----
+  if (!getWxAuthCredential(event).token) {
+    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+  }
   if (!(await isAdminUser(event))) {
     throw createError({ statusCode: 403, statusMessage: "forbidden" });
   }
