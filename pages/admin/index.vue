@@ -115,10 +115,21 @@ async function loadBlacklist() {
 }
 
 // 打开管理页即探测管理员权限（2026-08-25 用户拍板：只查一次 user info）：
-// 子站在根域 .shenzjd.com 静默登录过，token cookie 共享，后端直接读 cookie
-// → userinfo → isAdmin 判定，无需前端再触发 silentCheck
+// - 子站都在根域 .shenzjd.com 静默登录过，token cookie 共享，后端直接读 cookie
+//   → userinfo → isAdmin 判定，无需前端再触发 silentCheck
+// - 但"直接打开 /admin"（新标签/新会话）可能无 token → 兜底调一次 silentCheck 写 token
 onMounted(() => {
-  loadBlacklist();
+  if (
+    typeof document !== "undefined" &&
+    !/(?:^|; )wxauth-token=/.test(document.cookie)
+  ) {
+    // 动态 import SDK 避免 SSR 报错（document/window 不可用）
+    import("wx-auth-sdk").then(({ WxAuth }) => {
+      WxAuth.silentCheck().finally(() => loadBlacklist());
+    });
+  } else {
+    loadBlacklist();
+  }
 });
 
 watch(activeTab, (t) => {
