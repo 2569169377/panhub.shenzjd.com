@@ -11,6 +11,7 @@ import { useAdminApi } from "~/composables/useAdminApi";
 import { ADMIN_NAV_KEY, ADMIN_AUTH_KEY } from "~/utils/adminKeys";
 import SearchRecordPanel from "~/components/admin/SearchRecordPanel.vue";
 import BlacklistPanel from "~/components/admin/BlacklistPanel.vue";
+import ChannelPanel from "~/components/admin/ChannelPanel.vue";
 
 definePageMeta({
   title: "PanHub 管理",
@@ -64,7 +65,8 @@ watch(
 
     <!-- 正常内容 -->
     <template v-else>
-      <SearchRecordPanel v-if="activeKey === 'search-log'" @blocked="onBlocked" />
+      <ChannelPanel v-if="activeKey === 'channels'" />
+      <SearchRecordPanel v-else-if="activeKey === 'search-log'" @blocked="onBlocked" />
       <BlacklistPanel v-else-if="activeKey === 'blacklist'" ref="blPanel" />
     </template>
   </div>

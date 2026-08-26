@@ -1,25 +1,12 @@
 <template>
   <div class="admin-shell">
-    <!-- 顶栏：品牌 + 顶部菜单 + 用户区 -->
+    <!-- 顶栏：品牌 + 用户区 -->
     <header class="admin-topbar">
       <button type="button" class="admin-burger" aria-label="打开菜单" @click="menuOpen = true">☰</button>
       <NuxtLink to="/admin" class="admin-brand">
         <span class="admin-brand-badge">P</span>
         <span class="admin-brand-name">PanHub</span>
       </NuxtLink>
-
-      <!-- 桌面顶部菜单（小屏隐藏，用抽屉） -->
-      <nav v-if="!isMobile" class="admin-topnav">
-        <button
-          v-for="item in flatMenus"
-          :key="item.key"
-          type="button"
-          :class="['admin-topnav-item', { active: item.key === activeKey }]"
-          @click="setActive(item.key)">
-          <span class="admin-menu-icon">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </button>
-      </nav>
 
       <div class="admin-top-actions">
         <span v-if="authStatus === 'ok'" class="admin-user-chip" title="微信关注公众号登录">
@@ -95,6 +82,10 @@ interface AdminMenuGroup {
 /** 菜单分组（新增功能往这里加；页面面板须与 key 对应渲染） */
 const MENU_GROUPS: AdminMenuGroup[] = [
   {
+    label: "频道",
+    items: [{ key: "channels", label: "频道管理", icon: "📡" }],
+  },
+  {
     label: "防护",
     items: [
       { key: "search-log", label: "搜索记录", icon: "🔍" },
@@ -103,15 +94,14 @@ const MENU_GROUPS: AdminMenuGroup[] = [
   },
 ];
 
-const activeKey = ref<string>("search-log");
+const activeKey = ref<string>("channels");
 const menuOpen = ref(false);
 const isMobile = ref(false);
 const authStatus = ref<"checking" | "ok" | "no-login" | "no-admin">("checking");
 
-/** 顶部菜单取全部项（扁平） */
-const flatMenus = computed(() => MENU_GROUPS.flatMap((g) => g.items));
+/** 当前激活菜单项（面包屑） */
 const currentLabel = computed(
-  () => flatMenus.value.find((m) => m.key === activeKey.value)?.label || "管理后台",
+  () => MENU_GROUPS.flatMap((g) => g.items).find((m) => m.key === activeKey.value)?.label || "管理后台",
 );
 
 function setActive(key: string) {
@@ -188,30 +178,6 @@ provide(ADMIN_AUTH_KEY, authStatus);
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.3px;
-}
-.admin-topnav {
-  display: flex;
-  gap: 4px;
-  margin-left: 12px;
-}
-.admin-topnav-item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary, #4b5563);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.admin-topnav-item:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.04)); }
-.admin-topnav-item.active {
-  background: var(--bg-active, rgba(15, 118, 110, 0.08));
-  color: var(--primary, #0f766e);
-  font-weight: 600;
 }
 .admin-top-actions {
   margin-left: auto;
@@ -331,7 +297,6 @@ provide(ADMIN_AUTH_KEY, authStatus);
 /* ===== 窄屏适配 ===== */
 @media (max-width: 900px) {
   .admin-burger { display: block; }
-  .admin-topnav { display: none; }
   .admin-sidebar {
     position: fixed;
     top: 56px;
