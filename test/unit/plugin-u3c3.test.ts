@@ -1,13 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseYunsoHtml } from "../../server/core/plugins/yunso";
 import { parseU3c3Html } from "../../server/core/plugins/u3c3";
 
-// 取自真实响应结构的精简 fixture（yunso: data 字段内的 HTML 片段）
-const YUNSO_HTML = `
-<div class="responsive-container"><div style=""><a onclick="open_sid(this)" id="1" url="https:\\/\\/pan.quark.cn\\/s\\/abc123" pa="8888" rel="noreferrer" target="_blank" style=""><u>测试片A（全集）张三</u></a></div>
-<div class="responsive-container"><div style=""><a onclick="open_sid(this)" id="2" url="https:\\/\\/pan.quark.cn\\/s\\/def456" pa="" rel="noreferrer" target="_blank" style=""><u>测试片B 李四</u></a></div>
-<div class="feedback"><a href="javascript:;" onclick="x()">忽略</a></div>
-`;
+// 2026-08-27：yunso 已从注册表移除（上游 wd 参数失效返回固定推荐列表），
+// 原 plugin-yunso-u3c3.test.ts 中的 yunso parser 用例随之删除。
+// 本文件只保留 u3c3 parser 用例。
 
 // 取自真实响应结构的精简 fixture（u3c3: 种子列表表格）
 const U3C3_HTML = `
@@ -17,21 +13,6 @@ const U3C3_HTML = `
 <tr class="default"><td><a href="/?type=U3C3&p=1"><img></a></td><td><a href="/?type=U3C3&p=1"><span><b>某电影 1080P</b></span></a></td><td class="text-center"><a href="/torrent/y.torrent"><i download></i></a><a href="magnet:?xt=urn:btih:BBB222"><i magnet></i></a></td><td class="text-center">5GB</td><td class="text-center">2023-01-15 08:30:00</td><td></td><td></td></tr>
 </table>
 `;
-
-describe("yunso parser", () => {
-  it("提取 quark 链接 + 标题 + 密码，并跳过无 url 属性的链接", () => {
-    const r = parseYunsoHtml(YUNSO_HTML, "测试");
-    // 仅 2 个带 url= 的结果锚点，feedback 的 <a> 被跳过
-    expect(r.length).toBe(2);
-    expect(r[0].links[0].url).toBe("https://pan.quark.cn/s/abc123");
-    expect(r[0].links[0].type).toBe("quark");
-    expect(r[0].links[0].password).toBe("8888");
-    expect(r[0].title).toContain("测试片A");
-    expect(r[1].links[0].url).toBe("https://pan.quark.cn/s/def456");
-    expect(r[1].links[0].password).toBe("");
-    expect(r[1].title).toContain("测试片B");
-  });
-});
 
 describe("u3c3 parser", () => {
   it("提取磁力链接 + 名称 + 日期，跳过表头行", () => {
