@@ -68,6 +68,12 @@ export default defineNuxtConfig({
     // ⚠️ 漏加此条曾导致首次 401 被 /** swr:3600 缓存 1 小时，之后请求
     // 到不了后端，用户有 token 也永远 401（管理页看不到 userinfo 调用）
     "/api/blacklist": { swr: false, cache: false },
+    // 管理后台频道接口（2026-08-26）：同样禁缓存——
+    // ⚠️ 与 blacklist 同坑：首次无 cookie 的 401 被 /** swr:3600 缓存，
+    // 用户登录后仍命中缓存 401（"明明登录了却说没登录"）。
+    // 管理员登录态（wxauth-token cookie）本身就是每请求必读的，
+    // 任何缓存都会把"未登录的错误响应"或"登录前的旧响应"复用。
+    "/api/admin/**": { swr: false, cache: false },
     // 链接检测接口需要读 POST body，禁止缓存避免 body 被中间件消费
     "/api/check": { swr: false, cache: false },
     // 图片代理依赖豆瓣，禁止 SWR 缓存避免错误响应被缓存
