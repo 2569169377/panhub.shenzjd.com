@@ -25,7 +25,6 @@ import { MelostPlugin } from "../plugins/melost";
 import { Quark4kPlugin } from "../plugins/quark4k";
 import { OugePlugin } from "../plugins/ouge";
 import { WanouPlugin } from "../plugins/wanou";
-import { U3c3Plugin } from "../plugins/u3c3";
 import { DyyjvPlugin } from "../plugins/dyyjv";
 
 const SERVICE_CONTEXT_KEY = "__panhub_search_service__";
@@ -57,10 +56,11 @@ function createPluginManager(): PluginManager {
   safeRegister("quark4k", () => new Quark4kPlugin());
   safeRegister("ouge", () => new OugePlugin());
   safeRegister("wanou", () => new WanouPlugin());
-  // 2026-08-27 移除 yunso：上游 wd 参数失效（搜任何词返回同一批固定推荐列表，
-  // 与搜索词完全无关），被汇总层相关性过滤兜底后等效 0 结果，保留只会白消耗
-  // 每次搜索 2.6s 的超时等待。
-  safeRegister("u3c3", () => new U3c3Plugin());
+  // 2026-08-27 移除 yunso / u3c3：
+  // - yunso：上游 wd 参数失效（搜任何词返回同一批固定推荐列表，与搜索词完全
+  //   无关），被汇总层相关性过滤兜底后等效 0 结果，保留只会白消耗超时等待
+  // - u3c3：纯磁力种子站，产品要求搜索结果不出现磁力链接（同 nyaa /
+  //   solidtorrents / torrentgalaxy / x1337x 的处理），整站无网盘链接无保留价值
   // 2026-08-07 新增：dyyjv（电影云集，WordPress REST API，详情页内嵌夸克/百度链接）
   safeRegister("dyyjv", () => new DyyjvPlugin());
   pm.registerAllGlobalPlugins();
