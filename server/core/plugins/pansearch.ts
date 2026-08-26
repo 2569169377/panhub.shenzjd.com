@@ -104,14 +104,19 @@ function extractLink(content: string): { url: string; password: string } {
   return { url, password };
 }
 export function extractTitle(content: string, keyword: string): string {
-  // 2026-08-26 修复：上游把命中关键词包在
-  // <span class='highlight-keyword'> 里，若直接对原始 HTML 用
-  // /名称：([^<\n]+)/ 提取，`[^<]` 一遇到 < 就截断——
-  // "名称：[<span>阿甘正传</span>][1994]" 会提取出孤立的 "["
-  // （用户截图：搜索「阿甘正传」百度网盘结果 note 只剩 "["
-  // 或 "《"）。先剥掉 HTML 标签再提取。
+  // 2026-08-26 两次修复：
+  // ①上游把命中关键词包在 <span class='highlight-keyword'> 里，直接对原始
+  //   HTML 用 /名称：([^<\n]+)/ 提取会被 < 截断成孤立 "["（用户首次截图：
+  //   百度网盘结果 note 是 "["/"《"）。先 cleanHTML 剥标签再提取。
+  // ②pansearch 上游把所有字段（名称/描述/链接/📁大小/🏷标签/⚠版权/
+  //   📢频道…）挤在一行里没有 \n，原来的 [^\n]+ 会贪婪到行尾把整段
+  //   当 title，UI 直接爆炸（用户二次截图：note 5 行铺满含描述/标签/
+  //   版权等）。改用惰性 + lookahead：截到下个字段标签
+  //   （描述/链接/📁/🏷/⚠️/📢/👥/🔍）前即停。
   const cleaned = cleanHTML(content);
-  const m = /名称[：:]([^\n]+)/.exec(cleaned);
+  const m = /名称[：:]\s*([\s\S]+?)(?=\s*(?:描述[：:]|链接[：:]|📁|🏷|⚠️|📢|👥|🔍|$))/u.exec(
+    cleaned
+  );
   if (m) {
     const t = m[1].trim();
     if (t) return t;
