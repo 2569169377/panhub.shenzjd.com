@@ -18,6 +18,8 @@ import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
  *     → 某 openid 最近搜了什么（term/ip/createdAt，时间倒序）
  *   GET /api/search-log?term=<词>&limit=50&days=7
  *     → 搜过该词的所有 openid/ip（时间倒序）
+ *   GET /api/search-log?ip=<IP>&limit=50&days=7
+ *     → 该 IP 最近搜过什么（term/openid/createdAt，时间倒序；2026-08-26 新增）
  *
  * 数据为个人搜索历史，严禁暴露给前端页面（仅管理端排查用）。
  */
@@ -43,12 +45,14 @@ export default defineEventHandler(async (event) => {
 
   const targetOpenid = String(q.openid || "").trim().slice(0, 128);
   const term = String(q.term || "").trim().slice(0, 200);
+  const ip = String(q.ip || "").trim().slice(0, 64);
 
-  if (targetOpenid && term) {
-    throw createError({ statusCode: 400, statusMessage: "openid 与 term 只能二选一" });
+  const given = [targetOpenid, term, ip].filter(Boolean).length;
+  if (given !== 1) {
+    throw createError({ statusCode: 400, statusMessage: "openid / term / ip 只能三选一" });
   }
-  if (!targetOpenid && !term) {
-    throw createError({ statusCode: 400, statusMessage: "需提供 openid 或 term 参数" });
+  if (!targetOpenid && !term && !ip) {
+    throw createError({ statusCode: 400, statusMessage: "需提供 openid / term / ip 参数" });
   }
 
   if (targetOpenid) {
@@ -60,10 +64,19 @@ export default defineEventHandler(async (event) => {
     };
   }
 
-  const items = await store.searchByTerm(term, limit, since);
+  if (term) {
+    const items = await store.searchByTerm(term, limit, since);
+    return {
+      code: 0,
+      message: "success",
+      data: { mode: "term", term, items, total: items.length },
+    };
+  }
+
+  const items = await store.searchByIp(ip, limit, since);
   return {
     code: 0,
     message: "success",
-    data: { mode: "term", term, items, total: items.length },
+    data: { mode: "ip", ip, items, total: items.length },
   };
 });

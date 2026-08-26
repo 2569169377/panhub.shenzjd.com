@@ -175,4 +175,18 @@ describe("TursoSearchLogStore", () => {
     expect(items.map((i) => i.openid).sort()).toEqual(["o-1", "o-2"]);
     expect(items.every((i) => i.ip !== "")).toBe(true);
   });
+
+  it("searchByIp：某 IP 的所有搜索记录（时间倒序）", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-1", ip: "9.9.9.9", term: "花开锦绣", now: now + 3000 });
+    await store.logSearch({ openid: "o-2", ip: "9.9.9.9", term: "凡人修仙传", now: now + 1000 });
+    await store.logSearch({ openid: "o-3", ip: "8.8.8.8", term: "别的词", now: now + 2000 });
+
+    const items = await store.searchByIp("9.9.9.9", 50);
+    expect(items).toHaveLength(2);
+    // 时间倒序：花开锦绣（now+3000）在前
+    expect(items[0].term).toBe("花开锦绣");
+    expect(items[0].openid).toBe("o-1");
+    expect(items[1].term).toBe("凡人修仙传");
+  });
 });

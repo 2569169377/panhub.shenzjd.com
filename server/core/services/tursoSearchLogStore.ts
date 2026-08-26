@@ -268,6 +268,37 @@ export class TursoSearchLogStore {
     }));
   }
 
+  /**
+   * 管理排查：某 IP 的所有搜索记录（该 IP 搜过什么），按时间倒序。
+   * 处置爬虫/刷词 IP 时快速定位其行为特征。
+   */
+  async searchByIp(
+    ip: string,
+    limit: number,
+    since?: number
+  ): Promise<{ term: string; openid: string; createdAt: number }[]> {
+    await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 500);
+    const rows = since
+      ? await this.client.execute(
+          `SELECT term, openid, created_at FROM search_log
+           WHERE ip = ? AND created_at >= ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [ip, since, safe]
+        )
+      : await this.client.execute(
+          `SELECT term, openid, created_at FROM search_log
+           WHERE ip = ?
+           ORDER BY created_at DESC LIMIT ?`,
+          [ip, safe]
+        );
+    return rows.rows.map((r) => ({
+      term: r.term as string,
+      openid: r.openid as string,
+      createdAt: (r.created_at as number) ?? 0,
+    }));
+  }
+
   close(): void {
     try {
       this.client.close();

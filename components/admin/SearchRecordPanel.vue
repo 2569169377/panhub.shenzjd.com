@@ -18,12 +18,16 @@
           type="button"
           :class="['admin-seg-item', { active: mode === 'term' }]"
           @click="mode = 'term'">按搜索词查</button>
+        <button
+          type="button"
+          :class="['admin-seg-item', { active: mode === 'ip' }]"
+          @click="mode = 'ip'">按 IP 查</button>
       </div>
       <div class="admin-form-row">
         <input
           v-model="keyword"
           type="text"
-          :placeholder="mode === 'openid' ? '输入 openid' : '输入搜索词'"
+          :placeholder="mode === 'openid' ? '输入 openid' : mode === 'term' ? '输入搜索词' : '输入 IP'"
           class="admin-input"
           @keyup.enter="doSearch" />
         <select v-model="days" class="admin-select" aria-label="时间范围">
@@ -57,6 +61,7 @@
               <th>#</th>
               <th>搜索词</th>
               <th v-if="mode === 'term'">openid</th>
+              <th v-if="mode === 'ip'">openid</th>
               <th>IP</th>
               <th>时间（北京时间）</th>
               <th class="th-op">操作</th>
@@ -66,7 +71,7 @@
             <tr v-for="(it, idx) in items" :key="idx">
               <td class="mono">{{ idx + 1 }}</td>
               <td class="cell-term">{{ it.term ?? "-" }}</td>
-              <td v-if="mode === 'term'" class="mono cell-openid">{{ it.openid ?? "-" }}</td>
+              <td v-if="mode === 'term' || mode === 'ip'" class="mono cell-openid">{{ it.openid ?? "-" }}</td>
               <td class="mono">{{ it.ip || "-" }}</td>
               <td class="mono">{{ formatTime(it.createdAt) }}</td>
               <td class="op-cell">
@@ -103,7 +108,7 @@ const { querySearchLog, blockIp } = useAdminApi();
 const { showToast } = useToast();
 const modal = ref<InstanceType<typeof AdminModal>>();
 
-const mode = ref<"openid" | "term">("openid");
+const mode = ref<"openid" | "term" | "ip">("openid");
 const keyword = ref("");
 const days = ref("7");
 const loading = ref(false);
@@ -116,7 +121,9 @@ const busyKey = ref("");
 
 /** 通知父层黑名单数据已变化（拉黑后联动刷新黑名单面板） */
 const emit = defineEmits<{ (e: "blocked"): void }>();
-const modeLabel = computed(() => (mode.value === "openid" ? "openid" : "搜索词"));
+const modeLabel = computed(() =>
+  mode.value === "openid" ? "openid" : mode.value === "term" ? "搜索词" : "IP",
+);
 
 function formatTime(ms?: number): string {
   if (!ms) return "-";

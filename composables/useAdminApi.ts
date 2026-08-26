@@ -103,7 +103,7 @@ export function useAdminApi() {
 
   /** 搜索记录查询 */
   async function querySearchLog(opts: {
-    mode: "openid" | "term";
+    mode: "openid" | "term" | "ip";
     keyword: string;
     days?: string;
     limit?: number;
