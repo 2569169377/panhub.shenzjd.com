@@ -4,7 +4,7 @@
       <div>
         <h2>频道管理</h2>
         <p class="admin-card-desc">
-          全部频道 {{ allCount }} 个 · 优先 {{ priorityCount }} + 默认 {{ defaultCount }} ·
+          全部频道 {{ allCount }} 个 · 固定 {{ priorityCount }} + 搜索 {{ defaultCount }} ·
           版本 v{{ version || "-" }}
         </p>
       </div>
@@ -52,12 +52,16 @@
       <p v-if="dirty" class="admin-notice admin-notice-warn">
         有未保存的修改，点击「保存全部」生效
       </p>
+      <p class="channel-tip">
+        <b>固定</b>：不下发给第三方站、也不参与本站搜索；<b>搜索</b>：按表格顺序逐批搜索，
+        排在前面的频道更早发起请求。可用 ↑↓ 调整搜索顺序。
+      </p>
 
       <div v-if="rows.length" class="channel-table-wrap">
         <table class="channel-table">
           <thead>
             <tr>
-              <th class="col-pri">优先级</th>
+              <th class="col-pri">固定下发</th>
               <th class="col-id">频道 ID</th>
               <th class="col-name">频道名字</th>
               <th class="col-ops">操作</th>
@@ -65,10 +69,10 @@
           </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
-            <!-- 优先级 -->
+            <!-- 固定下发 -->
             <td class="col-pri">
               <span :class="['channel-pri-badge', { 'is-pri': row.priority }]">
-                {{ row.priority ? "优先" : "默认" }}
+                {{ row.priority ? "固定" : "搜索" }}
               </span>
             </td>
             <!-- 频道 ID（不可改） -->
@@ -86,12 +90,32 @@
             </td>
             <!-- 操作 -->
             <td class="col-ops">
+              <!-- 排序（仅"搜索"频道：组内上移/下移，数组顺序 = 搜索顺序） -->
+              <template v-if="!row.priority">
+                <button
+                  type="button"
+                  class="ops-btn"
+                  :disabled="isFirstOfGroup(row)"
+                  title="上移（搜索更靠前）"
+                  @click="moveRow(row, -1)">
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="ops-btn"
+                  :disabled="isLastOfGroup(row)"
+                  title="下移（搜索更靠后）"
+                  @click="moveRow(row, 1)">
+                  ↓
+                </button>
+              </template>
+              <!-- 固定 ⇄ 搜索 切换 -->
               <button
                 type="button"
                 class="ops-btn"
-                :title="row.priority ? '取消优先（移到默认）' : '设为优先（固定不下发）'"
+                :title="row.priority ? '取消固定（参与搜索）' : '设为固定（不下发且不参与搜索）'"
                 @click="row.priority ? unpick(row.id) : prioritize(row.id)">
-                {{ row.priority ? "⬇" : "⬆" }}
+                {{ row.priority ? "◁" : "📌" }}
               </button>
               <button type="button" class="ops-btn ops-btn-danger" title="删除" @click="askRemove(row.id)">✕</button>
             </td>
@@ -209,29 +233,57 @@ function onNameInput(_row: ChannelRow) {
   dirty.value = true;
 }
 
-/** 设/取消优先 */
+/** 设为固定（移到固定组末尾） */
 function prioritize(id: string) {
   const row = rows.value.find((r) => r.id === id);
   if (row) row.priority = true;
   sortRows();
   dirty.value = true;
 }
+/** 取消固定（移到搜索组末尾，即最后搜） */
 function unpick(id: string) {
   const row = rows.value.find((r) => r.id === id);
   if (row) row.priority = false;
   sortRows();
   dirty.value = true;
 }
-/** 保持优先在前排序（视觉稳定） */
+
+/** 保持固定在前、搜索在后（组内相对顺序不变；稳定排序） */
 function sortRows() {
   rows.value = [...rows.value].sort((a, b) => Number(b.priority) - Number(a.priority));
+}
+
+/** 搜索组内第一个 / 最后一个？ */
+function isFirstOfGroup(row: ChannelRow): boolean {
+  const group = rows.value.filter((r) => !r.priority);
+  return group.length <= 1 || group[0].id === row.id;
+}
+function isLastOfGroup(row: ChannelRow): boolean {
+  const group = rows.value.filter((r) => !r.priority);
+  return group.length <= 1 || group[group.length - 1].id === row.id;
+}
+
+/** 搜索组内上移/下移（数组顺序 = 搜索顺序） */
+function moveRow(row: ChannelRow, dir: -1 | 1) {
+  const idx = rows.value.findIndex((r) => r.id === row.id);
+  if (idx < 0) return;
+  const next = idx + dir;
+  // 只能在同一组内移动：不能越过固定/搜索的分界
+  if (next < 0 || next >= rows.value.length) return;
+  const target = rows.value[next];
+  if (target.priority !== row.priority) return; // 跨组不允许
+  const copy = [...rows.value];
+  copy[idx] = target;
+  copy[next] = row;
+  rows.value = copy;
+  dirty.value = true;
 }
 
 /** 保存全部 */
 function askSave() {
   modalRef.value?.open({
     title: "保存频道配置",
-    message: `将保存为 v${version.value + 1}：优先级 ${priorityCount.value} 个、默认 ${defaultCount.value} 个。\n保存后立即对所有请求生效。`,
+    message: `将保存为 v${version.value + 1}：固定下发 ${priorityCount.value} 个、参与搜索 ${defaultCount.value} 个。\n保存后立即对所有请求生效。`,
     confirmText: "保存",
     onConfirm: async () => {
       await doSave();
@@ -427,5 +479,21 @@ onMounted(load);
   background: rgba(245, 158, 11, 0.1);
   border: 1px solid rgba(245, 158, 11, 0.35);
   color: #b45309;
+}
+.channel-tip {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-tertiary, #9ca3af);
+  background: var(--bg-hover, rgba(15, 118, 110, 0.04));
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.channel-tip b { color: var(--text-secondary, #4b5563); font-weight: 600; }
+.ops-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--text-tertiary, #9ca3af);
 }
 </style>
