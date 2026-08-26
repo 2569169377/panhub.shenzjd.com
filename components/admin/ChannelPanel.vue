@@ -53,15 +53,16 @@
         有未保存的修改，点击「保存全部」生效
       </p>
 
-      <table v-if="rows.length" class="channel-table">
-        <thead>
-          <tr>
-            <th class="col-pri">优先级</th>
-            <th class="col-id">频道 ID</th>
-            <th class="col-name">频道名字</th>
-            <th class="col-ops">操作</th>
-          </tr>
-        </thead>
+      <div v-if="rows.length" class="channel-table-wrap">
+        <table class="channel-table">
+          <thead>
+            <tr>
+              <th class="col-pri">优先级</th>
+              <th class="col-id">频道 ID</th>
+              <th class="col-name">频道名字</th>
+              <th class="col-ops">操作</th>
+            </tr>
+          </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
             <!-- 优先级 -->
@@ -96,8 +97,10 @@
             </td>
           </tr>
         </tbody>
-      </table>
-      <div v-else class="admin-empty">暂无频道</div>
+        </table>
+      </div>
+      <p v-if="rows.length > 12" class="channel-table-hint">↑ 表格内部滚动 · 共 {{ rows.length }} 个频道</p>
+      <div v-else-if="rows.length === 0" class="admin-empty">暂无频道</div>
     </template>
 
     <AdminModal ref="modal" :title="'确认操作'" tone="primary" confirm-text="确认" />
@@ -314,10 +317,24 @@ onMounted(load);
 .channel-input:focus { outline: none; border-color: var(--primary, #0f766e); }
 
 /* ===== 表格 ===== */
+.channel-table-wrap {
+  max-height: 460px; /* 内部滚动，避免 77 个频道撑长整页 */
+  overflow-y: auto;
+  border: 1px solid var(--border-light, #e5dfd0);
+  border-radius: 10px;
+  position: relative;
+}
 .channel-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+}
+.channel-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-primary, #fffdf8);
+  box-shadow: 0 1px 0 var(--border-light, #e5dfd0);
 }
 .channel-table th {
   text-align: left;
@@ -334,6 +351,7 @@ onMounted(load);
   vertical-align: middle;
 }
 .channel-table tbody tr:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.03)); }
+.channel-table tbody tr:nth-child(even) { background: var(--bg-hover, rgba(15, 118, 110, 0.025)); }
 .col-pri { width: 70px; white-space: nowrap; }
 .col-id { width: 180px; }
 .col-name { min-width: 200px; }
@@ -347,6 +365,20 @@ onMounted(load);
   border: 1px solid var(--border-light, #e5dfd0);
   color: var(--text-tertiary, #9ca3af);
   background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+}
+/* 表格内部滚动的滚动条美化（WebKit） */
+.channel-table-wrap::-webkit-scrollbar { width: 10px; }
+.channel-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong, #d6cdb8);
+  border-radius: 999px;
+  border: 2px solid var(--bg-primary, #fffdf8);
+}
+.channel-table-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary, #9ca3af); }
+.channel-table-wrap::-webkit-scrollbar-track { background: transparent; }
+.channel-table-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary, #9ca3af);
 }
 .channel-pri-badge.is-pri {
   background: rgba(15, 118, 110, 0.14);
