@@ -63,22 +63,28 @@ export default defineEventHandler(async (event: H3Event) => {
       (sum, arr) => sum + arr.length,
       0
     );
-    await fakeStream.push({
-      event: "chunk",
-      data: JSON.stringify({ done: 1, total, merged }),
-    });
-    await fakeStream.push({
-      event: "done",
-      data: JSON.stringify({
-        total,
-        warnings: [],
-        pluginCount: 0,
-        merged,
-        completedIndices: [0],
-        reachedLimit: false,
-      }),
-    });
-    await fakeStream.close();
+    // ⚠️ 2026-08-27 修复：h3 createEventStream 是惰性的，push() 必须在
+    // send() 之后才会真正写入流；在 send() 前 await push() 会永不 resolve
+    // （handler 卡死 → CF 等源站直到超时 → SSE 一直 pending，线上实测）。
+    // 必须与正常分支同构：后台任务里 push，主 handler 立即 return send()。
+    void (async () => {
+      await fakeStream.push({
+        event: "chunk",
+        data: JSON.stringify({ done: 1, total, merged }),
+      });
+      await fakeStream.push({
+        event: "done",
+        data: JSON.stringify({
+          total,
+          warnings: [],
+          pluginCount: 0,
+          merged,
+          completedIndices: [0],
+          reachedLimit: false,
+        }),
+      });
+      await fakeStream.close();
+    })();
     return fakeStream.send();
   }
   // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429
