@@ -141,11 +141,44 @@ describe("ChannelConfigService", () => {
 
   it("未加载且无兜底时返回空快照", () => {
     const service = new ChannelConfigService({});
-    expect(service.getSnapshot()).toEqual({
-      version: 0,
-      priorityChannels: [],
-      defaultChannels: [],
+    const snap = service.getSnapshot();
+    expect(snap.version).toBe(0);
+    expect(snap.priorityChannels).toEqual([]);
+    expect(snap.defaultChannels).toEqual([]);
+  });
+
+  it("save 保留 channelNames（仅存在的频道、去空白、剔除不存在的 id）", async () => {
+    const service = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+      envJson: JSON.stringify({
+        version: 1,
+        priorityChannels: ["pri1"],
+        defaultChannels: ["a", "b"],
+      }),
     });
+    await service.ensureLoaded();
+
+    const saved = await service.save({
+      priorityChannels: ["pri1"],
+      defaultChannels: ["a", "b"],
+      channelNames: {
+        pri1: " 优先频道备注 ",
+        a: "A频道",
+        ghost: "不存在的id",   // 应被剔除
+        "": "空key被剔除",
+      },
+    });
+
+    expect(saved.channelNames).toEqual({ pri1: "优先频道备注", a: "A频道" });
+
+    // 落库可读回：新 service 拉到 v2 也带 channelNames
+    const fresh = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+    });
+    await fresh.ensureLoaded();
+    expect(fresh.getSnapshot().channelNames).toEqual({ pri1: "优先频道备注", a: "A频道" });
   });
 
   it("save 写入新版本并使内存缓存立即生效（priority 与 default 互斥去重）", async () => {

@@ -8,8 +8,9 @@ import { isAdminUser, getWxAuthCredential } from "../../utils/wxAuthCheck";
  * 语义：全量替换 priorityChannels / defaultChannels（前端本地编辑后
  * 整份提交，服务端负责去重/互斥/空保护，见 ChannelConfigService.save）。
  *
- * body: { priorityChannels?: string[], defaultChannels?: string[] }
- *   缺省字段沿用当前配置（便于只改一边）。
+ * body: { priorityChannels?: string[], defaultChannels?: string[], channelNames?: Record<string,string> }
+ *   缺省字段沿用当前配置（便于只改一边）。channelNames 为频道备注名映射（id→显示名），
+ *   仅存于管理员可见的配置，不影响通道下发。
  * 返回：{ version, priorityCount, defaultCount }（新版本快照）。
  *
  * 鉴权：与 admin/channels.get 一致 —— wx-auth isAdminUser。
@@ -39,6 +40,10 @@ export default defineEventHandler(async (event) => {
     defaultChannels: Array.isArray(body.defaultChannels)
       ? body.defaultChannels
       : current.defaultChannels,
+    channelNames:
+      body.channelNames && typeof body.channelNames === "object"
+        ? body.channelNames
+        : current.channelNames,
   };
 
   try {

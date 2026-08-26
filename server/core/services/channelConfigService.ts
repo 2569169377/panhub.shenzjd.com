@@ -23,6 +23,13 @@ export interface ChannelConfig {
   version: number;
   priorityChannels: string[];
   defaultChannels: string[];
+  /**
+   * 频道备注名（2026-08-26 管理后台"频道名字"列）。
+   * key = 频道 ID（TG username，即 priority/default 里的字符串），
+   * value = 管理员自定义的显示名/备注。可空（未备注的频道只显示 ID）。
+   * 不会参与搜索逻辑，仅管理后台展示与编辑。
+   */
+  channelNames?: Record<string, string>;
 }
 
 export interface ChannelConfigServiceOptions {
@@ -94,10 +101,18 @@ function toChannelConfig(parsed: any): ChannelConfig | null {
     Array.isArray(parsed[key])
       ? parsed[key].filter((x: unknown) => typeof x === "string")
       : [];
+  // channelNames：{ id: name } 映射（仅保留对象、key/value 为字符串且 key 非空）
+  const names: Record<string, string> = {};
+  if (parsed.channelNames && typeof parsed.channelNames === "object") {
+    for (const [k, v] of Object.entries(parsed.channelNames)) {
+      if (k && typeof v === "string" && v.trim()) names[k] = v.trim();
+    }
+  }
   return {
     version: Number(parsed.version) || 0,
     priorityChannels: pick("priorityChannels"),
     defaultChannels: pick("defaultChannels"),
+    channelNames: Object.keys(names).length ? names : undefined,
   };
 }
 
@@ -122,7 +137,7 @@ export class ChannelConfigService {
     if (this.config) return { ...this.config };
     const fromEnv = this.parseEnvJson();
     if (fromEnv) return fromEnv;
-    return { version: 0, priorityChannels: [], defaultChannels: [] };
+    return { version: 0, priorityChannels: [], defaultChannels: [], channelNames: undefined };
   }
 
   /**
@@ -193,6 +208,19 @@ export class ChannelConfigService {
     const priSet = new Set(priority);
     defaults = defaults.filter((c) => !priSet.has(c));
 
+    // 频道备注名规范化：仅保留"确实存在的频道 ID"的备注，剔除无用/超长项
+    const names: Record<string, string> = {};
+    if (next.channelNames && typeof next.channelNames === "object") {
+      const known = new Set([...priority, ...defaults]);
+      for (const [id, name] of Object.entries(next.channelNames)) {
+        const cleanName = typeof name === "string" ? name.trim() : "";
+        if (id && known.has(id) && cleanName && cleanName.length <= 100) {
+          names[id] = cleanName;
+        }
+      }
+    }
+    const hasNames = Object.keys(names).length > 0;
+
     // 空配置保护：不允许把两份都清空（防止误删全部频道导致服务不可用）
     if (priority.length === 0 && defaults.length === 0) {
       throw new Error("频道清单不能为空：至少保留一个频道");
@@ -205,14 +233,23 @@ export class ChannelConfigService {
         await client.execute("SELECT COALESCE(MAX(version), 0) AS v FROM channel_config")
       ).rows;
       const version = Number(rows[0]?.v) + 1; // 并发安全：DB 端取 MAX 递增
-      const plain = JSON.stringify({ priorityChannels: priority, defaultChannels: defaults });
+      const plain = JSON.stringify({
+        priorityChannels: priority,
+        defaultChannels: defaults,
+        ...(hasNames ? { channelNames: names } : {}),
+      });
       const payload = encryptChannelConfig(plain, channelKey);
       await client.execute(
         "INSERT INTO channel_config (version, payload, updated_at) VALUES (?, ?, ?)",
         [version, payload, Date.now()]
       );
       // 立即生效：更新内存缓存
-      this.config = { version, priorityChannels: priority, defaultChannels: defaults };
+      this.config = {
+        version,
+        priorityChannels: priority,
+        defaultChannels: defaults,
+        ...(hasNames ? { channelNames: names } : {}),
+      };
       loggers.search.info("频道配置已保存（管理后台 CRUD）", {
         version,
         priorityCount: priority.length,
@@ -371,6 +408,7 @@ export class ChannelConfigService {
           version: Number(body?.data?.version) || 0,
           priorityChannels: [],
           defaultChannels: channels,
+          channelNames: undefined,
         };
       } finally {
         clearTimeout(timer);
