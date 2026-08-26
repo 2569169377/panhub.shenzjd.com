@@ -6,8 +6,8 @@
  * - NUXT_PUBLIC_WX_AUTH_ENFORCE=1（主站）→ checkSearchAuth() 对未认证用户强制弹认证，
  *   无关闭按钮、必须完成关注+验证码才能搜索（当前服务端 WX_AUTH_ENFORCE=1 也会
  *   401 拦截）。已认证用户（cookie 有效）永不弹窗。
- * - 未设置/=0（fork 版默认）→ 软引导：未认证用户搜索时
- *   只弹一次可选认证弹窗（可关闭），不强制；已认证用户永不弹窗。
+ * - 未设置/=0（fork 版默认）→ 软引导：未认证用户搜索时每个新会话（刷新/新标签页）
+ *   弹一次可选认证弹窗（可关闭，sessionStorage 记一次），不强制；已认证用户永不弹窗。
  *   fork 站默认零配置即"不强制 + cookie 有效免验证码"，避免每搜必弹。
  *
  * 依赖 wx-auth-sdk@1.2.8+ 的 silent + required 选项：
@@ -112,21 +112,23 @@ export function useWxAuth() {
     // 跳过搜索。改为等 onVerified 回调置位 isVerified 的信号。
 
     if (!enforce) {
-      // 软引导：仅在“首次使用本浏览器且未认证”时弹一次可关闭的引导窗
-      // （展示关注二维码 + 验证码入口），随后记住，之后搜索不再打扰。
-      // 用户愿意关注就扫描输入验证码 → 写入 1 年长期 cookie → 从此永久免验证。
+      // 软引导：每个新会话（标签页/刷新）仅弹一次可关闭的引导窗
+      // （展示关注二维码 + 验证码入口），关掉后本会话不再弹。
+      // 用 sessionStorage 记录（关闭标签页即清除）——不永久"永不打扰"，
+      // 下次回访/刷新会再给一次关注入口，兼顾转化与打扰控制。
+      // 用户愿意关注就扫描输入验证码 → SDK 写 1 年长期 cookie → 从此免验证。
       // 关注与否都立即放行搜索（不阻塞）。
-      const remindedKey = "wxauth-soft-reminded";
+      const remindedKey = "wxauth-soft-reminded-session";
       let reminded = false;
       try {
-        reminded = localStorage.getItem(remindedKey) === "1";
+        reminded = sessionStorage.getItem(remindedKey) === "1";
       } catch {}
       if (!reminded) {
         void WxAuth.showAuthModal();
         // 停留 ~1.5s 让用户看到二维码/引导，随即自动放行搜索（弹窗仍可手动关闭）
         await new Promise((r) => setTimeout(r, 1500));
         try {
-          localStorage.setItem(remindedKey, "1");
+          sessionStorage.setItem(remindedKey, "1");
         } catch {}
       }
       return true;
