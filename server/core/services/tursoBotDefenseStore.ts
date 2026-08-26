@@ -194,17 +194,29 @@ export class TursoBotDefenseStore {
     return nextBlockCount;
   }
 
-  /** 当前 IP 是否仍在封禁期内（expires_at > now） */
+  /**
+   * 当前 IP 是否仍在封禁期内。
+   *
+   * 2026-08-27 修复：必须 `block_count > 0 且 expires_at > now` 才算封禁。
+   * 此前只看 expires_at > now 存在致命误判——recordRejection 写入的新条目
+   * expires_at = now + 1h（累计期短标记）、block_count = 0（未正式拉黑），
+   * 但 isBlocked 只看 expires_at 会把这类"从未拉黑过的计数记录"误判为封禁，
+   * 导致正常用户只要被记录 1 次拒绝事件（hit_count=1）就被蜜罐/拦截 1 小时
+   * （用户实测：自己 IP 被假拉黑，block_count=0 / hit_count=1 / expires_at 1h）。
+   * 正式拉黑（extendBlock / manuallyBlock）都会设置 block_count > 0。
+   */
   async isBlocked(ip: string, now: number): Promise<boolean> {
     await this.waitForInit();
     const r = (
       await this.client.execute(
-        "SELECT expires_at FROM rejected_ips WHERE ip = ?",
+        "SELECT block_count, expires_at FROM rejected_ips WHERE ip = ?",
         [ip]
       )
     ).rows[0];
     if (!r) return false;
-    return ((r.expires_at as number) ?? 0) > now;
+    const blockCount = (r.block_count as number) ?? 0;
+    const expiresAt = (r.expires_at as number) ?? 0;
+    return blockCount > 0 && expiresAt > now;
   }
 
   /**
