@@ -12,7 +12,7 @@ import {
   classifyError,
   type WarningInfo,
 } from "../utils/errors";
-import { buildSearchKeywordVariants } from "../utils/searchKeyword";
+import { buildSearchKeywordVariants, matchesSearchKeyword } from "../utils/searchKeyword";
 import { loggers } from "../utils/logger";
 
 /**
@@ -226,8 +226,28 @@ export class SearchService {
     const allResults = this.mergeSearchResults(tgResults, pluginResults);
     this.sortResultsByTimeDesc(allResults);
 
+    // 结果与搜索关键词相关性过滤（2026-08-27 用户拍板：真实资源但
+    // 名字对不上搜索词的结果不展示）。
+    // 背景：yunso 上游 wd 参数失效（搜任何词返回同一批固定推荐列表）、
+    // dyyjv 自带「相关推荐」板块——这些资源链接真实存在，但和搜索词
+    // 无关（用户搜「阿甘正传」混入「好莱坞俗套大吐槽」「熊出没」等）。
+    // 兜底：title/content 经 normalize 后不含关键词变体 → 整条丢弃。
+    // TG 来源在抓取阶段已按全文匹配，这里对插件来源做统一兜底。
+    // 边界：单字符关键词会触发插件兜底变体（如搜 "1" → "电影"/"movie"/
+    // "1080p"），返回的 title 可能不含单字符，此时不过滤避免误杀。
+    const keywordTrimmed = keyword.trim();
+    const relevantResults =
+      keywordTrimmed.length <= 1
+        ? allResults
+        : allResults.filter((result) => {
+            const haystack = [result.title, result.content]
+              .filter(Boolean)
+              .join(" ");
+            return matchesSearchKeyword(haystack, keyword);
+          });
+
     const filteredForResults: SearchResult[] = [];
-    for (const result of allResults) {
+    for (const result of relevantResults) {
       // 统一剔除磁力链接（TG / 插件来源都覆盖）
       const strippedMagnet = stripMagnetLinks(result);
       const hasTime = !!result.datetime;
@@ -240,7 +260,7 @@ export class SearchService {
     }
 
     const mergedLinks = this.mergeResultsByType(
-      allResults,
+      relevantResults,
       keyword,
       cloudTypes
     );
