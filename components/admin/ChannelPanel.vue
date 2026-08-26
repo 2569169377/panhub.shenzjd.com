@@ -30,12 +30,12 @@
         v-model="newName"
         type="text"
         class="channel-input"
-        placeholder="输入频道名（如：xxx_tg）"
+        placeholder="输入频道名字后回车添加（默认频道）"
         :disabled="saving"
         @keyup.enter="addChannel"
       />
       <button type="button" class="btn btn-neutral" :disabled="saving || !newName.trim()" @click="addChannel">
-        添加到默认
+        + 添加频道
       </button>
     </div>
 
@@ -45,43 +45,55 @@
         有未保存的修改，点击「保存全部」生效
       </p>
 
-      <!-- 优先级频道（固定下发/不下发给 fork 站） -->
-      <div class="channel-block">
-        <h3 class="channel-block-title">
-          优先级频道
-          <span class="channel-count">({{ priorityChannels.length }})</span>
-          <span class="channel-block-hint">固定使用，不下发给第三方</span>
-        </h3>
-        <div v-if="priorityChannels.length" class="channel-tags">
-          <div v-for="c in priorityChannels" :key="c" class="channel-tag channel-tag-pri">
-            <span class="channel-tag-name" :title="c">{{ c }}</span>
-            <span class="channel-tag-actions">
-              <button type="button" class="channel-tag-btn" title="取消优先（移到默认）" @click="unprioritize(c)">⬇</button>
-              <button type="button" class="channel-tag-btn channel-tag-btn-danger" title="删除" @click="askRemove(c)">✕</button>
-            </span>
-          </div>
-        </div>
-        <div v-else class="admin-state admin-state-sm">无优先级频道</div>
-      </div>
-
-      <!-- 默认频道（全部下发） -->
-      <div class="channel-block">
-        <h3 class="channel-block-title">
-          默认频道
-          <span class="channel-count">({{ defaultChannels.length }})</span>
-          <span class="channel-tag-hint">随 /api/channels 下发</span>
-        </h3>
-        <div v-if="defaultChannels.length" class="channel-tags">
-          <div v-for="c in defaultChannels" :key="c" class="channel-tag">
-            <span class="channel-tag-name" :title="c">{{ c }}</span>
-            <span class="channel-tag-actions">
-              <button type="button" class="channel-tag-btn" title="设为优先（固定）" @click="prioritize(c)">⬆</button>
-              <button type="button" class="channel-tag-btn channel-tag-btn-danger" title="删除" @click="removeChannel(c)">✕</button>
-            </span>
-          </div>
-        </div>
-        <div v-else class="admin-state admin-state-sm">无默认频道</div>
-      </div>
+      <table v-if="rows.length" class="channel-table">
+        <thead>
+          <tr>
+            <th class="col-pri">优先级</th>
+            <th class="col-name">频道名字</th>
+            <th class="col-ops">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in rows" :key="row.name">
+            <!-- 优先级 -->
+            <td class="col-pri">
+              <span :class="['channel-pri-badge', { 'is-pri': row.priority }]">
+                {{ row.priority ? "优先" : "默认" }}
+              </span>
+            </td>
+            <!-- 频道名字（行内编辑） -->
+            <td class="col-name">
+              <template v-if="editingName === row.name">
+                <input
+                  v-model="editValue"
+                  type="text"
+                  class="row-input"
+                  :class="{ 'row-input-invalid': editError }"
+                  :placeholder="row.name"
+                  @keyup.enter="commitEdit(row)"
+                  @keyup.esc="cancelEdit"
+                />
+                <button type="button" class="btn btn-primary btn-sm" @click="commitEdit(row)" :disabled="!editValue.trim()">✓</button>
+                <button type="button" class="btn btn-neutral btn-sm" @click="cancelEdit">✕</button>
+              </template>
+              <span v-else class="channel-name" :title="row.name">{{ row.name }}</span>
+            </td>
+            <!-- 操作 -->
+            <td class="col-ops">
+              <button
+                type="button"
+                class="ops-btn"
+                :title="row.priority ? '取消优先（移到默认）' : '设为优先（固定不下发）'"
+                @click="row.priority ? unpick(row.name) : prioritize(row.name)">
+                {{ row.priority ? "⬇" : "⬆" }}
+              </button>
+              <button type="button" class="ops-btn" title="修改名字" @click="startEdit(row)">✎</button>
+              <button type="button" class="ops-btn ops-btn-danger" title="删除" @click="askRemove(row.name)">✕</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="admin-state">暂无频道</div>
     </template>
 
     <AdminModal ref="modal" :title="'确认操作'" tone="primary" confirm-text="确认" />
@@ -90,14 +102,14 @@
 
 <script setup lang="ts">
 /**
- * 频道管理面板（2026-08-26 CRUD 升级）
+ * 频道管理面板（2026-08-26 CRUD v2：表格版）
  *
- * 全部频道（priority + default）列举，支持：
- * - 新增（添加到默认）
- * - 删除（两个区均可）
- * - 设/取消优先（在两组间移动）
- * 本地编辑 → 批量「保存全部」（PUT 全量，服务端去重/互斥/空保护）。
- * 「重新加载」= 放弃本地修改、从远端重拉最新配置（如脚本 sync 后）。
+ * 全部频道（优先级 + 默认）以表格列出，一行一个频道：
+ * - 列：优先级（优先/默认徽标）/ 频道名字（行内改名）/ 操作
+ * - 增：顶部输入 + 添加（进入默认）
+ * - 删：操作列 ✕（确认弹窗）
+ * - 改：✎ 行内改名、⬆/⬇ 切换优先级（保留在两组间移动）
+ * - 查：全量列出，更改本地编辑 → 批量「保存全部」（PUT 全量）
  */
 import { useAdminApi, type ChannelAdminData } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
@@ -118,8 +130,23 @@ const base = ref<ChannelAdminData | null>(null);
 const priorityChannels = ref<string[]>([]);
 const defaultChannels = ref<string[]>([]);
 
+// 行内编辑状态
+const editingName = ref<string | null>(null); // 正在编辑的原频道名
+const editValue = ref("");
+const editError = ref(false);
+
+/** 表格行：channels 统一列出（优先在前） */
+interface ChannelRow {
+  name: string;
+  priority: boolean;
+}
+const rows = computed<ChannelRow[]>(() => [
+  ...priorityChannels.value.map((name) => ({ name, priority: true })),
+  ...defaultChannels.value.map((name) => ({ name, priority: false })),
+]);
+
 const version = computed(() => base.value?.version ?? 0);
-const allCount = computed(() => priorityChannels.value.length + defaultChannels.value.length);
+const allCount = computed(() => rows.value.length);
 
 /** 加载服务器最新配置 */
 async function load() {
@@ -132,6 +159,7 @@ async function load() {
     priorityChannels.value = [...data.priorityChannels];
     defaultChannels.value = [...data.defaultChannels];
     dirty.value = false;
+    cancelEdit();
   } catch (e: any) {
     error.value = e?.message || "请求异常";
   } finally {
@@ -139,7 +167,7 @@ async function load() {
   }
 }
 
-/** 新增（默认区） */
+/** 增：添加到默认频道 */
 function addChannel() {
   const name = newName.value.trim();
   if (!name) return;
@@ -152,33 +180,67 @@ function addChannel() {
   dirty.value = true;
 }
 
-/** 删除频道（确认弹窗） */
-function removeChannel(name: string) {
+/** 删：确认弹窗后从两份清单移除 */
+function askRemove(name: string) {
   modalRef.value?.open({
     title: "删除频道",
     message: `确定删除频道「${name}」吗？保存后对所有使用该频道列表的请求生效。`,
     tone: "danger",
     confirmText: "删除",
     onConfirm: async () => {
-      defaultChannels.value = defaultChannels.value.filter((c) => c !== name);
       priorityChannels.value = priorityChannels.value.filter((c) => c !== name);
+      defaultChannels.value = defaultChannels.value.filter((c) => c !== name);
       dirty.value = true;
+      if (editingName.value === name) cancelEdit();
     },
   });
 }
 
-/** 升为优先（从默认移除，加入优先） */
+/** 改：切换优先级（保留在两组间移动） */
 function prioritize(name: string) {
   defaultChannels.value = defaultChannels.value.filter((c) => c !== name);
   if (!priorityChannels.value.includes(name)) priorityChannels.value.push(name);
   dirty.value = true;
 }
-
-/** 取消优先（加入默认） */
-function unprioritize(name: string) {
+function unpick(name: string) {
   priorityChannels.value = priorityChannels.value.filter((c) => c !== name);
   if (!defaultChannels.value.includes(name)) defaultChannels.value.push(name);
   dirty.value = true;
+}
+
+/** 改：开始行内改名 */
+function startEdit(row: ChannelRow) {
+  editingName.value = row.name;
+  editValue.value = row.name;
+  editError.value = false;
+}
+function cancelEdit() {
+  editingName.value = null;
+  editValue.value = "";
+  editError.value = false;
+}
+function commitEdit(row: ChannelRow) {
+  const next = editValue.value.trim();
+  if (!next) {
+    editError.value = true;
+    return;
+  }
+  if (next === row.name) {
+    cancelEdit();
+    return;
+  }
+  // 改名冲突检查（全量频道范围内）
+  const others = [...priorityChannels.value, ...defaultChannels.value].filter((c) => c !== row.name);
+  if (others.includes(next)) {
+    showToast("已存在同名频道", "error");
+    editError.value = true;
+    return;
+  }
+  const list = row.priority ? priorityChannels.value : defaultChannels.value;
+  const idx = list.indexOf(row.name);
+  if (idx >= 0) list.splice(idx, 1, next);
+  dirty.value = true;
+  cancelEdit();
 }
 
 /** 保存全部（确认弹窗） */
@@ -205,16 +267,16 @@ async function doSave() {
     });
     dirty.value = false;
     showToast(`已保存 v${r.version}`, "success");
-    await load(); // 刷新列表（服务端做了互斥/去重，回读最新）
+    await load(); // 服务端做了去重/互斥，回读最新
   } catch (e: any) {
     showToast(e?.message || "保存失败", "error");
-    throw e; // 让 modal 保持打开显示错误
+    throw e; // 保持弹窗显示错误
   } finally {
     saving.value = false;
   }
 }
 
-/** 重新加载（放弃本地未保存修改，从远端重拉） */
+/** 重新加载（放弃本地修改，从远端重拉） */
 function askReload() {
   modalRef.value?.open({
     title: "重新加载频道配置",
@@ -248,7 +310,7 @@ onMounted(load);
 .channel-add {
   display: flex;
   gap: 10px;
-  margin: 16px 0 4px;
+  margin: 16px 0 14px;
   max-width: 520px;
 }
 .channel-input {
@@ -261,51 +323,82 @@ onMounted(load);
   font-size: 14px;
 }
 .channel-input:focus { outline: none; border-color: var(--primary, #0f766e); }
-.channel-block { margin-top: 18px; }
-.channel-block-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+
+/* ===== 表格 ===== */
+.channel-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 14px;
+}
+.channel-table th {
+  text-align: left;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary, #1f2937);
-  margin-bottom: 10px;
+  color: var(--text-tertiary, #9ca3af);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light, #e5dfd0);
+  letter-spacing: 0.5px;
 }
-.channel-count { color: var(--text-tertiary, #9ca3af); font-weight: 400; font-size: 13px; }
-.channel-tag-hint { color: var(--text-tertiary, #9ca3af); font-weight: 400; font-size: 12px; }
-.channel-tags { display: flex; flex-wrap: wrap; gap: 8px; }
-.channel-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 12px;
+.channel-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-light, #eee);
+  vertical-align: middle;
+}
+.channel-table tbody tr:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.03)); }
+.col-pri { width: 90px; white-space: nowrap; }
+.col-name { min-width: 200px; }
+.col-ops { width: 150px; white-space: nowrap; }
+
+.channel-pri-badge {
+  display: inline-block;
+  padding: 2px 10px;
   border-radius: 999px;
-  background: var(--bg-hover, rgba(15, 118, 110, 0.06));
+  font-size: 12px;
   border: 1px solid var(--border-light, #e5dfd0);
-  color: var(--text-primary, #1f2937);
-  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
 }
-.channel-tag-pri {
+.channel-pri-badge.is-pri {
   background: rgba(15, 118, 110, 0.14);
   border-color: rgba(15, 118, 110, 0.3);
   color: var(--primary, #0f766e);
-  font-weight: 500;
+  font-weight: 600;
 }
-.channel-tag-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.channel-tag-actions { display: inline-flex; gap: 2px; }
-.channel-tag-btn {
+.channel-name { word-break: break-all; color: var(--text-primary, #1f2937); }
+
+.row-input {
+  width: 220px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-light, #e5dfd0);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #1f2937);
+  margin-right: 6px;
+}
+.row-input:focus { outline: none; border-color: var(--primary, #0f766e); }
+.row-input-invalid, .row-input-invalid:focus {
+  border-color: var(--error, #ef4444);
+  background: rgba(239, 68, 68, 0.05);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2);
+}
+
+.btn-sm { padding: 3px 10px; font-size: 13px; }
+.ops-btn {
   border: none;
   background: transparent;
   color: var(--text-tertiary, #9ca3af);
   cursor: pointer;
   font-size: 13px;
-  padding: 2px 4px;
+  padding: 4px 7px;
   border-radius: 6px;
   line-height: 1;
+  margin-right: 2px;
 }
-.channel-tag-btn:hover { background: rgba(0, 0, 0, 0.06); color: var(--text-primary, #1f2937); }
-.channel-tag-btn-danger:hover { background: rgba(239, 68, 68, 0.12); color: var(--error, #ef4444); }
-.admin-state-sm { padding: 8px 0; font-size: 13px; }
+.ops-btn:hover { background: rgba(0, 0, 0, 0.06); color: var(--text-primary, #1f2937); }
+.ops-btn-danger:hover { background: rgba(239, 68, 68, 0.12); color: var(--error, #ef4444); }
+
+.admin-empty { padding: 24px 0; text-align: center; color: var(--text-tertiary, #9ca3af); font-size: 14px; }
 .admin-notice-warn {
   background: rgba(245, 158, 11, 0.1);
   border: 1px solid rgba(245, 158, 11, 0.35);
