@@ -87,7 +87,7 @@ export default defineNuxtConfig({
     public: {
       apiBase: "/api",
       siteUrl: "https://panhub.shenzjd.com",
-      // 前端微信认证开关（默认 false = fork 友好软引导）。
+      // 前端微信认证开关（默认 "0" = fork 友好软引导）。
       //
       // ⚠️ 必须用 Nuxt 官方运行时覆盖通道 NUXT_PUBLIC_WX_AUTH_ENFORCE，而不是在
       //    构建期读 process.env.WX_AUTH_ENFORCE：
@@ -97,12 +97,17 @@ export default defineNuxtConfig({
       //    - 反例：把默认值写成 process.env.WX_AUTH_ENFORCE 只在「构建时」求值，
       //      CI 构建环境没有 .env → 主站前端也被打成 false（bug），且违背运行覆盖机制。
       //
-      // 取值约定（destr 解析，字符串 "1"/"true" → true）：
-      //   1（或 true）→ 主站强制：未认证搜索时弹窗常驻不可关，前端拦截 + 后端 401 双保险
-      //   0/未设置   → fork 默认软引导：首次无 cookie 弹一次可关引导（扫码关注公众号），
-      //               之后 localStorage 记住不再打扰；搜索不阻塞、后端也不拦
+      // ⚠️ 取值类型坑（本次复盘实证）：Nuxt 环境变量覆盖经 destr 解析——"true" → boolean
+      //    true，"1" → number 1（不是字符串）。默认值统一用字符串 "0"（fork 软引导），
+      //    主站部署配 NUXT_PUBLIC_WX_AUTH_ENFORCE=1（会被 destr 转成 number 1）。
+      //    读取端（useWxAuth.ts）已做宽松四态判断 boolean true / number 1 / string "1" / "true",
+      //    避免类型漂移导致主站强制配置静默失效。
+      // 取值约定：
+      //   1 → 主站强制：未认证搜索时弹窗常驻不可关，前端拦截 + 后端 401 双保险
+      //   0 → fork 默认软引导：首次无 cookie 弹一次可关引导（扫码关注公众号），
+      //       之后 localStorage 记住不再打扰；搜索不阻塞、后端也不拦
       // ⚠️ 前端强制必须与后端 WX_AUTH_ENFORCE=1 配套，否则体验断裂（前端放行但后端 401）。
-      wxAuthEnforce: false,
+      wxAuthEnforce: "0",
     },
   },
 });

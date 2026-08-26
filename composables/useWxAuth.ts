@@ -1,11 +1,12 @@
 /**
  * 微信公众号认证 composable（双模式：强制 / 软引导）
  *
- * 模式由运行时配置 public.wxAuthEnforce 决定（= WX_AUTH_ENFORCE 环境变量）：
- * - WX_AUTH_ENFORCE=1（主站）→ checkSearchAuth() 对未认证用户强制弹认证，
- *   无关闭按钮、必须完成关注+验证码才能搜索（当前服务端 requireWxAuth 也
- *   同步 401 拦截）。已认证用户（cookie 有效）永不弹窗。
- * - WX_AUTH_ENFORCE 未设置/=0（fork 版默认）→ 软引导：未认证用户搜索时
+ * 模式由运行时配置 public.wxAuthEnforce 决定（= NUXT_PUBLIC_WX_AUTH_ENFORCE 环境变量，
+ * 独立于后端 WX_AUTH_ENFORCE，避免 build 阶段拿不到 env 的问题）：
+ * - NUXT_PUBLIC_WX_AUTH_ENFORCE=1（主站）→ checkSearchAuth() 对未认证用户强制弹认证，
+ *   无关闭按钮、必须完成关注+验证码才能搜索（当前服务端 WX_AUTH_ENFORCE=1 也会
+ *   401 拦截）。已认证用户（cookie 有效）永不弹窗。
+ * - 未设置/=0（fork 版默认）→ 软引导：未认证用户搜索时
  *   只弹一次可选认证弹窗（可关闭），不强制；已认证用户永不弹窗。
  *   fork 站默认零配置即"不强制 + cookie 有效免验证码"，避免每搜必弹。
  *
@@ -28,10 +29,18 @@ export function useWxAuth() {
   const silentCheckDone = ref(false);
   let silentCheckPromise: Promise<boolean> = Promise.resolve(false);
 
-  // 是否强制（= 主站 WX_AUTH_ENFORCE=1）：
+  // 是否强制（= 主站 NUXT_PUBLIC_WX_AUTH_ENFORCE=1）：
   // 由 nuxt runtimeConfig.public.wxAuthEnforce 注入（与后端 requireWxAuth 同一开关）。
-  // fork 站未配置时默认 false → 软引导，可关闭、不强制弹窗。
-  const enforce = useRuntimeConfig().public.wxAuthEnforce === true;
+  // ⚠️ destr 类型坑（2026-08-26 复盘实证）：Nuxt 环境变量覆盖经 destr 解析——
+  //   "true" → boolean true，"1" → number 1，都【不是】字符串。若默认值声明的类型
+  //   与 workspace 侧 env 形态不同，覆盖后类型会漂移。必须宽松四态判断：
+  //   boolean true / boolean "1"转的数字 1 / string "1" / string "true"。
+  const wxAuthEnforceRaw: unknown = useRuntimeConfig().public.wxAuthEnforce;
+  const enforce =
+    wxAuthEnforceRaw === true ||
+    wxAuthEnforceRaw === 1 ||
+    wxAuthEnforceRaw === "1" ||
+    wxAuthEnforceRaw === "true";
 
   // 仅在客户端初始化
   onBeforeMount(() => {
@@ -155,6 +164,15 @@ export function useWxAuth() {
     if (typeof window === "undefined") return false;
     isVerified.value = false; // 强制重新认证
     void WxAuth.showAuthModal();
+
+    if (!enforce) {
+      // 配置错配兜底：若某 fork/主站后端开了 WX_AUTH_ENFORCE=1 但前端没开
+      // NUXT_PUBLIC_WX_AUTH_ENFORCE（软引导），服务端 401 也会走 forceVerify。
+      // 软引导窗可关闭，等 1.5s 就放行（本就可关），避免用户关窗后永久卡死。
+      await new Promise((r) => setTimeout(r, 1500));
+      return true;
+    }
+
     await waitVerified();
     return isVerified.value;
   }
