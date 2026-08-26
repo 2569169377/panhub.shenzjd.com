@@ -3,7 +3,7 @@
     <!-- 顶栏：品牌 + 用户区 -->
     <header class="admin-topbar">
       <button type="button" class="admin-burger" aria-label="打开菜单" @click="menuOpen = true">☰</button>
-      <NuxtLink to="/admin" class="admin-brand">
+      <NuxtLink to="/" class="admin-brand" title="返回首页">
         <span class="admin-brand-badge">P</span>
         <span class="admin-brand-name">PanHub</span>
       </NuxtLink>

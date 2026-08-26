@@ -56,7 +56,9 @@ export function useAdminApi() {
   const authStatus = ref<AdminAuthStatus>("checking");
 
   async function request<T = any>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
+    // credentials: "same-origin" 显式声明：管理接口靠 wxauth-token cookie 鉴权，
+    // 必须确保每次请求携带 cookie（同源默认也带，但显式声明排除一切边角情况）
+    const res = await fetch(url, { ...init, credentials: "same-origin" });
     if (res.status === 401) {
       authStatus.value = "no-login";
       throw new AdminApiError(401, "未登录");
@@ -76,17 +78,17 @@ export function useAdminApi() {
     return data.data as T;
   }
 
-  /** 打开管理页即探测管理员权限（onMounted 调用：先看有没有 token，没有再兜底 silentCheck） */
+  /** 打开管理页即探测管理员权限（onMounted 调用：先补齐 cookie，再探测） */
   async function probeAuth(): Promise<AdminAuthStatus> {
     authStatus.value = "checking";
     try {
-      // 无 token cookie → 先调 wx-auth SDK 静默登录写 cookie，再探测
-      const hasToken =
-        typeof document !== "undefined" && /(?:^|; )wxauth-token=/.test(document.cookie);
-      if (!hasToken) {
-        const { WxAuth } = await import("wx-auth-sdk");
-        await WxAuth.silentCheck().catch(() => {});
-      }
+      // 先调一次 wx-auth SDK 静默检查：把 localStorage 备份的 token 落回 cookie，
+      // 或验证无有效凭证（silentCheck 对无 cookie 是幂等安全返回 false）。
+      // 此前优化"有 wxauth-token cookie 就跳过"有个隐患：SDK 可能凭 localStorage
+      // 残留通过 silentCheck 写 cookie，但若写失败/被清，则出现"内存有 token、
+      // cookie 没有"——搜索能过（token 兜底），管理接口却 401（只认 token cookie）。
+      const { WxAuth } = await import("wx-auth-sdk");
+      await WxAuth.silentCheck().catch(() => {});
       // 探测：拉一次黑名单（管理员接口），成功即管理员
       await request("/api/blacklist?limit=1");
       authStatus.value = "ok";
@@ -135,6 +137,23 @@ export function useAdminApi() {
     return request("/api/admin/channels");
   }
 
+  /** 频道配置全量（含 priority 频道） */
+  async function loadChannels(): Promise<ChannelAdminData> {
+    return request("/api/admin/channels");
+  }
+
+  /** 频道配置全量保存（CRUD 提交：priority/default 互斥已由服务端处理） */
+  async function saveChannels(payload: {
+    priorityChannels: string[];
+    defaultChannels: string[];
+  }): Promise<{ version: number; priorityCount: number; defaultCount: number }> {
+    return request("/api/admin/channels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
   /** 频道配置重载（强制重新拉取，不重启进程） */
   async function reloadChannels(): Promise<{
     version: number;
@@ -144,5 +163,5 @@ export function useAdminApi() {
     return request("/api/admin/channels/reload", { method: "POST" });
   }
 
-  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, reloadChannels };
+  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels };
 }
