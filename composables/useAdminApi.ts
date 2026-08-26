@@ -33,6 +33,15 @@ export interface BlacklistItem {
   remainingMs?: number;
 }
 
+/** 频道配置（管理面板全量视图，含 priority） */
+export interface ChannelAdminData {
+  version: number;
+  priorityChannels: string[];
+  defaultChannels: string[];
+  priorityCount: number;
+  defaultCount: number;
+}
+
 /** 409 之外的错误会被包装为 AdminApiError（serverMessage 来自后端 message） */
 export class AdminApiError extends Error {
   status: number;
@@ -121,5 +130,19 @@ export function useAdminApi() {
     return request(`/api/blacklist?ip=${encodeURIComponent(ip)}`, { method: "DELETE" });
   }
 
-  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp };
+  /** 频道配置全量（含 priority 频道） */
+  async function loadChannels(): Promise<ChannelAdminData> {
+    return request("/api/admin/channels");
+  }
+
+  /** 频道配置重载（强制重新拉取，不重启进程） */
+  async function reloadChannels(): Promise<{
+    version: number;
+    priorityCount: number;
+    defaultCount: number;
+  }> {
+    return request("/api/admin/channels/reload", { method: "POST" });
+  }
+
+  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, reloadChannels };
 }
