@@ -64,6 +64,13 @@
     <slot />
   </main>
 
+  <!-- 页脚（隐私政策链接，2026-08-26 从 app.vue 移入：仅客户页显示，admin 后台不显示） -->
+  <footer class="site-footer">
+    <NuxtLink to="/privacy" class="footer-link">隐私政策</NuxtLink>
+    <span class="footer-sep">·</span>
+    <span class="footer-copy">© {{ new Date().getFullYear() }} PanHub</span>
+  </footer>
+
   <!-- 密码门（仅在用户发起搜索时弹出） -->
   <ClientOnly>
     <PasswordGate
@@ -411,5 +418,26 @@ function dismissAnnouncement() {
     -webkit-text-fill-color: var(--text-primary);
     color: var(--text-primary);
   }
+}
+
+/* 页脚（隐私政策链接，2026-08-26 从 app.vue 移入：仅客户页布局显示，admin 后台不显示） */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 16px 28px;
+  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+}
+.footer-link {
+  color: var(--text-secondary, #6b7280);
+  text-decoration: none;
+}
+.footer-link:hover {
+  color: var(--accent, #2563eb);
+}
+.footer-sep {
+  opacity: 0.5;
 }
 </style>
