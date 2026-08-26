@@ -87,6 +87,22 @@ export default defineNuxtConfig({
     public: {
       apiBase: "/api",
       siteUrl: "https://panhub.shenzjd.com",
+      // 前端微信认证开关（默认 false = fork 友好软引导）。
+      //
+      // ⚠️ 必须用 Nuxt 官方运行时覆盖通道 NUXT_PUBLIC_WX_AUTH_ENFORCE，而不是在
+      //    构建期读 process.env.WX_AUTH_ENFORCE：
+      //    - Nuxt 文档：runtimeConfig.public 由「同名 NUXT_PUBLIC_* 环境变量」在
+      //      运行时自动覆盖；SSR 每次请求把新值序列化进 payload，客户端随之生效，
+      //      Docker --env-file / 服务器 env / wrangler secret 都能覆盖，无需重建镜像。
+      //    - 反例：把默认值写成 process.env.WX_AUTH_ENFORCE 只在「构建时」求值，
+      //      CI 构建环境没有 .env → 主站前端也被打成 false（bug），且违背运行覆盖机制。
+      //
+      // 取值约定（destr 解析，字符串 "1"/"true" → true）：
+      //   1（或 true）→ 主站强制：未认证搜索时弹窗常驻不可关，前端拦截 + 后端 401 双保险
+      //   0/未设置   → fork 默认软引导：首次无 cookie 弹一次可关引导（扫码关注公众号），
+      //               之后 localStorage 记住不再打扰；搜索不阻塞、后端也不拦
+      // ⚠️ 前端强制必须与后端 WX_AUTH_ENFORCE=1 配套，否则体验断裂（前端放行但后端 401）。
+      wxAuthEnforce: false,
     },
   },
 });

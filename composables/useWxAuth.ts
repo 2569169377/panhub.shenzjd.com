@@ -1,13 +1,18 @@
 /**
- * 微信公众号认证 composable（强制模式）
- * - 未认证用户：搜索时强制弹出认证，弹窗无关闭按钮，必须完成
- *   关注公众号 + 验证码验证后才能继续搜索（验证成功后自动继续）
- * - 已认证用户（cookie 存在且有效）永不弹窗
+ * 微信公众号认证 composable（双模式：强制 / 软引导）
+ *
+ * 模式由运行时配置 public.wxAuthEnforce 决定（= WX_AUTH_ENFORCE 环境变量）：
+ * - WX_AUTH_ENFORCE=1（主站）→ checkSearchAuth() 对未认证用户强制弹认证，
+ *   无关闭按钮、必须完成关注+验证码才能搜索（当前服务端 requireWxAuth 也
+ *   同步 401 拦截）。已认证用户（cookie 有效）永不弹窗。
+ * - WX_AUTH_ENFORCE 未设置/=0（fork 版默认）→ 软引导：未认证用户搜索时
+ *   只弹一次可选认证弹窗（可关闭），不强制；已认证用户永不弹窗。
+ *   fork 站默认零配置即"不强制 + cookie 有效免验证码"，避免每搜必弹。
  *
  * 依赖 wx-auth-sdk@1.2.8+ 的 silent + required 选项：
  * - init({ silent: true }) 只做 cookie 静默验证（有效 => onVerified，无效 => 删 cookie），不自动弹窗
  * - required: true 强制认证：弹窗无关闭"×"、遮罩不可点穿，必须完成验证
- * 弹窗时机由 checkSearchAuth() 手动控制（未认证时 await 阻塞直到验证完成）。
+ * 弹窗时机由 checkSearchAuth() 手动控制（强制时 await 阻塞直到验证完成）。
  */
 
 import { WxAuth } from "wx-auth-sdk";
@@ -23,12 +28,17 @@ export function useWxAuth() {
   const silentCheckDone = ref(false);
   let silentCheckPromise: Promise<boolean> = Promise.resolve(false);
 
+  // 是否强制（= 主站 WX_AUTH_ENFORCE=1）：
+  // 由 nuxt runtimeConfig.public.wxAuthEnforce 注入（与后端 requireWxAuth 同一开关）。
+  // fork 站未配置时默认 false → 软引导，可关闭、不强制弹窗。
+  const enforce = useRuntimeConfig().public.wxAuthEnforce === true;
+
   // 仅在客户端初始化
   onBeforeMount(() => {
     if (typeof window === "undefined") return;
 
     // 完成收敛的兜底：silentCheck 失败时 onVerified 不会触发，
-    // 必须用超时强制置位，否则 isReady 永远 false → 调用方 await 挂起
+    // 必须用 isReady 强制置位，否则 isReady 永远 false → 调用方 await 挂起
     const resolveReady = () => {
       if (!silentCheckDone.value) silentCheckDone.value = true;
       if (!isReady.value) isReady.value = true;
@@ -37,13 +47,15 @@ export function useWxAuth() {
 
     WxAuth.init({
       apiBase: "https://wx-auth.shenzjd.com",
-      // silent: true —— init 内部 autoCheck 不会弹窗，只静默验证 cookie
+      // silent: true 会 init 只做 cookie 静默验证（已验证 token 有效 => onVerified；无效 => 删 cookie）
       // 2026-08-25 修复：此前 useWxAuth 在 init 后又手动调一次 silentCheck，
       // 导致首页每次加载发 2 次 /api/auth/check 请求。改为依赖 init 内部
       // 唯一一次 silentCheck，由 onVerified 回调置位 + 5s 超时兜底。
       silent: true,
-      // required: true —— 强制认证：弹窗无关闭按钮，遮罩不可点穿
-      required: true,
+      // required: enforce —— 主站（enforce=true）强制：无关闭按钮、遮罩不可点穿，
+      // 必须完成关注+验证码（与后端 requireWxAuth 实时拦截一致）；
+      // fork 版（enforce=false）可关闭、软引导不阻塞。
+      required: enforce,
       onVerified: (user: any) => {
         if (isVerified.value) return;
         console.log("[wx-auth] 认证成功", user);
@@ -63,10 +75,13 @@ export function useWxAuth() {
   });
 
   /**
-   * 每次搜索前调用（强制认证）：
-   * - 已认证（关注公众号且 cookie 有效）=> 直接放行，返回 true
-   * - 未认证 => 弹出强制认证弹窗（不可关闭），等待用户完成关注+验证码
-   *   验证，验证成功后自动放行（无需再点一次搜索）
+   * 每次搜索前调用：
+   * - 已认证（关注公众号且 cookie 有效）=> 直接放行，返回 true（永不弹窗）
+   * - 未认证：
+   *   - enforce=true（主站）=> 弹出强制认证弹窗（不可关闭），等待完成关注+验证码，
+   *     验证成功后自动放行（无需再点一次搜索）
+   *   - enforce=false（fork 版默认）=> 软引导：只弹一次可选认证弹窗（可关闭），
+   *     不阻塞搜索；验证成功后人记住 cookie，后续搜索不再弹
    */
   async function checkSearchAuth(): Promise<boolean> {
     // 本地开发（npm run dev）不强制关注公众号，直接放行
@@ -81,11 +96,35 @@ export function useWxAuth() {
     // 已认证（cookie 有效）→ 相当于已登录，直接放行
     if (isVerified.value) return true;
 
-    // 未认证 → 弹出强制认证弹窗（required:true 无关闭按钮）。
+    // 未认证：
     // 注意：不用 await WxAuth.requireAuth() 的返回值——SDK verifyCode 成功
     // 路径是 close() 先 resolve(false) 再 onVerified()（resolveAuth 已被置
     // null 无法覆盖），requireAuth 的 Promise 恒为 false，会误判"未认证"
     // 跳过搜索。改为等 onVerified 回调置位 isVerified 的信号。
+
+    if (!enforce) {
+      // 软引导：仅在“首次使用本浏览器且未认证”时弹一次可关闭的引导窗
+      // （展示关注二维码 + 验证码入口），随后记住，之后搜索不再打扰。
+      // 用户愿意关注就扫描输入验证码 → 写入 1 年长期 cookie → 从此永久免验证。
+      // 关注与否都立即放行搜索（不阻塞）。
+      const remindedKey = "wxauth-soft-reminded";
+      let reminded = false;
+      try {
+        reminded = localStorage.getItem(remindedKey) === "1";
+      } catch {}
+      if (!reminded) {
+        void WxAuth.showAuthModal();
+        // 停留 ~1.5s 让用户看到二维码/引导，随即自动放行搜索（弹窗仍可手动关闭）
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          localStorage.setItem(remindedKey, "1");
+        } catch {}
+      }
+      return true;
+    }
+
+    // 强制模式：弹常驻认证窗（SDK required=true 无关闭按钮、遮罩不可点穿），
+    // 等用户完成关注+验证码认证后才放行搜索
     void WxAuth.showAuthModal();
     await waitVerified();
     return isVerified.value;
