@@ -1,7 +1,6 @@
 import { defineEventHandler, createError } from "h3";
-import { getChannelConfigService } from "../core/services/channelConfigService";
-import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
-import { requireAdminOrigin } from "../utils/adminOriginCheck";
+import { getChannelConfigService } from "../../core/services/channelConfigService";
+import { isAdminUser, getWxAuthCredential } from "../../utils/wxAuthCheck";
 
 /**
  * 频道配置管理查询 API（2026-08-26 管理后台"频道管理"面板数据源）
@@ -11,10 +10,8 @@ import { requireAdminOrigin } from "../utils/adminOriginCheck";
  *
  * 鉴权：与 /api/search-log 一致 —— wx-auth isAdminUser（管理员标记）。
  *   无 wxauth-token cookie → 401；登录态但非管理员 → 403。
- * 同源校验：与 search-log / blacklist 一致（P1，先于鉴权 fail-fast）。
  */
 export default defineEventHandler(async (event) => {
-  requireAdminOrigin(event);
   if (!getWxAuthCredential(event).token) {
     throw createError({ statusCode: 401, statusMessage: "wx auth required" });
   }

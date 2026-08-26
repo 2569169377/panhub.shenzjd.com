@@ -1,7 +1,6 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getSearchLogStore } from "../core/services/tursoSearchLogStore";
 import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
-import { requireAdminOrigin } from "../utils/adminOriginCheck";
 
 /**
  * 搜索明细管理查询 API（2026-08-25 用户拍板：排查"哪个 openid 搜了什么"）
@@ -14,10 +13,6 @@ import { requireAdminOrigin } from "../utils/adminOriginCheck";
  *   首页完成关注公众号）；是登录态但非管理员 → 403
  * - userinfo 不可达 → 403（fail-closed，管理接口宁可不可用不裸奔）
  *
- * 同源校验（2026-08-26 P1 补丁）：读接口 Origin/Referer 至少一个匹配
- * 白名单（默认 panhub.shenzjd.com + ADMIN_ORIGIN_ALLOWLIST）→ 放行；
- * 跨源/无来源一律 403（fail-fast）。详见 server/utils/adminOriginCheck。
- *
  * 用法：
  *   GET /api/search-log?openid=<openid>&limit=50&days=7
  *     → 某 openid 最近搜了什么（term/ip/createdAt，时间倒序）
@@ -28,8 +23,6 @@ import { requireAdminOrigin } from "../utils/adminOriginCheck";
  */
 
 export default defineEventHandler(async (event) => {
-  // ---- 来源校验（P1，先于鉴权 fail-fast）----
-  requireAdminOrigin(event);
   // ---- 鉴权：wx-auth 管理员标记（2026-08-25 用户拍板，无任何配置）----
   if (!getWxAuthCredential(event).token) {
     throw createError({ statusCode: 401, statusMessage: "wx auth required" });

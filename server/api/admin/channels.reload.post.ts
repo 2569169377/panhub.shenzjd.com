@@ -1,7 +1,6 @@
 import { defineEventHandler, createError } from "h3";
-import { getChannelConfigService } from "../core/services/channelConfigService";
-import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
-import { requireAdminOrigin } from "../utils/adminOriginCheck";
+import { getChannelConfigService } from "../../core/services/channelConfigService";
+import { isAdminUser, getWxAuthCredential } from "../../utils/wxAuthCheck";
 
 /**
  * 频道配置重载 API（2026-08-26 管理后台"频道管理"面板"重新加载"按钮）
@@ -9,11 +8,10 @@ import { requireAdminOrigin } from "../utils/adminOriginCheck";
  * 强制忽略内存缓存重新加载频道配置（Turso → env → 远程），
  * 用于修改频道表（sync-channels）后无需重启进程即同步最新配置。
  *
- * 鉴权与同源校验：与 admin/channels.get 一致（管理员 + 同源）。
+ * 鉴权：与 admin/channels.get 一致 —— wx-auth isAdminUser（管理员标记）。
  * 加载失败：保持旧配置可用并返回 500（前端提示失败，不破坏现有服务）。
  */
 export default defineEventHandler(async (event) => {
-  requireAdminOrigin(event);
   if (!getWxAuthCredential(event).token) {
     throw createError({ statusCode: 401, statusMessage: "wx auth required" });
   }
