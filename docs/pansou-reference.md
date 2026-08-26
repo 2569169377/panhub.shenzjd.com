@@ -31,7 +31,7 @@
 |---|---|---|---|
 | **melost**（影盘社） | POST `www.melost.cn/v1/search/disk` | **total=2172，单页 30 条** | 夸克 |
 | **quark4k** | `quark4k.com/api/discussions`（Flarum） | **38 条** | 夸克 |
-| **u3c3** | `u3c3u3c3.u3c3u3c3u3c3.com/?search=` | **62 条** | 磁力 |
+| ~~u3c3~~（2026-08-27 移除） | `u3c3u3c3.u3c3u3c3u3c3.com/?search=` | 62 条纯磁力 | 磁力 |
 | ~~yunso~~（2026-08-27 移除） | POST `www.yunso.net/api/Core/search2` | 19 条但全无关（wd 参数失效） | 夸克+天翼 |
 | **ouge / wanou** | `woog.nxog.eu.org/api.php/provide/vod?ac=detail&wd=` | 3 条 | UC |
 | **quarktv** | `www.quarktv.com/?s=` | 有 | 夸克 |
@@ -105,7 +105,7 @@ Referer: https://www.melost.cn/search
 | **melost** | 单关键词 2172 条结果，是所有源里出货最猛的 | JSON API，1 小时 |
 | **quark4k** | 38 条夸克，Flarum 标准 API 好解析 | JSON API，1 小时 |
 | ~~yunso~~（2026-08-27 移除） | 19 条但全无关（wd 参数失效，返回固定推荐列表） | 返回 HTML 片段 |
-| **u3c3** | 62 条磁力，补充磁力覆盖 | HTML 解析，2 小时 |
+| ~~u3c3~~（2026-08-27 移除） | 62 条纯磁力（产品要求不出现磁力链接） | HTML 解析 |
 
 *(c) 清理 5 个死源文件*：`zhizhen`、`hdr4k`、`muou`、`huban`、`shandian`
 
@@ -204,7 +204,7 @@ pansou 写了 `docs/pansou-plugin-developer-SKILL.md`（111 行）+ AI 客户端
 | 2 | 新增 melost + quark4k（都是 JSON API，最快） | 0.5 天 | 插件 4→6，出货量数量级提升 |
 | 3 | 抽 `panLink.ts` 统一网盘识别 | 0.5 天 | 消除 8 处重复 |
 | 4 | 三维打分排序 | 0.5 天 | 搜索质量明显改善 |
-| 5 | 新增 yunso + u3c3（需写 HTML 解析） | 1 天 | 插件 6→8（yunso 已于 2026-08-27 移除） |
+| 5 | 新增 yunso + u3c3（需写 HTML 解析） | 1 天 | 插件 6→8（yunso/u3c3 已于 2026-08-27 移除） |
 | 6 | 基类多端点容灾 + 4 秒快速响应 | 1-2 天 | 抗源站失效 |
 | 7 | 插件开发 Skill | 1 天 | 后续加插件成本大降 |
 | 8 | 链接有效性检测 API（先做夸克+阿里+百度，覆盖 80%） | 3-5 天 | 差异化功能 |

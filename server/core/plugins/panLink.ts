@@ -71,7 +71,7 @@ export function extractLinksFromText(text: string): Link[] {
 
 /**
  * 把 HTML 片段转成纯文本（去标签 + 还原常见 HTML 实体）。
- * 供各 HTML 解析类插件（quark4k / u3c3 等）复用，避免每个插件各写一份。
+ * 供各 HTML 解析类插件（quark4k 等）复用，避免每个插件各写一份。
  */
 export function cleanHTML(html?: string): string {
   let s = html || "";
