@@ -19,7 +19,8 @@ WX_AUTH_ENFORCE = "0"
 
 # 前端微信认证开关（2026-08-26，Nuxt 运行时覆盖通道，默认软引导）：
 # - 1 → 主站强制：前端未认证搜索弹常驻弹窗（需与后端 WX_AUTH_ENFORCE=1 配套）
-# - 0/不设 → fork 默认软引导：首次弹一次可关引导，之后不打扰；搜索不阻塞
+# - 0/不设 → fork 默认软引导：每个新会话弹一次可关引导（sessionStorage 记一次，
+#   会话内不再弹），搜索不阻塞
 # 部署时覆盖主站：
 #   Docker：服务器 /opt/.../index/.env 增加 NUXT_PUBLIC_WX_AUTH_ENFORCE=1
 #   Worker：wrangler secret put NUXT_PUBLIC_WX_AUTH_ENFORCE 1
