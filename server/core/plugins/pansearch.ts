@@ -103,9 +103,19 @@ function extractLink(content: string): { url: string; password: string } {
   if (mPwd) password = mPwd[1];
   return { url, password };
 }
-function extractTitle(content: string, keyword: string): string {
-  const m = /名称：([^<\n]+)/.exec(content);
-  if (m) return cleanHTML(m[1]);
+export function extractTitle(content: string, keyword: string): string {
+  // 2026-08-26 修复：上游把命中关键词包在
+  // <span class='highlight-keyword'> 里，若直接对原始 HTML 用
+  // /名称：([^<\n]+)/ 提取，`[^<]` 一遇到 < 就截断——
+  // "名称：[<span>阿甘正传</span>][1994]" 会提取出孤立的 "["
+  // （用户截图：搜索「阿甘正传」百度网盘结果 note 只剩 "["
+  // 或 "《"）。先剥掉 HTML 标签再提取。
+  const cleaned = cleanHTML(content);
+  const m = /名称[：:]([^\n]+)/.exec(cleaned);
+  if (m) {
+    const t = m[1].trim();
+    if (t) return t;
+  }
   return keyword;
 }
 function cleanHTML(html: string): string {
