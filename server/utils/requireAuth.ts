@@ -4,7 +4,7 @@ import { isUnlocked } from "./auth";
 import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
 import { getClientIp } from "../middleware/rateLimiter";
-import { isWxAuthEnforced, verifyWxAuthOnceCached } from "./wxAuthCheck";
+import { verifyWxAuthOnceCached } from "./wxAuthCheck";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 
 export function requireSearchAuth(event: H3Event): void {
@@ -56,20 +56,23 @@ export function requireHumanOrCredential(event: H3Event): void {
 }
 
 /**
- * 微信关注公众号登录态校验（2026-08-22，开关控制）
+ * 微信关注公众号登录态校验（2026-08-22，2026-08-26 起写死强制）
  *
  * 思路：前端已强制"关注公众号 + 验证码"才能搜索，但脚本直调 API 可绕过
  * 前端弹窗。本层在服务端实时校验 wxauth cookie（wxauth-token/wxauth-openid），
  * 未认证请求直接 401，从根上挡住刷词脚本。
  *
- * 规则（2026-08-22 用户拍板）：
- * - 仅当 WX_AUTH_ENFORCE=1 时启用（默认关闭，不影响现状）
+ * 规则（2026-08-26 用户拍板：写死强制，不设开关）：
+ * - **恒强制**：生产环境所有搜索请求必经此校验，不依赖任何环境变量
+ *   （此前 WX_AUTH_ENFORCE 开关已删除，不再存在"默认关闭"路径）
+ * - 本地开发（import.meta.dev）放行，便于调试
  * - 已带 Bearer / x-panhub-client-secret 凭证（小程序/API）→ 放行
  * - **实时校验、不缓存**：取消关注 = 退出登录，下次搜索立即 401
- * - wx-auth 服务故障 → 降级放行（不误伤真人），打 warn 日志
+ * - wx-auth 服务故障 → 拒绝（fail-closed，宁可误伤，不裸奔）
  */
 export async function requireWxAuth(event: H3Event): Promise<void> {
-  if (!isWxAuthEnforced()) return;
+  // 2026-08-26：本地开发不强制（npm run dev 不受影响）；生产恒强制、无开关
+  if (import.meta.dev) return;
   // 已授权客户端（小程序/API）凭证放行
   const auth = getRequestHeader(event, "authorization");
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");

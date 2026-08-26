@@ -12,25 +12,21 @@ import { loggers } from "../core/utils/logger";
  * 本模块在服务端校验这两个 cookie 是否有效（实时调 wx-auth 服务的
  * /api/auth/check），用于拦截"未关注公众号"的脚本/爬虫直调搜索接口。
  *
- * 关键设计（2026-08-22 用户拍板）：
- * 1. 开关控制：仅当 WX_AUTH_ENFORCE=1 时启用（默认关闭，不影响现状）
- * 2. **实时校验、不缓存**：取消关注 = 退出登录，下次搜索立即 401，
+ * 关键设计（2026-08-26 用户拍板：写死强制，移除开关）：
+ * 1. **写死强制**：不再有 WX_AUTH_ENFORCE 开关，生产环境所有搜索请求
+ *    必须带有效 wxauth 凭证（本地 dev 由 requireWxAuth 统一放行）
+ * 2. **实时校验、不缓存**：取消关注 = 退出登录，取消搜索立即 401，
  *    绝不把已失效的登录态当有效（用户明确要求）
- * 3. 请求内去重：同一个请求（event）内只校验一次（前端一次搜索会并发
- *    多个 /api/search 子请求，靠 event.context 标记避免重复打远程；
+ * 3. 请求内去重：同一次请求（搜索）内只查一次（前端一次搜索会并发
+ *    多个 /api/search 子请求，靠 event.context 标记避免同打远程；
  *    这是请求内复用，不是跨请求缓存）
- * 4. 服务降级：wx-auth 服务不可达/超时 → 放行（宁可多放，不误伤真人），
- *    但打 warn 日志便于观察
+ * 4. **服务故障 fail-closed**：wx-auth 服务不可达/超时/非 2xx → 拒绝，
+ *    打 warn 日志便于观察（宁可误伤，不裸奔——用户拍板）
  * 5. 无 cookie / 校验失败 → 返回 false（拒绝）
  */
 
 const WX_AUTH_API_BASE = process.env.WX_AUTH_API_BASE || "https://wx-auth.shenzjd.com";
 const WX_AUTH_CHECK_TIMEOUT_MS = 5000;
-
-/** 开关：仅当显式设置 WX_AUTH_ENFORCE=1 时启用登录态拦截 */
-export function isWxAuthEnforced(): boolean {
-  return process.env.WX_AUTH_ENFORCE === "1";
-}
 
 /** 从请求中提取 wxauth 凭证（token 优先，openid 兜底） */
 export function getWxAuthCredential(event: H3Event): { token?: string; openid?: string } {
@@ -41,7 +37,7 @@ export function getWxAuthCredential(event: H3Event): { token?: string; openid?: 
   return {};
 }
 
-/** 调 wx-auth /api/auth/check，返回是否已认证。远程故障时降级放行（返回 true）并打日志。 */
+/** 调 wx-auth /api/auth/check，返回是否已认证。远程故障时 fail-closed（返回 false）并打日志。 */
 export async function verifyWxAuthCredential(event: H3Event): Promise<boolean> {
   const cred = getWxAuthCredential(event);
   const query = cred.token ? `token=${encodeURIComponent(cred.token)}` : cred.openid ? `openid=${encodeURIComponent(cred.openid)}` : "";
@@ -59,8 +55,9 @@ export async function verifyWxAuthCredential(event: H3Event): Promise<boolean> {
     });
     clearTimeout(timer);
     if (!res.ok) {
-      loggers.api.warn?.("wx-auth check 非 2xx，降级放行", { status: res.status });
-      return true;
+      // 2026-08-26：非 2xx 由"降级放行"改为 fail-closed 拒绝（用户拍板：宁可误伤，不裸奔）
+      loggers.api.warn?.("wx-auth check 非 2xx，fail-closed 拒绝", { status: res.status });
+      return false;
     }
     const data = (await res.json()) as {
       authenticated?: boolean;
@@ -76,11 +73,11 @@ export async function verifyWxAuthCredential(event: H3Event): Promise<boolean> {
     }
     return false;
   } catch (err) {
-    // 网络错误/超时 → 降级放行，不误伤真人（但打日志便于观察）
-    loggers.api.warn?.("wx-auth check 请求失败，降级放行", {
+    // 网络错误/超时 → 2026-08-26 起 fail-closed 拒绝（宁可误伤，不裸奔），打日志便于观察
+    loggers.api.warn?.("wx-auth check 请求失败，fail-closed 拒绝", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return true;
+    return false;
   }
 }
 
