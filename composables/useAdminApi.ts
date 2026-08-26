@@ -139,11 +139,6 @@ export function useAdminApi() {
     return request("/api/admin/channels");
   }
 
-  /** 频道配置全量（含 priority 频道） */
-  async function loadChannels(): Promise<ChannelAdminData> {
-    return request("/api/admin/channels");
-  }
-
   /** 频道配置全量保存（CRUD 提交：priority/default 互斥已由服务端处理） */
   async function saveChannels(payload: {
     priorityChannels: string[];

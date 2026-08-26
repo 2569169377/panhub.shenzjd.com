@@ -114,8 +114,8 @@ const searched = ref(false);
 const lastKeyword = ref("");
 const busyKey = ref("");
 
-/** 通知父层黑名单数据已变化（用于联动刷新） */
-const emit = defineEmits<{ (e: "changed"): void }>();
+/** 通知父层黑名单数据已变化（拉黑后联动刷新黑名单面板） */
+const emit = defineEmits<{ (e: "blocked"): void }>();
 const modeLabel = computed(() => (mode.value === "openid" ? "openid" : "搜索词"));
 
 function formatTime(ms?: number): string {
