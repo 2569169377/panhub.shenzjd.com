@@ -28,7 +28,8 @@ docker run -d -p 4000:4000 -v /root/panhub/data:/app/data \
 | Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fwu529778790%2Fpanhub.shenzjd.com) |
 
 > Cloudflare Workers 构建命令使用 `npm run build:cf`（Nitro Cloudflare 预设）。
-> 可选环境变量：`TURSO_URL` / `TURSO_AUTH_TOKEN`（热搜存储）；未配置不影响搜索等核心功能。
+> 部署只需 `cp .env.example .env` 后配置 `TURSO_URL` / `TURSO_AUTH_TOKEN` / `CHANNEL_KEY`；
+> 频道配置由主站固定下发（服务端写死），无需任何 `CHANNELS_*` 配置。
 
 - 本地开发：`npm install && npm run dev`；测试：`npm test`
 
