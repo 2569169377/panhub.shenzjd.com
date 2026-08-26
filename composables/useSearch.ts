@@ -67,6 +67,8 @@ export interface SearchState {
   deepLoading: boolean;
   paused: boolean;
   error: string;
+  /** IP 被黑名单拦截（403 ip blocked）：页面显示"搜索受限"提示，区别于普通错误 */
+  restricted: boolean;
   searched: boolean;
   elapsedMs: number;
   total: number;
@@ -79,6 +81,7 @@ export function useSearch() {
     deepLoading: false,
     paused: false,
     error: "",
+    restricted: false,
     searched: false,
     elapsedMs: 0,
     total: 0,
@@ -96,6 +99,9 @@ export function useSearch() {
   };
   const setError = (v: string) => {
     state.value.error = v;
+  };
+  const setRestricted = (v: boolean) => {
+    state.value.restricted = v;
   };
   const setSearched = (v: boolean) => {
     state.value.searched = v;
@@ -288,6 +294,8 @@ export function useSearch() {
           error?.cause?.cause?.name === "AbortError";
         if (isAbort) return {};
         if (error?.statusCode === 401) onAuthRequired?.();
+        // IP 被黑名单拦截：置受限状态（不抛普通错误，避免和"没结果"混淆）
+        if (error?.statusCode === 403) setRestricted(true);
         devWarn(`${label} search failed:`, error);
         return {};
       } finally {
@@ -468,6 +476,14 @@ export function useSearch() {
         onAuthRequired?.();
         return { usedFallback: false };
       }
+      // IP 被黑名单拦截（403 ip blocked）：告知用户受限，不再回退分批模式
+      // （分批也会全部 403，只会白打 N 个请求；且分批模式对 403 是静默吞掉，
+      //  用户会看到"空结果"却不知道为什么 → 2026-08-26 修复误导）
+      if (resp.status === 403) {
+        setRestricted(true);
+        setError("");
+        return { usedFallback: false };
+      }
       if (!resp.ok) {
         devWarn(`[useSearch] SSE HTTP ${resp.status}，回退分批模式`);
         return { usedFallback: true };
@@ -614,6 +630,7 @@ export function useSearch() {
     // 重置状态
     setLoading(true);
     setError("");
+    setRestricted(false);
     setSearched(true);
     setElapsedMs(0);
     setTotal(0);
@@ -673,6 +690,7 @@ export function useSearch() {
     setDeepLoading(false);
     setPaused(false);
     setError("");
+    setRestricted(false);
     setSearched(false);
     setElapsedMs(0);
     setTotal(0);
@@ -694,6 +712,7 @@ export function useSearch() {
   const deepLoading = computed(() => state.value.deepLoading);
   const paused = computed(() => state.value.paused);
   const error = computed(() => state.value.error);
+  const restricted = computed(() => state.value.restricted);
   const searched = computed(() => state.value.searched);
   const elapsedMs = computed(() => state.value.elapsedMs);
   const total = computed(() => state.value.total);
@@ -706,6 +725,7 @@ export function useSearch() {
     deepLoading,
     paused,
     error,
+    restricted,
     searched,
     elapsedMs,
     total,
