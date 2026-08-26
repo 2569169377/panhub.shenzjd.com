@@ -7,14 +7,6 @@
         <span class="admin-brand-badge">P</span>
         <span class="admin-brand-name">PanHub</span>
       </NuxtLink>
-
-      <div class="admin-top-actions">
-        <span v-if="authStatus === 'ok'" class="admin-user-chip" title="微信关注公众号登录">
-          <span class="admin-user-dot"></span>
-          管理员
-        </span>
-        <NuxtLink to="/" class="admin-home-link">← 回首页</NuxtLink>
-      </div>
     </header>
 
     <!-- 遮罩（移动端抽屉打开时） -->
@@ -58,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { ADMIN_NAV_KEY, ADMIN_AUTH_KEY } from "~/utils/adminKeys";
+import { ADMIN_NAV_KEY } from "~/utils/adminKeys";
 
 /**
  * 管理后台规范化布局（2026-08-25 v2 重构）
@@ -67,7 +59,6 @@ import { ADMIN_NAV_KEY, ADMIN_AUTH_KEY } from "~/utils/adminKeys";
  * 与页面的协作（provide/inject 共享响应式 ref，键见 ~/utils/adminKeys）：
  * - activeKey：当前激活菜单（布局渲染高亮/面包屑，页面据此渲染面板）
  * - setActive：切换菜单
- * - authStatus：管理员状态（页面探测后写入，布局顶栏显示"管理员"徽标）
  */
 interface AdminMenuItem {
   key: string;
@@ -97,7 +88,6 @@ const MENU_GROUPS: AdminMenuGroup[] = [
 const activeKey = ref<string>("channels");
 const menuOpen = ref(false);
 const isMobile = ref(false);
-const authStatus = ref<"checking" | "ok" | "no-login" | "no-admin">("checking");
 
 /** 当前激活菜单项（面包屑） */
 const currentLabel = computed(
@@ -120,9 +110,8 @@ onMounted(() => {
 });
 onBeforeUnmount(() => window.removeEventListener("resize", onResize));
 
-// 提供给页面：切换菜单 + 上报鉴权状态
+// 提供给页面：切换菜单
 provide(ADMIN_NAV_KEY, { activeKey, setActive });
-provide(ADMIN_AUTH_KEY, authStatus);
 </script>
 
 <style scoped>
@@ -179,35 +168,6 @@ provide(ADMIN_AUTH_KEY, authStatus);
   font-weight: 800;
   letter-spacing: 0.3px;
 }
-.admin-top-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.admin-user-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--bg-active, rgba(15, 118, 110, 0.08));
-  color: var(--primary, #0f766e);
-  font-size: 13px;
-  font-weight: 500;
-}
-.admin-user-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--success, #10b981);
-}
-.admin-home-link {
-  color: var(--text-secondary, #4b5563);
-  font-size: 13px;
-  text-decoration: none;
-}
-.admin-home-link:hover { color: var(--primary, #0f766e); }
 
 /* 遮罩（移动端抽屉） */
 .admin-mask {

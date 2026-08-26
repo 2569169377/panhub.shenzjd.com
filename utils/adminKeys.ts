@@ -7,7 +7,3 @@ export const ADMIN_NAV_KEY = Symbol("admin-nav") as InjectionKey<{
   activeKey: Ref<string>;
   setActive: (k: string) => void;
 }>;
-
-export const ADMIN_AUTH_KEY = Symbol("admin-auth") as InjectionKey<
-  Ref<"checking" | "ok" | "no-login" | "no-admin">
->;

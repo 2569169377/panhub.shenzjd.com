@@ -8,7 +8,7 @@
  * 401 → 未登录提示；403 → 非管理员提示；ok 才渲染面板。
  */
 import { useAdminApi } from "~/composables/useAdminApi";
-import { ADMIN_NAV_KEY, ADMIN_AUTH_KEY } from "~/utils/adminKeys";
+import { ADMIN_NAV_KEY } from "~/utils/adminKeys";
 import SearchRecordPanel from "~/components/admin/SearchRecordPanel.vue";
 import BlacklistPanel from "~/components/admin/BlacklistPanel.vue";
 import ChannelPanel from "~/components/admin/ChannelPanel.vue";
@@ -28,9 +28,6 @@ const { authStatus, probeAuth } = useAdminApi();
 const nav = inject<{ activeKey: Ref<string>; setActive: (k: string) => void }>(ADMIN_NAV_KEY);
 const activeKey = computed(() => nav?.activeKey.value ?? "search-log");
 
-/** 布局注入的鉴权状态引用（布局顶栏据此显示"管理员"徽标） */
-const authRef = inject<Ref<"checking" | "ok" | "no-login" | "no-admin">>(ADMIN_AUTH_KEY);
-
 /** 面板联动：搜索记录里拉黑后，通知黑名单面板刷新（若已挂载） */
 const blPanel = ref<InstanceType<typeof BlacklistPanel>>();
 function onBlocked() {
@@ -38,17 +35,8 @@ function onBlocked() {
 }
 
 onMounted(async () => {
-  await probeAuth(); // 探测结果经 watch(authStatus) 同步给布局
+  await probeAuth(); // 无 token 时兜底 silentCheck，补齐 wxauth cookie
 });
-
-// 探测结果同步给布局（探测内部已写 authStatus，这里兜底再同步一次）
-watch(
-  authStatus,
-  (s) => {
-    if (authRef) authRef.value = s;
-  },
-  { immediate: true },
-);
 </script>
 
 <template>
