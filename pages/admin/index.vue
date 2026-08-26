@@ -27,7 +27,7 @@ const { authStatus, probeAuth } = useAdminApi();
 
 /** 布局注入的当前激活菜单（响应式） */
 const nav = inject<{ activeKey: Ref<string>; setActive: (k: string) => void }>(ADMIN_NAV_KEY);
-const activeKey = computed(() => nav?.activeKey.value ?? "search-log");
+const activeKey = computed(() => nav?.activeKey.value ?? "overview");
 
 /** 面板联动：搜索记录里拉黑后，通知黑名单面板刷新（若已挂载） */
 const blPanel = ref<InstanceType<typeof BlacklistPanel>>();
