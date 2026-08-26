@@ -38,6 +38,8 @@ export interface ChannelAdminData {
   version: number;
   priorityChannels: string[];
   defaultChannels: string[];
+  /** 频道备注名映射（ID → 显示名/备注），可空 */
+  channelNames: Record<string, string>;
   priorityCount: number;
   defaultCount: number;
 }
@@ -146,6 +148,7 @@ export function useAdminApi() {
   async function saveChannels(payload: {
     priorityChannels: string[];
     defaultChannels: string[];
+    channelNames?: Record<string, string>;
   }): Promise<{ version: number; priorityCount: number; defaultCount: number }> {
     return request("/api/admin/channels", {
       method: "PUT",
