@@ -2,7 +2,8 @@
  * 微信公众号认证 composable（2026-08-26 起：写死强制，无开关、无软引导）
  *
  * 决策（用户拍板）：
- * - 所有部署（主站 + fork 站）一律强制"关注公众号 + 验证码"后才能搜索。
+ * - 所有部署（主站 + fork 站，含本地 dev/localhost）一律强制"关注公众号 + 验证码"后才能搜索。
+ *   2026-08-26 起移除 import.meta.dev 放行：dev 行为 == 生产，可把 localhost 当 fork 站验证认证链路。
  *   不再有 NUXT_PUBLIC_WX_AUTH_ENFORCE 开关，也不再区分"主站强制/fork 软引导"。
  * - 已验证用户：SDK 在【当前域名】写 cookie（wxauth-token 1 年有效），
  *   下次搜索 silentCheck 命中即静默放行，不弹窗。
@@ -75,8 +76,6 @@ export function useWxAuth() {
    *   验证成功后自动放行（无需再点一次搜索）
    */
   async function checkSearchAuth(): Promise<boolean> {
-    // 本地开发（npm run dev）不强制关注公众号，直接放行
-    if (import.meta.dev) return true;
     if (typeof window === "undefined") return false;
 
     // 等待静默验证收敛（最长等一次请求的完成），避免对已关注用户误弹窗
@@ -117,8 +116,6 @@ export function useWxAuth() {
    *   SDK 会写入新 token，后续搜索恢复正常。
    */
   async function forceVerify(): Promise<boolean> {
-    // 本地开发（npm run dev）不强制关注公众号，直接放行
-    if (import.meta.dev) return true;
     if (typeof window === "undefined") return false;
     isVerified.value = false; // 强制重新认证
     void WxAuth.showAuthModal();

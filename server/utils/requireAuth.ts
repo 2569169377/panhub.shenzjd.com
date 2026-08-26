@@ -63,16 +63,15 @@ export function requireHumanOrCredential(event: H3Event): void {
  * 未认证请求直接 401，从根上挡住刷词脚本。
  *
  * 规则（2026-08-26 用户拍板：写死强制，不设开关）：
- * - **恒强制**：生产环境所有搜索请求必经此校验，不依赖任何环境变量
- *   （此前 WX_AUTH_ENFORCE 开关已删除，不再存在"默认关闭"路径）
- * - 本地开发（import.meta.dev）放行，便于调试
+ * - **恒强制**：所有环境（生产 + 本地 dev）搜索请求必经此校验，不依赖任何环境变量
+ *   （此前 WX_AUTH_ENFORCE 开关已删除，不再存在"默认关闭"路径；
+ *    2026-08-26 起同步移除 import.meta.dev 放行：dev 行为 == 生产，
+ *    localhost 可当 fork 站验证"无 cookie → 401 → 前端弹验证码"链路）
  * - 已带 Bearer / x-panhub-client-secret 凭证（小程序/API）→ 放行
  * - **实时校验、不缓存**：取消关注 = 退出登录，下次搜索立即 401
  * - wx-auth 服务故障 → 拒绝（fail-closed，宁可误伤，不裸奔）
  */
 export async function requireWxAuth(event: H3Event): Promise<void> {
-  // 2026-08-26：本地开发不强制（npm run dev 不受影响）；生产恒强制、无开关
-  if (import.meta.dev) return;
   // 已授权客户端（小程序/API）凭证放行
   const auth = getRequestHeader(event, "authorization");
   const clientSecret = getRequestHeader(event, "x-panhub-client-secret");
