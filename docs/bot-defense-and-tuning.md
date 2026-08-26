@@ -91,21 +91,24 @@ DELETE FROM rejected_ips WHERE ip = '1.2.3.4';
 
 `BotDefenseService.startMaintenance()` 每 5min 调一次 `pruneExpired`，自动清理 `expires_at <= now` 的条目。
 
-## 启用 WX_AUTH_ENFORCE（强制公众号登录）
+## 公众号登录强制认证（写死强制，无开关）
 
 第三个加固方案：所有 `POST /api/search` / `GET /api/search` 都必须带 `wxauth-token` cookie，未带 → 401 "wx auth required"。
 
-代码层是现成的（`server/utils/wxAuthCheck.ts:31`），但**默认关闭**（WX_AUTH_ENFORCE != "1" 不生效），需要手动开启环境变量。
+代码位置：`server/utils/wxAuthCheck.ts`（校验实现）+ `server/utils/requireAuth.ts`（`requireWxAuth` 入口拦截）。
+
+**2026-08-26 起写死强制**：不再有 `WX_AUTH_ENFORCE` 环境变量，所有部署（主站 + fork 站）生产环境恒强制；本地 `npm run dev`（import.meta.dev）自动放行。前端 `useWxAuth.ts` 同步恒 `required`（弹窗不可关闭）——前端拦截 + 后端 401 双保险，无需任何部署配置。
 
 ### 副作用预警
 
-- 未关注公众号的真人用户直接 401，体验影响大
-- API Key 持有者（小程序 / 已授权 client）不受影响（requireAuth 有 Bearer/client-secret 放行）
-- 测试环境先开，确认无误再上生产
+- 未关注公众号的真人用户直接 401，体验影响大（这是产品设计，不是 bug）
+- fork 站在自己域名完成一次关注+验证码后，cookie 写在自己域名（1 年有效），后续搜索静默放行、不再弹
+- API Key 持有者（小程序 / 已授权 client）不受影响（`requireAuth` 有 Bearer/client-secret 放行）
+- **wx-auth 服务故障 → fail-closed（拒绝）**：宁可误伤，不裸奔（2026-08-26 用户拍板，之前是降级放行）
 
 ### ⚠️ 上线前必做：本地验证手册
 
-上次打开 `WX_AUTH_ENFORCE=1` 时出过问题（用户描述），这次必须**先本地端到端验证**再上：
+本地 dev（import.meta.dev）自动放行强制校验，要完整验证鉴权链路需让 dev server 走校验分支——用本地 mock wx-auth 服务配合：
 
 #### 步骤 1：启动本地 mock wx-auth 服务
 
@@ -124,10 +127,10 @@ node scripts/mock-wx-auth.mjs &
 }
 ```
 
-#### 步骤 2：启动 dev server（开启开关 + 指向 mock）
+#### 步骤 2：启动 dev server（指向 mock）
 
 ```bash
-WX_AUTH_ENFORCE=1 WX_AUTH_API_BASE=http://localhost:8899 npm run dev
+WX_AUTH_API_BASE=http://localhost:8899 npm run dev
 ```
 
 #### 步骤 3：本地 curl 验证四种场景
@@ -149,34 +152,23 @@ curl -i -H 'Authorization: Bearer dev-bearer' \
   'http://localhost:4000/api/search?kw=凡人修仙传'
 ```
 
-**预期**：A=D=200 且有搜索结果，B=C=401。如果 A 失败 → 立刻关停本地 mock + 回到 WX_AUTH_ENFORCE=0 状态，调查通过路径。
+**预期**：A=D=200 且有搜索结果，B=C=401。如果 A 失败 → 调 mock 白名单 + 确认 `WX_AUTH_API_BASE` 指向 mock，调查通过路径。
 
 #### 步骤 4：试产前再用真实 cookie 测一次
 
 复制浏览器真实登录态的 `wxauth-token`，修改 `scripts/.wx-auth-mock.json` 加上这个 token，重启 mock 服务，然后 curl 复测。验证走真实 `https://wx-auth.shenzjd.com` 时也没问题（默认 `WX_AUTH_API_BASE` 不设也能跑）。
 
-### Worker 启用
+### 部署
 
-确认 A/D 路径都好之后：
+写死强制后无需任何额外配置：
 
-```bash
-wrangler secret put WX_AUTH_ENFORCE
-# 输入值: 1
-```
-
-### Docker 启用
-
-服务器 .env 加：
-
-```bash
-WX_AUTH_ENFORCE=1
-```
-
-重启容器生效（docker compose restart panhub）。
+- **Worker**：旧 `wrangler secret put WX_AUTH_ENFORCE=1` 已无作用，可直接忽略/删除（代码不再读该变量）
+- **Docker**：服务器 .env 里的 `WX_AUTH_ENFORCE=1` 同样无作用，无感
+- 新代码部署后即全部强制生效
 
 ### 性能开销
 
-每次搜索多 1 次 `https://wx-auth.shenzjd.com/api/auth/check` 调用（5s timeout），fail-open 不误伤真人。生产压力评估后再开启。
+每次搜索多 1 次 `https://wx-auth.shenzjd.com/api/auth/check` 调用（5s timeout），但同一 token 10min 内第二次起走内存缓存（`verifyWxAuthOnceCached`），不再打远程；wx-auth 服务故障 → fail-closed 拒绝（2026-08-26 用户拍板）。
 
 ## 测试
 

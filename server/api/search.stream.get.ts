@@ -75,7 +75,7 @@ export default defineEventHandler(async (event: H3Event) => {
   await recordSearchTerm(
     kw,
     ip,
-    // 2026-08-25：WX_AUTH_ENFORCE=1 时 requireWxAuth 已把 openid 存进
+    // 2026-08-25：requireWxAuth 已把 openid 存进
     // event.context（见 wxAuthCheck.ts），搜索日志用它关联"谁搜了什么"
     ((event.context as Record<string, any>)?.__wxAuthOpenid as string) || ""
   );

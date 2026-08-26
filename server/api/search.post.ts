@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
   }
   // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
   requireHumanOrCredential(event);
-  // 微信关注公众号登录态校验（WX_AUTH_ENFORCE=1 时启用，实时校验不缓存）
+  // 微信关注公众号登录态校验（恒强制，本地 dev 放行）
   await requireWxAuth(event);
   const config = useRuntimeConfig();
   // 确保频道配置已加载（Turso 加密配置 → 解密缓存），幂等、带 TTL
@@ -68,7 +68,7 @@ export default defineEventHandler(async (event) => {
 
   // 记录搜索词（2026-08-22：只要搜索就记录，便于排查）。
   // 防刷由入口 requireHumanOrCredential 承担（bot UA 403），本层不再过滤。
-  // 2026-08-25：附带 openid（WX_AUTH_ENFORCE=1 时由 requireWxAuth 解出存
+  // 2026-08-25：附带 openid（由 requireWxAuth 解出存
   // event.context），供 search_log 明细关联"谁搜了什么"
   await recordSearchTerm(
     kw,

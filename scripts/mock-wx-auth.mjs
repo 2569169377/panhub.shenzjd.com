@@ -1,10 +1,10 @@
-// 本地 mock wx-auth 服务（仅用于本地验证 WX_AUTH_ENFORCE=1 的搜索鉴权流程）
+// 本地 mock wx-auth 服务（仅用于本地验证搜索鉴权流程）
 //
 // 用法：
 //   node scripts/mock-wx-auth.mjs &
 //
 // 然后启动 dev：
-//   WX_AUTH_ENFORCE=1 WX_AUTH_API_BASE=http://localhost:8899 npm run dev
+//   WX_AUTH_API_BASE=http://localhost:8899 npm run dev
 //
 // 本服务会根据 mock-tokens.json 里的配置回复 authenticated：
 //   - 白名单内的 token / openid → authenticated: true（放行）

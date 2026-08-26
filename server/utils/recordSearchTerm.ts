@@ -76,7 +76,7 @@ function isDuplicateWithinWindow(term: string, now: number): boolean {
  * （search_log 表：openid/ip/term/created_at，**长期保留**；热词/日历
  * 按天 GROUP BY 本表明细即得"每天每词次数"），用于排查"哪个 openid
  * 搜了什么"；与 search_terms 匿名聚合解耦。
- * openid 从 wxauth 凭证解出（WX_AUTH_ENFORCE=1 时由 check 响应带回，
+ * openid 从 wxauth 凭证解出（恒强制，由 check 响应带回，
  * 见 wxAuthCheck.ts），未登录请求传空串只记 ip+term。
  */
 export async function recordSearchTerm(
