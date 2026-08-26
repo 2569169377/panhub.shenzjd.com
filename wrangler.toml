@@ -10,22 +10,9 @@ binding = "ASSETS"
 # 环境变量（与线上 Docker 保持一致）
 [vars]
 LOG_LEVEL = "info"
-# 微信关注公众号登录态校验开关（2026-08-22）：1=服务端实时校验 wxauth cookie，
-# 未关注/取消关注的搜索请求 401。管理后端，不管前端弹窗。
-# 2026-08-25：线上已通过 wrangler secret put WX_AUTH_ENFORCE=1 覆盖此值（生效中）。
-# 此处保留 0 作为仓库默认（Docker .env 里为 1）。以 secret/服务器实际配置为准。
-# ⚠️ 前端弹窗强制与否由独立的 NUXT_PUBLIC_WX_AUTH_ENFORCE 控制（见 runtimeConfig 注释）。
-WX_AUTH_ENFORCE = "0"
-
-# 前端微信认证开关（2026-08-26，Nuxt 运行时覆盖通道，默认软引导）：
-# - 1 → 主站强制：前端未认证搜索弹常驻弹窗（需与后端 WX_AUTH_ENFORCE=1 配套）
-# - 0/不设 → fork 默认软引导：每个新会话弹一次可关引导（sessionStorage 记一次，
-#   会话内不再弹），搜索不阻塞
-# 部署时覆盖主站：
-#   Docker：服务器 /opt/.../index/.env 增加 NUXT_PUBLIC_WX_AUTH_ENFORCE=1
-#   Worker：wrangler secret put NUXT_PUBLIC_WX_AUTH_ENFORCE 1
-# fork 站无需任何配置（默认软引导、后端不拦），用户不再被验证码打扰。
-NUXT_PUBLIC_WX_AUTH_ENFORCE = "0"
+# 2026-08-26：微信关注公众号认证已写死强制（无开关）——WX_AUTH_ENFORCE /
+# NUXT_PUBLIC_WX_AUTH_ENFORCE 已删除，前端 useWxAuth 恒 required、
+# 后端 requireWxAuth 恒拦截（本地 dev 自动放行）。部署无需再配任何认证开关。
 # IP 黑名单拦截开关（2026-08-24）：1=拉黑生效（同一 IP 50 次/5min 触发分级封禁
 # 24h→7d→30d）；0=只记录不拦截。2026-08-25 用户确认 Docker 已配，Worker 同步开启。
 BOT_DEFENSE_ENFORCE = "1"
