@@ -1,22 +1,55 @@
 /* ============================================================
- * 管理后台共享样式（2026-08-25 规范化重构引入）
+ * 管理后台共享样式（2026-08-25 规范化重构引入；2026-08-26 设计稿落地）
  * 供 AdminLayout / 各 admin 面板组件复用：
  * 统一设计令牌 + 卡片 / 表格 / 按钮 / 徽章 / 表单 / 状态组件。
  * 注意：这里定义的组件样式类名以 admin- 前缀，避免与客户页冲突。
+ *
+ * 2026-08-26 蓝调重构（对齐 Ardot 设计稿）：
+ * - 设计稿为蓝色系（主蓝 #2563EB / 深蓝 #2151C7），现有全局变量是暖色米色系。
+ * - 为不污染客户首页，这里在 .admin-page/.admin-view 作用域内**局部覆盖**
+ *   全局 CSS 变量，把所有面板切到蓝调；客户页不受影响。
  * ============================================================ */
 :where(.admin-page, .admin-view) {
   --admin-radius: 12px;
   --admin-radius-sm: 8px;
+
+  /* ---- 2026-08-26 蓝调覆盖（仅 admin 作用域） ---- */
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-glow: rgba(37, 99, 235, 0.2);
+  --primary-soft: #eff4ff; /* 激活菜单浅蓝 */
+  --primary-soft-border: #bfdbfe; /* 浅蓝边框 */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f4f6f9; /* 画布底 */
+  --bg-hover: rgba(37, 99, 235, 0.06);
+  --bg-active: rgba(37, 99, 235, 0.1);
+  --border-light: #e8ecf0; /* 边框 */
+  --border-medium: #d4dbe5;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --error: #dc2626;
+  --danger-strong: #dc2626;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --shadow-sm: 0 1px 2px 0 rgba(16, 24, 40, 0.05);
 }
 
 /* ---------- 卡片 ---------- */
 .admin-card {
   background: var(--bg-primary, #fffdf8);
-  border: 1px solid var(--border-light, #e5dfd0);
+  border: 1px solid var(--border-light, #e8ecf0);
   border-radius: var(--radius-lg, 16px);
-  box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
+  box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(16, 24, 40, 0.05));
   padding: 20px;
 }
+
+/* 2026-08-26 设计稿：渐变品牌 Logo（蓝 #2563EB → #2151C7） */
+.admin-brand-badge {
+  background: linear-gradient(135deg, #2563eb, #2151c7);
+  color: #fff;
+}
+.admin-brand-badge g,
+.admin-brand-badge path { fill: #fff; }
 .admin-card-head {
   display: flex;
   align-items: flex-start;
