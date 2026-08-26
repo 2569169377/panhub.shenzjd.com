@@ -1,20 +1,16 @@
 <template>
   <div class="admin-shell">
-    <!-- 顶栏：品牌 + 用户区 -->
-    <header class="admin-topbar">
-      <button type="button" class="admin-burger" aria-label="打开菜单" @click="menuOpen = true">☰</button>
-      <NuxtLink to="/" class="admin-brand" title="返回首页">
-        <span class="admin-brand-badge">P</span>
-        <span class="admin-brand-name">PanHub</span>
-      </NuxtLink>
-    </header>
-
     <!-- 遮罩（移动端抽屉打开时） -->
     <div v-if="menuOpen" class="admin-mask" @click="menuOpen = false" />
 
     <div class="admin-body">
-      <!-- 侧栏（桌面常驻 / 移动端抽屉） -->
+      <!-- 侧栏（桌面常驻 / 移动端抽屉）：固定在左侧，不随内容滚动 -->
       <aside :class="['admin-sidebar', { open: menuOpen }]">
+        <!-- 品牌（原顶栏迁入侧栏） -->
+        <NuxtLink to="/" class="admin-brand" title="返回首页">
+          <span class="admin-brand-badge">P</span>
+          <span class="admin-brand-name">PanHub</span>
+        </NuxtLink>
         <div class="admin-side-title">管理后台</div>
 
         <nav class="admin-menu">
@@ -35,7 +31,7 @@
         <div class="admin-side-foot">v2 · 2026-08-25</div>
       </aside>
 
-      <!-- 内容区 -->
+      <!-- 内容区（唯一滚动区） -->
       <main class="admin-content">
         <div class="admin-crumb">
           <span class="admin-crumb-root">PanHub</span>
@@ -46,6 +42,14 @@
         <slot />
       </main>
     </div>
+
+    <!-- 移动端：无顶栏，悬浮汉堡开抽屉 -->
+    <button
+      v-if="isMobile && !menuOpen"
+      type="button"
+      class="admin-burger-fab"
+      aria-label="打开菜单"
+      @click="menuOpen = true">☰</button>
   </div>
 </template>
 
@@ -121,33 +125,40 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
 <style scoped>
 /* ===== 外壳 ===== */
 .admin-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
-  flex-direction: column;
   color: var(--text-primary, #1f2937);
   background: var(--bg-secondary, #f7f3ea);
 }
 
-/* ===== 顶栏 ===== */
-.admin-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 56px;
-  padding: 0 20px;
-  background: var(--bg-primary, #fffdf8);
-  border-bottom: 1px solid var(--border-light, #e5dfd0);
+/* 遮罩（移动端抽屉） */
+.admin-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 120;
 }
-.admin-burger {
-  display: none;
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  color: var(--text-secondary, #4b5563);
-  padding: 4px 8px;
+
+/* ===== 主体 ===== */
+.admin-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ===== 侧栏（固定，整屏高度，内部滚动） ===== */
+.admin-sidebar {
+  width: 216px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 16px 12px;
+  background: var(--bg-primary, #fffdf8);
+  border-right: 1px solid var(--border-light, #e5dfd0);
 }
 .admin-brand {
   display: flex;
@@ -155,6 +166,9 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
   gap: 10px;
   text-decoration: none;
   color: var(--text-primary, #1f2937);
+  padding: 4px 10px 14px;
+  border-bottom: 1px solid var(--border-light, #f0ead9);
+  margin-bottom: 12px;
 }
 .admin-brand-badge {
   width: 28px;
@@ -171,32 +185,6 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.3px;
-}
-
-/* 遮罩（移动端抽屉） */
-.admin-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 120;
-}
-
-/* ===== 主体 ===== */
-.admin-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-/* ===== 侧栏 ===== */
-.admin-sidebar {
-  width: 216px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 12px;
-  background: var(--bg-primary, #fffdf8);
-  border-right: 1px solid var(--border-light, #e5dfd0);
 }
 .admin-side-title {
   font-size: 13px;
@@ -241,10 +229,12 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
   color: var(--text-tertiary, #9ca3af);
 }
 
-/* ===== 内容区 ===== */
+/* ===== 内容区（唯一滚动区） ===== */
 .admin-content {
   flex: 1;
   min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
   padding: 20px 24px 48px;
 }
 .admin-crumb {
@@ -260,10 +250,9 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
 
 /* ===== 窄屏适配 ===== */
 @media (max-width: 900px) {
-  .admin-burger { display: block; }
   .admin-sidebar {
     position: fixed;
-    top: 56px;
+    top: 0;
     bottom: 0;
     left: 0;
     z-index: 130;
@@ -274,5 +263,21 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
   }
   .admin-sidebar.open { transform: translateX(0); }
   .admin-content { padding: 16px 14px 40px; }
+  /* 无顶栏，悬浮汉堡按钮开抽屉 */
+  .admin-burger-fab {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 110;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 10px;
+    background: var(--bg-primary, #fffdf8);
+    color: var(--text-secondary, #4b5563);
+    font-size: 20px;
+    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
+    cursor: pointer;
+  }
 }
 </style>
