@@ -2,11 +2,10 @@
  * wxAuthCheck（微信关注公众号登录态校验）单元测试
  *
  * 验证：
- * - 开关控制（WX_AUTH_ENFORCE 未开启不启用）
  * - cookie 提取（token 优先，openid 兜底，无 cookie 返回空）
  * - 实时校验：check 返回 authenticated=true → 放行；false → 拒绝
  * - 无 cookie → false（拒绝）
- * - wx-auth 服务故障/非 2xx → 降级放行（不误伤真人）
+ * - wx-auth 服务故障/非 2xx → fail-closed 拒绝（2026-08-26 起不再降级放行）
  * - 请求内去重：同一次请求只调一次远程
  */
 
@@ -23,7 +22,6 @@ vi.mock("h3", () => ({
 
 import * as h3 from "h3";
 import {
-  isWxAuthEnforced,
   getWxAuthCredential,
   verifyWxAuthCredential,
   verifyWxAuthOnce,
@@ -39,29 +37,6 @@ function makeEvent(cookies: Record<string, string> = {}): H3Event {
   mockedGetCookie.mockImplementation((e: any, name: string) => cookies[name]);
   return event;
 }
-
-describe("isWxAuthEnforced", () => {
-  const OLD = process.env.WX_AUTH_ENFORCE;
-  afterEach(() => {
-    if (OLD === undefined) delete process.env.WX_AUTH_ENFORCE;
-    else process.env.WX_AUTH_ENFORCE = OLD;
-  });
-
-  it("未设置时默认关闭", () => {
-    delete process.env.WX_AUTH_ENFORCE;
-    expect(isWxAuthEnforced()).toBe(false);
-  });
-
-  it("WX_AUTH_ENFORCE=1 时启用", () => {
-    process.env.WX_AUTH_ENFORCE = "1";
-    expect(isWxAuthEnforced()).toBe(true);
-  });
-
-  it("WX_AUTH_ENFORCE=0 时关闭", () => {
-    process.env.WX_AUTH_ENFORCE = "0";
-    expect(isWxAuthEnforced()).toBe(false);
-  });
-});
 
 describe("getWxAuthCredential", () => {
   beforeEach(() => mockedGetCookie.mockReset());
@@ -84,12 +59,10 @@ describe("getWxAuthCredential", () => {
 
 describe("verifyWxAuthCredential", () => {
   const OLD_BASE = process.env.WX_AUTH_API_BASE;
-  const OLD_ENFORCE = process.env.WX_AUTH_ENFORCE;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     process.env.WX_AUTH_API_BASE = "https://wx-auth.example.com";
-    process.env.WX_AUTH_ENFORCE = "1";
     fetchMock = vi.fn();
     (globalThis as any).fetch = fetchMock;
     mockedGetCookie.mockReset();
@@ -98,8 +71,6 @@ describe("verifyWxAuthCredential", () => {
   afterEach(() => {
     if (OLD_BASE === undefined) delete process.env.WX_AUTH_API_BASE;
     else process.env.WX_AUTH_API_BASE = OLD_BASE;
-    if (OLD_ENFORCE === undefined) delete process.env.WX_AUTH_ENFORCE;
-    else process.env.WX_AUTH_ENFORCE = OLD_ENFORCE;
   });
 
   it("check 返回 authenticated:true → 放行", async () => {
@@ -124,16 +95,16 @@ describe("verifyWxAuthCredential", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("check 非 2xx → 降级放行", async () => {
+  it("check 非 2xx → fail-closed 拒绝", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 });
     const event = makeEvent({ "wxauth-token": "tok" });
-    expect(await verifyWxAuthCredential(event)).toBe(true);
+    expect(await verifyWxAuthCredential(event)).toBe(false);
   });
 
-  it("网络错误/超时 → 降级放行", async () => {
+  it("网络错误/超时 → fail-closed 拒绝", async () => {
     fetchMock.mockRejectedValue(new Error("timeout"));
     const event = makeEvent({ "wxauth-token": "tok" });
-    expect(await verifyWxAuthCredential(event)).toBe(true);
+    expect(await verifyWxAuthCredential(event)).toBe(false);
   });
 
   it("openid 兜底路径", async () => {
