@@ -207,14 +207,18 @@ export function parseChannelPage(
       const escaped = link.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       title = title.replace(new RegExp(escaped, "g"), "");
     }
-    title = title
-      .replace(
-        /(名称|描述|链接|大小|标签|夸克|UC|百度|阿里|迅雷|115|天翼|123|移动|提取码|密码|📧|📿|：|,|\.|\||-|\s)+/g,
-        " "
-      )
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80);
+    // 单次清洗（含删 URL、平台词/标点替换、空白折叠、长度截断），
+    // 复用到下面"滑动窗口找有效 title"逻辑，避免重复硬编码。
+    const singleClean = (raw: string): string =>
+      raw
+        .replace(
+          /(名称|描述|链接|大小|标签|夸克|UC|百度|阿里|迅雷|115|天翼|123|移动|提取码|密码|📧|📿|：|,|\.|\||-|\s)+/g,
+          " "
+        )
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80);
+    title = singleClean(title);
     // ⚠️ 2026-08-25 修复：清洗正则只删 ASCII 标点/平台词，刻意保留中文
     // 书名号（"《繁花》"等配对片名）。但当消息格式异常导致 firstLine 仅
     // 留一个孤立标点（如 firstLine="《"），清洗后 title="《"——!title
@@ -223,12 +227,35 @@ export function parseChannelPage(
     // 修复：title 必须含至少一个中文/字母/数字才算有效，否则从 text
     // 全文找含内容字符的有效行兜底（这条消息已通过 matchesSearchKeyword
     // 匹配，必有相关行）；都找不到再走 firstLine 兜底（保持原行为）。
+    // 2026-08-26 跟进：cheerio .text() 不把 <br> 转 \n，message text 通常
+    // 是单行长字符串。出现过的 bug：清洗后剩余 = 大量 emoji 头 + 末尾孤立
+    // 【 /《，slice(0, 80) 按 UTF-16 切到【 /《 处结束（emoji 在 4e00-9fa5
+    // 之外，HAS_CONTENT_RE 仍 false），text.split("\n") 因为无 \n 拿不到
+    // 多行，最终 title = 残留的 `🎬🎬🎬...🎬 【`。前端按 word-break 渲染
+    // 时看起来只剩一个孤立的【（用户截图「阿甘正传」搜索里三条结果都是
+    // 单字标点）。新的兜底用滑动窗口扫整段 text 找首个含内容字符的 80 字符
+    // 段，再兜底用 keyword 自身。
     if (!HAS_CONTENT_RE.test(title)) {
-      const validLine = text
-        .split("\n")
-        .map((s) => s.trim())
-        .find((s) => HAS_CONTENT_RE.test(s));
-      title = (validLine || firstLine).slice(0, 80);
+      const winSize = 80;
+      let best = "";
+      // 80 字符步长滑窗（每段单独走一次完整清洗）
+      for (let i = 0; i + winSize <= text.length; i += winSize) {
+        const seg = text.slice(i, i + winSize);
+        const c = singleClean(seg);
+        if (HAS_CONTENT_RE.test(c) && c.length > best.length) best = c;
+      }
+      // 末段（不到 winSize 字符）
+      const lastStart = Math.floor(text.length / winSize) * winSize;
+      if (lastStart < text.length) {
+        const cTail = singleClean(text.slice(lastStart));
+        if (HAS_CONTENT_RE.test(cTail) && cTail.length > best.length) best = cTail;
+      }
+      // 极端情况兜底：text 全文就是只有 emoji / 平台词（如 source 模板消息），
+      // 直接用搜索关键词占位 title，避免下发纯标点伤害 UI。
+      if (!best && HAS_CONTENT_RE.test(keyword)) {
+        best = keyword.trim();
+      }
+      if (best) title = best.slice(0, 80);
     }
 
     let content = text;
