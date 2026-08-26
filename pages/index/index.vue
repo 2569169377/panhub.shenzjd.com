@@ -143,15 +143,9 @@
     </section>
 
     <!-- 错误提示 -->
-    <section v-if="searchState.error && !restricted" class="error-alert">
+    <section v-if="searchState.error" class="error-alert">
       <span class="error-icon">⚠️</span>
       <span>{{ searchState.error }}</span>
-    </section>
-
-    <!-- IP 受限提示（被黑名单拦截时展示，引导联系公众号申诉） -->
-    <section v-if="restricted" class="error-alert">
-      <span class="error-icon">⚠️</span>
-      <span>搜索暂时不可用（可能是短时间内请求过于频繁）。如有疑问，可联系右侧公众号「神族九帝」反馈</span>
     </section>
 
     <!-- 豆瓣电影新片榜 - 搜索时隐藏 -->
@@ -278,7 +272,6 @@ const {
   continueSearch,
   hasResults,
   autoPausedAtLimit,
-  restricted,
 } = useSearch();
 const { settings, loadSettings } = useSettings();
 const auth = useAuth();
