@@ -152,6 +152,25 @@ export class ChannelConfigService {
   }
 
   /**
+   * 强制重新加载（清缓存后重新走加载链；用于管理后台"重载配置"）。
+   * 与 ensureLoaded 不同：忽略已有缓存，总是重新拉取最新配置并更新 this.config。
+   * 加载失败保持旧配置可用（fail-safe），并把错误抛给调用方记录。
+   */
+  async reload(): Promise<ChannelConfig> {
+    if (this.loadPromise) await this.loadPromise; // 等待进行中的加载收敛
+    this.config = null;
+    try {
+      const loaded = await this.load();
+      this.config = loaded || null;
+      return this.getSnapshot();
+    } catch (err) {
+      // 加载失败：不破坏已有配置（若已成功过则沿用），错误抛给调用方（管理页提示）
+      if (this.loadPromise) this.loadPromise = null;
+      throw err;
+    }
+  }
+
+  /**
    * 频道配置下发（取 defaultChannels 前 N 个；priority 频道即使同时
    * 出现在 default 中也剔除，不随下发暴露）。用于 /api/channels。
    */

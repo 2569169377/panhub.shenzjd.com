@@ -112,6 +112,33 @@ describe("ChannelConfigService", () => {
     expect(service.getSnapshot().defaultChannels).toEqual(["new1", "new2"]);
   });
 
+  it("reload 忽略缓存、强制重载最新配置", async () => {
+    const insert = async (version: number, channels: string[]) => {
+      const encrypted = encryptChannelConfig(
+        JSON.stringify({ version, priorityChannels: [], defaultChannels: channels }),
+        KEY,
+      );
+      await client.execute(
+        "INSERT INTO channel_config (version, payload, updated_at) VALUES (?, ?, ?)",
+        [version, encrypted, Date.now()]
+      );
+    };
+    await insert(1, ["v1"]);
+
+    const service = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+    });
+    await service.ensureLoaded();
+    expect(service.getSnapshot().version).toBe(1);
+
+    // 数据源更新后，reload 应拿到新版本（ensureLoaded 因缓存不会）
+    await insert(2, ["v2"]);
+    await service.reload();
+    expect(service.getSnapshot().version).toBe(2);
+    expect(service.getSnapshot().defaultChannels).toEqual(["v2"]);
+  });
+
   it("未加载且无兜底时返回空快照", () => {
     const service = new ChannelConfigService({});
     expect(service.getSnapshot()).toEqual({
