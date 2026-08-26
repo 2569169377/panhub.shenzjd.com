@@ -6,6 +6,7 @@ import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
+import { buildBlockedFakeMerged } from "../core/utils/blockedFakeData";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
 import { loggers } from "../core/utils/logger";
@@ -48,9 +49,37 @@ export default defineEventHandler(async (event: H3Event) => {
   requireSearchAuth(event);
   const ip = getClientIp(event);
   if (await getOrCreateBotDefenseService().isBlocked(ip)) {
-    // 2026-08-25 降噪：命中即 403，无需逐条 warn（已拉黑 IP 的反复探测只会刷日志）
-    loggers.search.debug(`拦截黑名单 IP`, { ip, method: event.method, path: event.path });
-    throw createError({ statusCode: 403, statusMessage: "ip blocked" });
+    // 2026-08-27 改为蜜罐假数据：不再 403（爬虫收到 403 仍会继续请求），
+    // 改为推一次 chunk（含 merged 假数据）+ done，协议与正常流完全一致，
+    // 无论搜什么都是同一份纯静态公众号宣传内容，不触发真实搜索。
+    loggers.search.debug(`黑名单 IP 命中，返回蜜罐假数据(stream)`, {
+      ip,
+      method: event.method,
+      path: event.path,
+    });
+    const fakeStream = createEventStream(event);
+    const merged = buildBlockedFakeMerged();
+    const total = Object.values(merged).reduce(
+      (sum, arr) => sum + arr.length,
+      0
+    );
+    await fakeStream.push({
+      event: "chunk",
+      data: JSON.stringify({ done: 1, total, merged }),
+    });
+    await fakeStream.push({
+      event: "done",
+      data: JSON.stringify({
+        total,
+        warnings: [],
+        pluginCount: 0,
+        merged,
+        completedIndices: [0],
+        reachedLimit: false,
+      }),
+    });
+    await fakeStream.close();
+    return fakeStream.send();
   }
   // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429
   if (await isSearchRateLimited(ip)) {

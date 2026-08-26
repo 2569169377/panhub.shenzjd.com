@@ -25,6 +25,7 @@ import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
 import { getClientIp } from "../middleware/rateLimiter";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
+import { buildBlockedFakeGenericResponse } from "../core/utils/blockedFakeData";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
 import { loggers } from "../core/utils/logger";
@@ -38,13 +39,17 @@ import type { GenericResponse, SearchRequest } from "../core/types/models";
 export default defineEventHandler(async (event) => {
   requireSearchAuth(event);
   // IP 黑名单拦截（2026-08-24 用户拍板：累积到阈值的攻击源 24h 内拒绝所有搜索请求）
-  // 放在 UA 校验之前：黑名单 IP 多半已多次触发拦截，连 UA 检查都跳过直接 403
+  // 2026-08-27 改为蜜罐假数据：不再 403（爬虫收到 403 仍会继续请求），
+  // 改为返回标准结构的公众号宣传数据——无论搜什么都是同一份纯静态内容，
+  // 不触发真实搜索（零资源消耗），聚合采集方抓到后等于帮我们传播公众号。
   const ip = getClientIp(event);
   if (await getOrCreateBotDefenseService().isBlocked(ip)) {
-    // 2026-08-25 降噪：命中即 403，无需逐条 warn（已拉黑 IP 的反复探测只会刷日志）。
-    // 封禁动作（IP 拉黑/分级档位）本身在 botDefense.ts 有 info 级记录。
-    loggers.search.debug(`拦截黑名单 IP`, { ip, method: event.method, path: event.path });
-    throw createError({ statusCode: 403, statusMessage: "ip blocked" });
+    loggers.search.debug(`黑名单 IP 命中，返回蜜罐假数据`, {
+      ip,
+      method: event.method,
+      path: event.path,
+    });
+    return buildBlockedFakeGenericResponse();
   }
   // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429。
   // 独立于全局限流（按路径前缀），跨三个搜索端点共享同一计数，防换端点绕限。
