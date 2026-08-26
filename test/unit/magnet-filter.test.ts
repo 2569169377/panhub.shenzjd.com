@@ -17,7 +17,7 @@ class MagnetOnlyPlugin extends BaseAsyncPlugin {
         unique_id: "magnet-only-1",
         channel: "seed",
         datetime: new Date("2026-01-01T00:00:00.000Z").toISOString(),
-        title: "纯种子资源",
+        title: "测试 纯种子资源",
         content: "",
         links: [{ type: "magnet", url: "magnet:?xt=urn:btih:abc123", password: "" }],
       },
@@ -34,7 +34,7 @@ class MixedPlugin extends BaseAsyncPlugin {
         unique_id: "mixed-1",
         channel: "mixed",
         datetime: new Date("2026-01-02T00:00:00.000Z").toISOString(),
-        title: "混合资源",
+        title: "测试 混合资源",
         content: "",
         links: [
           { type: "quark", url: "https://pan.quark.cn/s/abc", password: "1234" },
@@ -54,7 +54,7 @@ class MislabeledPlugin extends BaseAsyncPlugin {
         unique_id: "mislabeled-1",
         channel: "mislabeled",
         datetime: new Date("2026-01-03T00:00:00.000Z").toISOString(),
-        title: "错误标注",
+        title: "测试 错误标注",
         content: "",
         links: [
           { type: "others", url: "magnet:?xt=urn:btih:deadbeef", password: "" },
@@ -73,7 +73,7 @@ class PanOnlyPlugin extends BaseAsyncPlugin {
         unique_id: "pan-only-1",
         channel: "pan",
         datetime: new Date("2026-01-04T00:00:00.000Z").toISOString(),
-        title: "网盘资源",
+        title: "测试 网盘资源",
         content: "",
         links: [
           { type: "baidu", url: "https://pan.baidu.com/s/xyz", password: "abcd" },

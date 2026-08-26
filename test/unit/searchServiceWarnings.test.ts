@@ -13,15 +13,17 @@ class ThrowingPlugin extends BaseAsyncPlugin {
 }
 
 class SuccessPlugin extends BaseAsyncPlugin {
-  async search(): Promise<SearchResult[]> {
+  async search(keyword: string): Promise<SearchResult[]> {
     return [
       {
         message_id: "1",
         unique_id: "ok-1",
         channel: "success-plugin",
         datetime: new Date("2026-01-01T00:00:00.000Z").toISOString(),
-        title: "ok result",
-        content: "ok result",
+        // title 必须与 keyword 相关：SearchService 汇总层有结果相关性过滤
+        // （2026-08-27），返回与搜索词无关的 title 会被整条丢弃
+        title: `${keyword} result`,
+        content: `${keyword} result`,
         links: [{ type: "quark", url: "https://example.com/1", password: "" }],
       },
     ];

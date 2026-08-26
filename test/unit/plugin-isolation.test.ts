@@ -25,7 +25,7 @@ class FakeNormalPlugin extends BaseAsyncPlugin {
         unique_id: "fake-normal-1",
         channel: "",
         datetime: new Date().toISOString(),
-        title: "正常结果",
+        title: "测试 正常结果",
         content: "",
         links: [{ type: "quark", url: "https://pan.quark.cn/s/normal", password: "" }],
       },
