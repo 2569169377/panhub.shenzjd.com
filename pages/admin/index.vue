@@ -9,6 +9,7 @@
  */
 import { useAdminApi } from "~/composables/useAdminApi";
 import { ADMIN_NAV_KEY } from "~/utils/adminKeys";
+import OverviewPanel from "~/components/admin/OverviewPanel.vue";
 import SearchRecordPanel from "~/components/admin/SearchRecordPanel.vue";
 import BlacklistPanel from "~/components/admin/BlacklistPanel.vue";
 import ChannelPanel from "~/components/admin/ChannelPanel.vue";
@@ -53,7 +54,8 @@ onMounted(async () => {
 
     <!-- 正常内容 -->
     <template v-else>
-      <ChannelPanel v-if="activeKey === 'channels'" />
+      <OverviewPanel v-if="activeKey === 'overview'" />
+      <ChannelPanel v-else-if="activeKey === 'channels'" />
       <SearchRecordPanel v-else-if="activeKey === 'search-log'" @blocked="onBlocked" />
       <BlacklistPanel v-else-if="activeKey === 'blacklist'" ref="blPanel" />
     </template>

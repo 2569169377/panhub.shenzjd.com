@@ -1,4 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
+import { formatDateKey, beijingDayStart } from "./hotSearchUtils";
 
 /**
  * Turso IP 黑名单存储（2026-08-24 用户拍板）
@@ -308,6 +309,70 @@ export class TursoBotDefenseStore {
       [now]
     );
     return result.rowsAffected ?? 0;
+  }
+
+  /**
+   * 管理概览统计（2026-08-26 流量概览面板数据源）。
+   * 全部基于 rejected_ips（被拦截/拉黑的 IP 档案）：
+   * - total：黑名单总条目数（含已解封惯犯档案）
+   * - blocked：当前封禁中条数（expires_at > now 且 block_count > 0）
+   * - todayActive：今日仍有活动（last_at >= 北京时间 0 点）的条目数
+   * - topIps：近 N 天最活跃的被拒 IP（按 hit_count 累计降序）
+   */
+  async getOverviewStats(
+    days = 7,
+    topLimit = 10,
+    now = Date.now()
+  ): Promise<{
+    total: number;
+    blocked: number;
+    todayActive: number;
+    topIps: {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      expiresAt: number;
+    }[];
+  }> {
+    await this.waitForInit();
+    const safeDays = Math.min(Math.max(1, days), 90);
+    const todayStart = beijingDayStart(formatDateKey(now));
+    const since = todayStart - (safeDays - 1) * 86400000;
+
+    const countRow = (
+      await this.client.execute(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN expires_at > ? AND block_count > 0 THEN 1 ELSE 0 END) AS blocked,
+           SUM(CASE WHEN last_at >= ? THEN 1 ELSE 0 END) AS todayActive
+         FROM rejected_ips`,
+        [now, todayStart]
+      )
+    ).rows[0];
+    const total = (countRow?.total as number) ?? 0;
+    const blocked = (countRow?.blocked as number) ?? 0;
+    const todayActive = (countRow?.todayActive as number) ?? 0;
+
+    const topRows = await this.client.execute(
+      `SELECT ip, reason, hit_count, block_count, expires_at FROM rejected_ips
+       WHERE last_at >= ?
+       ORDER BY hit_count DESC LIMIT ?`,
+      [since, Math.min(Math.max(1, topLimit), 50)]
+    );
+
+    return {
+      total,
+      blocked,
+      todayActive,
+      topIps: topRows.rows.map((r) => ({
+        ip: r.ip as string,
+        reason: (r.reason as string) ?? "",
+        hitCount: (r.hit_count as number) ?? 0,
+        blockCount: (r.block_count as number) ?? 0,
+        expiresAt: (r.expires_at as number) ?? 0,
+      })),
+    };
   }
 
   close(): void {

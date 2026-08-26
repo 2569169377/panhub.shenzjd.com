@@ -73,6 +73,10 @@ interface AdminMenuGroup {
 /** 菜单分组（新增功能往这里加；页面面板须与 key 对应渲染） */
 const MENU_GROUPS: AdminMenuGroup[] = [
   {
+    label: "概览",
+    items: [{ key: "overview", label: "流量概览", icon: "📊" }],
+  },
+  {
     label: "频道",
     items: [{ key: "channels", label: "频道管理", icon: "📡" }],
   },
@@ -85,7 +89,7 @@ const MENU_GROUPS: AdminMenuGroup[] = [
   },
 ];
 
-const activeKey = ref<string>("channels");
+const activeKey = ref<string>("overview");
 const menuOpen = ref(false);
 const isMobile = ref(false);
 

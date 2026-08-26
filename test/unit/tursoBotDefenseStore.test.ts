@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { TursoBotDefenseStore } from "../../server/core/services/tursoBotDefenseStore";
+import { formatDateKey, beijingDayStart } from "../../server/core/services/hotSearchUtils";
 
 describe("TursoBotDefenseStore 分级封禁", () => {
   let store: TursoBotDefenseStore;
@@ -229,5 +230,30 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     expect(r.blockCount).toBe(1);
     // 仍未被 extendBlock 改过 expires_at（保留拉黑时的 now+24h，已过期）
     expect(r.blocked).toBe(false); // block_count>0 但 expires_at(now+24h) <= now+25h
+  });
+
+  it("getOverviewStats：总条目/封禁中/今日活跃 + TOP 被拒 IP", async () => {
+    // 以真实"今天"（北京 0 点）为基准
+    const todayStart = beijingDayStart(formatDateKey(Date.now()));
+    const dayMs = 86400000;
+    const diag = todayStart + 3600_000; // 今天内
+    // 惯犯 A：拉黑（block_count=1，封禁中）+ 今天还有活动
+    await store.extendBlock("1.1.1.1", "bot_ua", diag - 1000);
+    await store.recordRejection("1.1.1.1", "bot_ua", diag);
+    // 惯犯 B：已解封（7 天前拉黑 24h，早过期），但今天仍被拒（应计入 todayActive 不计 blocked）
+    await store.extendBlock("2.2.2.2", "rate_limit", diag - 7 * dayMs);
+    await store.recordRejection("2.2.2.2", "rate_limit", diag);
+    // 计数记录 C：从未拉黑（block_count=0），今天被拒
+    await store.recordRejection("3.3.3.3", "bad_term", diag);
+    // 老记录 D：8 天前拉黑 24h（当前在封禁期内？8 天 > 24h 已过期；不在近 7 天窗口）
+    await store.extendBlock("4.4.4.4", "bot_ua", diag - 8 * dayMs);
+
+    const stats = await store.getOverviewStats(7, 10, diag);
+    expect(stats.total).toBe(4); // A/B/C/D 都有条目
+    expect(stats.blocked).toBe(1); // 仅 A 封禁中（D 的 24h 在 8 天前早已过期）
+    expect(stats.todayActive).toBe(3); // A/B/C 今日都有活动
+    // TOP IP（近 7 天活跃，按 hit_count 降序）：A、B 各 2 次，C 1 次
+    expect(stats.topIps).toHaveLength(3);
+    expect(stats.topIps.map((i) => i.ip)).toEqual(["1.1.1.1", "2.2.2.2", "3.3.3.3"]);
   });
 });

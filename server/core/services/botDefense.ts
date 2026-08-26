@@ -394,6 +394,39 @@ export class BotDefenseService {
     }
   }
 
+  /**
+   * 管理概览的黑名单统计（2026-08-26 流量概览面板）。
+   * 转发 store.getOverviewStats；持久化不可用时返回空统计（不报错）。
+   */
+  async getOverviewStats(
+    days = 7,
+    topLimit = 10
+  ): Promise<{
+    total: number;
+    blocked: number;
+    todayActive: number;
+    topIps: {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      expiresAt: number;
+    }[];
+  }> {
+    await this.waitForInit();
+    if (!this.store) {
+      return { total: 0, blocked: 0, todayActive: 0, topIps: [] };
+    }
+    try {
+      return await this.store.getOverviewStats(days, topLimit, Date.now());
+    } catch (err) {
+      loggers.api?.warn?.("黑名单概览统计失败", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { total: 0, blocked: 0, todayActive: 0, topIps: [] };
+    }
+  }
+
   /** 启动周期 prune（懒启动：首次获取服务时由 factory 触发） */
   startMaintenance(): void {
     if (this.pruneTimer) return;

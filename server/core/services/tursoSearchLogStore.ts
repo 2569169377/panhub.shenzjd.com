@@ -1,5 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
-import { formatDateKey } from "./hotSearchUtils";
+import { formatDateKey, beijingDayStart } from "./hotSearchUtils";
 
 /**
  * Turso 搜索明细日志存储（2026-08-25 用户拍板）
@@ -297,6 +297,71 @@ export class TursoSearchLogStore {
       openid: r.openid as string,
       createdAt: (r.created_at as number) ?? 0,
     }));
+  }
+
+  /**
+   * 管理概览统计（2026-08-26 流量概览面板数据源）。
+   * 全部基于 search_log（仅真实搜索，不含被拦截流量）：
+   * - todayCount：今日搜索次数（北京时间 0 点起）
+   * - todayTerms：今日去重搜索词数
+   * - trend：近 N 天每日搜索次数（连续序列，无数据天为 0）
+   * - topTerms：近 N 天 TOP 搜索词（按次降序）
+   */
+  async getOverviewStats(
+    days = 7,
+    topLimit = 10
+  ): Promise<{
+    todayCount: number;
+    todayTerms: number;
+    trend: { date: string; count: number }[];
+    topTerms: { term: string; count: number }[];
+  }> {
+    await this.waitForInit();
+    const safeDays = Math.min(Math.max(1, days), 90);
+    const todayStart = beijingDayStart(formatDateKey(Date.now()));
+    const since = todayStart - (safeDays - 1) * 86400000;
+
+    const todayRow = (
+      await this.client.execute(
+        "SELECT COUNT(*) AS c, COUNT(DISTINCT term) AS t FROM search_log WHERE created_at >= ?",
+        [todayStart]
+      )
+    ).rows[0];
+    const todayCount = (todayRow?.c as number) ?? 0;
+    const todayTerms = (todayRow?.t as number) ?? 0;
+
+    const trendRows = await this.client.execute(
+      `SELECT date((created_at + 8*3600*1000)/1000, 'unixepoch') AS day, COUNT(*) AS c
+       FROM search_log WHERE created_at >= ?
+       GROUP BY day`,
+      [since]
+    );
+    const trendMap = new Map<string, number>();
+    for (const r of trendRows.rows) trendMap.set(r.day as string, r.c as number);
+
+    const topRows = await this.client.execute(
+      `SELECT term, COUNT(*) AS c FROM search_log
+       WHERE created_at >= ?
+       GROUP BY term ORDER BY c DESC, term LIMIT ?`,
+      [since, Math.min(Math.max(1, topLimit), 50)]
+    );
+
+    // 补全连续 N 天序列（今天往前）
+    const trend: { date: string; count: number }[] = [];
+    for (let i = safeDays - 1; i >= 0; i--) {
+      const date = formatDateKey(Date.now() - i * 86400000);
+      trend.push({ date, count: trendMap.get(date) ?? 0 });
+    }
+
+    return {
+      todayCount,
+      todayTerms,
+      trend,
+      topTerms: topRows.rows.map((r) => ({
+        term: r.term as string,
+        count: (r.c as number) ?? 0,
+      })),
+    };
   }
 
   close(): void {

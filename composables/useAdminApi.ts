@@ -161,5 +161,29 @@ export function useAdminApi() {
     return request("/api/admin/channels/reload", { method: "POST" });
   }
 
-  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels };
+  /** 流量概览统计（搜索 + 黑名单两块聚合，只读） */
+  async function loadStats(): Promise<{
+    search: {
+      todayCount: number;
+      todayTerms: number;
+      trend: { date: string; count: number }[];
+      topTerms: { term: string; count: number }[];
+    };
+    defense: {
+      total: number;
+      blocked: number;
+      todayActive: number;
+      topIps: {
+        ip: string;
+        reason: string;
+        hitCount: number;
+        blockCount: number;
+        expiresAt: number;
+      }[];
+    };
+  }> {
+    return request("/api/admin/stats");
+  }
+
+  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels, loadStats };
 }

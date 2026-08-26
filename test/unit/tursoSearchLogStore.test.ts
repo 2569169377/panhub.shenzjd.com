@@ -189,4 +189,31 @@ describe("TursoSearchLogStore", () => {
     expect(items[0].openid).toBe("o-1");
     expect(items[1].term).toBe("凡人修仙传");
   });
+
+  it("getOverviewStats：今日搜索数/去重词数 + 近 N 天趋势 + TOP 词", async () => {
+    // 以真实"今天"（北京 0 点）为基准，避免时区差异导致 todayStart 判定偏差
+    const todayStart = beijingDayStart(formatDateKey(Date.now()));
+    const dayMs = 86400000;
+    const diag = todayStart + 3600_000; // 今天内
+    // 今天：花开锦绣 2 次 + 凡人修仙传 1 次 = 3 条，2 个词
+    await store.logSearch({ term: "花开锦绣", now: diag });
+    await store.logSearch({ term: "花开锦绣", now: diag + 1000 });
+    await store.logSearch({ term: "凡人修仙传", now: diag + 2000 });
+    // 昨天：1 条不同词
+    await store.logSearch({ term: "昨天的词", now: todayStart - dayMs + 1000 });
+    // 8 天前（不在最近 7 天窗口内）
+    await store.logSearch({ term: "更老的词", now: todayStart - 8 * dayMs + 1000 });
+
+    const stats = await store.getOverviewStats(7, 10);
+    expect(stats.todayCount).toBe(3);
+    expect(stats.todayTerms).toBe(2);
+    expect(stats.trend).toHaveLength(7);
+    // 最后一天（今天）计数 3
+    expect(stats.trend[6].count).toBe(3);
+    // 昨天计数 1；更老的不在窗口，趋势里不应出现
+    expect(stats.trend[5].count).toBe(1);
+    // TOP 词：花开锦绣 2 次第一
+    expect(stats.topTerms[0]).toEqual({ term: "花开锦绣", count: 2 });
+    expect(stats.topTerms[1]).toEqual({ term: "凡人修仙传", count: 1 });
+  });
 });
