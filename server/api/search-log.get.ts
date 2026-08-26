@@ -40,6 +40,7 @@ export default defineEventHandler(async (event) => {
 
   const q = getQuery(event);
   const limit = Math.min(Math.max(1, parseInt(String(q.limit || "50"), 10) || 50), 200);
+  const offset = Math.max(0, parseInt(String(q.offset || "0"), 10) || 0);
   const daysRaw = parseInt(String(q.days || ""), 10);
   const since = Number.isFinite(daysRaw) && daysRaw >= 1 ? Date.now() - daysRaw * 86400000 : undefined;
 
@@ -56,27 +57,30 @@ export default defineEventHandler(async (event) => {
   }
 
   if (targetOpenid) {
-    const items = await store.searchByOpenid(targetOpenid, limit, since);
+    const items = await store.searchByOpenid(targetOpenid, limit, since, offset);
+    const total = await store.countSearch("openid", targetOpenid, since);
     return {
       code: 0,
       message: "success",
-      data: { mode: "openid", openid: targetOpenid, items, total: items.length },
+      data: { mode: "openid", openid: targetOpenid, items, total },
     };
   }
 
   if (term) {
-    const items = await store.searchByTerm(term, limit, since);
+    const items = await store.searchByTerm(term, limit, since, offset);
+    const total = await store.countSearch("term", term, since);
     return {
       code: 0,
       message: "success",
-      data: { mode: "term", term, items, total: items.length },
+      data: { mode: "term", term, items, total },
     };
   }
 
-  const items = await store.searchByIp(ip, limit, since);
+  const items = await store.searchByIp(ip, limit, since, offset);
+  const total = await store.countSearch("ip", ip, since);
   return {
     code: 0,
     message: "success",
-    data: { mode: "ip", ip, items, total: items.length },
+    data: { mode: "ip", ip, items, total },
   };
 });

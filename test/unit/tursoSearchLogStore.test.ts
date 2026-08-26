@@ -216,4 +216,38 @@ describe("TursoSearchLogStore", () => {
     expect(stats.topTerms[0]).toEqual({ term: "花开锦绣", count: 2 });
     expect(stats.topTerms[1]).toEqual({ term: "凡人修仙传", count: 1 });
   });
+
+  it("searchByXxx 支持 offset 分页（配合 countSearch 算总量）", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-p", ip: "1.1.1.1", term: "词1", now: now + 1000 });
+    await store.logSearch({ openid: "o-p", ip: "1.1.1.1", term: "词2", now: now + 2000 });
+    await store.logSearch({ openid: "o-p", ip: "1.1.1.1", term: "词3", now: now + 3000 });
+
+    // 不带 offset：取前 2 条（时间倒序：词3、词2）
+    const first = await store.searchByOpenid("o-p", 2, undefined, 0);
+    expect(first.map((i) => i.term)).toEqual(["词3", "词2"]);
+    // offset=2：取剩余 1 条（词1）
+    const second = await store.searchByOpenid("o-p", 2, undefined, 2);
+    expect(second.map((i) => i.term)).toEqual(["词1"]);
+    // 总量
+    expect(await store.countSearch("openid", "o-p")).toBe(3);
+
+    // term 分页
+    await store.logSearch({ openid: "o-q", ip: "9.9.9.9", term: "词2", now: now + 1000 });
+    const termPage = await store.searchByTerm("词2", 1, undefined, 1);
+    expect(termPage).toHaveLength(1);
+    expect(await store.countSearch("term", "词2")).toBe(2);
+
+    // ip 分页
+    const ipAll = await store.searchByIp("1.1.1.1", 50);
+    expect(ipAll).toHaveLength(3);
+    expect(await store.countSearch("ip", "1.1.1.1")).toBe(3);
+  });
+
+  it("countSearch 支持 since 过滤", async () => {
+    const now = 1_700_000_000_000;
+    await store.logSearch({ openid: "o-c", term: "旧", now: now - 1000 });
+    await store.logSearch({ openid: "o-c", term: "新", now: now + 1000 });
+    expect(await store.countSearch("openid", "o-c", now)).toBe(1); // 只统计 now 之后
+  });
 });

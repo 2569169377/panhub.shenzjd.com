@@ -310,10 +310,14 @@ export class BotDefenseService {
 
   /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案），按最近活动倒序。
+   * 支持 IP 模糊搜索、状态筛选、offset 分页（2026-08-26）。
    * 不依赖 BOT_DEFENSE_ENFORCE 开关（管理侧只看数据，不拦截）。
    */
-  async listEntries(limit = 100): Promise<
-    {
+  async listEntries(
+    limit = 100,
+    opts: { ipFilter?: string; status?: "blocked" | "free"; offset?: number } = {}
+  ): Promise<{
+    items: {
       ip: string;
       reason: string;
       hitCount: number;
@@ -321,17 +325,23 @@ export class BotDefenseService {
       firstAt: number;
       lastAt: number;
       expiresAt: number;
-    }[]
-  > {
+    }[];
+    total: number;
+  }> {
     await this.waitForInit();
-    if (!this.store) return [];
+    if (!this.store) return { items: [], total: 0 };
     try {
-      return await this.store.listEntries(Date.now(), limit);
+      const { items, total } = await this.store.listEntries(
+        Date.now(),
+        limit,
+        opts
+      );
+      return { items, total };
     } catch (err) {
       loggers.api?.warn?.("黑名单列表查询失败", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return [];
+      return { items: [], total: 0 };
     }
   }
 

@@ -107,17 +107,29 @@ export function useAdminApi() {
     keyword: string;
     days?: string;
     limit?: number;
+    offset?: number;
   }): Promise<{ mode: string; items: SearchLogItem[]; total: number }> {
     const q = new URLSearchParams();
     q.set(opts.mode, opts.keyword.trim());
     q.set("limit", String(opts.limit ?? 100));
+    if (opts.offset) q.set("offset", String(opts.offset));
     if (opts.days) q.set("days", opts.days);
     return request(`/api/search-log?${q.toString()}`);
   }
 
-  /** 黑名单列表 */
-  async function loadBlacklist(limit = 200): Promise<{ now: number; items: BlacklistItem[]; total: number }> {
-    return request(`/api/blacklist?limit=${limit}`);
+  /** 黑名单列表（支持 IP 模糊搜索、状态筛选、分页） */
+  async function loadBlacklist(opts: {
+    limit?: number;
+    offset?: number;
+    ip?: string;
+    status?: "blocked" | "free" | "";
+  } = {}): Promise<{ now: number; items: BlacklistItem[]; total: number }> {
+    const q = new URLSearchParams();
+    q.set("limit", String(opts.limit ?? 100));
+    if (opts.offset) q.set("offset", String(opts.offset));
+    if (opts.ip?.trim()) q.set("ip", opts.ip.trim());
+    if (opts.status) q.set("status", opts.status);
+    return request(`/api/blacklist?${q.toString()}`);
   }
 
   /** 手动拉黑 */

@@ -212,26 +212,29 @@ export class TursoSearchLogStore {
   /**
    * 管理排查：某 openid 的搜索记录（谁搜了什么），按时间倒序。
    * since（ms）可选：只返回该时间点之后的记录。
+   * offset：分页偏移（2026-08-26 新增）。
    */
   async searchByOpenid(
     openid: string,
     limit: number,
-    since?: number
+    since?: number,
+    offset = 0
   ): Promise<{ term: string; ip: string; createdAt: number }[]> {
     await this.waitForInit();
     const safe = Math.min(Math.max(1, limit), 500);
+    const off = Math.max(0, Math.floor(offset));
     const rows = since
       ? await this.client.execute(
           `SELECT term, ip, created_at FROM search_log
            WHERE openid = ? AND created_at >= ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [openid, since, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [openid, since, safe, off]
         )
       : await this.client.execute(
           `SELECT term, ip, created_at FROM search_log
            WHERE openid = ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [openid, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [openid, safe, off]
         );
     return rows.rows.map((r) => ({
       term: r.term as string,
@@ -244,22 +247,24 @@ export class TursoSearchLogStore {
   async searchByTerm(
     term: string,
     limit: number,
-    since?: number
+    since?: number,
+    offset = 0
   ): Promise<{ openid: string; ip: string; createdAt: number }[]> {
     await this.waitForInit();
     const safe = Math.min(Math.max(1, limit), 500);
+    const off = Math.max(0, Math.floor(offset));
     const rows = since
       ? await this.client.execute(
           `SELECT openid, ip, created_at FROM search_log
            WHERE term = ? AND created_at >= ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [term, since, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [term, since, safe, off]
         )
       : await this.client.execute(
           `SELECT openid, ip, created_at FROM search_log
            WHERE term = ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [term, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [term, safe, off]
         );
     return rows.rows.map((r) => ({
       openid: r.openid as string,
@@ -275,28 +280,52 @@ export class TursoSearchLogStore {
   async searchByIp(
     ip: string,
     limit: number,
-    since?: number
+    since?: number,
+    offset = 0
   ): Promise<{ term: string; openid: string; createdAt: number }[]> {
     await this.waitForInit();
     const safe = Math.min(Math.max(1, limit), 500);
+    const off = Math.max(0, Math.floor(offset));
     const rows = since
       ? await this.client.execute(
           `SELECT term, openid, created_at FROM search_log
            WHERE ip = ? AND created_at >= ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [ip, since, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [ip, since, safe, off]
         )
       : await this.client.execute(
           `SELECT term, openid, created_at FROM search_log
            WHERE ip = ?
-           ORDER BY created_at DESC LIMIT ?`,
-          [ip, safe]
+           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [ip, safe, off]
         );
     return rows.rows.map((r) => ({
       term: r.term as string,
       openid: r.openid as string,
       createdAt: (r.created_at as number) ?? 0,
     }));
+  }
+
+  /**
+   * 管理排查：按条件统计总条数（配合 searchByXxx 分页）。
+   * field ∈ 'openid' | 'term' | 'ip'，精确匹配 + 可选 since 过滤。
+   */
+  async countSearch(
+    field: "openid" | "term" | "ip",
+    value: string,
+    since?: number
+  ): Promise<number> {
+    await this.waitForInit();
+    const rows = since
+      ? await this.client.execute(
+          `SELECT COUNT(*) AS c FROM search_log WHERE ${field} = ? AND created_at >= ?`,
+          [value, since]
+        )
+      : await this.client.execute(
+          `SELECT COUNT(*) AS c FROM search_log WHERE ${field} = ?`,
+          [value]
+        );
+    return (rows.rows[0]?.c as number) ?? 0;
   }
 
   /**

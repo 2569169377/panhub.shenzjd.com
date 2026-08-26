@@ -5,20 +5,37 @@
         <h2>IP 黑名单</h2>
         <p class="admin-card-desc">封禁中+惯犯档案+计数记录 · 顽固爬虫分级递增（24h → 7 天 → 30 天）</p>
       </div>
-      <button type="button" class="btn btn-neutral" :disabled="loading" @click="load">
+      <button type="button" class="btn btn-neutral" :disabled="loading" @click="refresh()">
         {{ loading ? "刷新中…" : "刷新" }}
       </button>
+    </div>
+
+    <!-- 筛选：IP 搜索 + 状态 -->
+    <div class="admin-form-row" style="margin-bottom: 10px">
+      <input
+        v-model="ipFilter"
+        type="text"
+        class="admin-input"
+        placeholder="按 IP 搜索（支持部分匹配）…"
+        @keyup.enter="doFilter"
+      />
+      <select v-model="status" class="admin-select" aria-label="状态筛选" @change="doFilter">
+        <option value="">全部</option>
+        <option value="blocked">封禁中</option>
+        <option value="free">已解封</option>
+      </select>
+      <button type="button" class="btn btn-neutral" @click="doFilter">筛选</button>
     </div>
 
     <p v-if="error" class="admin-notice admin-notice-error">{{ error }}</p>
 
     <div class="admin-list-head">
-      <span>共 {{ total }} 条记录</span>
-      <span class="admin-list-muted">{{ loading ? "加载中…" : "" }}</span>
+      <span>共 {{ total }} 条（{{ statusLabel }}）</span>
+      <span class="admin-list-muted">{{ loading ? "加载中…" : `第 ${page} / ${totalPages} 页` }}</span>
     </div>
 
     <div v-if="loading && items.length === 0" class="admin-state">加载中…</div>
-    <div v-else-if="items.length === 0 && !error" class="admin-state">暂无黑名单记录</div>
+    <div v-else-if="items.length === 0 && !error" class="admin-state">暂无符合条件的记录</div>
 
     <div v-else class="admin-table-wrap">
       <table class="admin-table">
@@ -61,6 +78,17 @@
           </tr>
         </tbody>
       </table>
+
+      <!-- 分页 -->
+      <div v-if="totalPages > 1" class="bl-pager">
+        <button type="button" class="btn btn-neutral" :disabled="page <= 1 || loading" @click="go(page - 1)">
+          ← 上一页
+        </button>
+        <span class="bl-pager-info">{{ page }} / {{ totalPages }}</span>
+        <button type="button" class="btn btn-neutral" :disabled="page >= totalPages || loading" @click="go(page + 1)">
+          下一页 →
+        </button>
+      </div>
     </div>
 
     <!-- 确认弹窗 -->
@@ -70,8 +98,10 @@
 
 <script setup lang="ts">
 /**
- * IP 黑名单面板（2026-08-25 admin 规范化重构拆出的子组件）
+ * IP 黑名单面板（2026-08-25 规范化重构拆出的子组件；2026-08-26 加筛选 + 分页）
  * 展示 /api/blacklist 封禁中 + 惯犯档案；"移除"即解除封禁。
+ * - IP 模糊搜索 + 状态筛选（封禁中/已解封/全部）
+ * - limit=50 分页
  */
 import { useAdminApi, type BlacklistItem } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
@@ -85,6 +115,16 @@ const error = ref("");
 const items = ref<BlacklistItem[]>([]);
 const total = ref(0);
 const busyKey = ref("");
+
+const ipFilter = ref("");
+const status = ref<"" | "blocked" | "free">("");
+const page = ref(1);
+const PAGE_SIZE = 50;
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const statusLabel = computed(() =>
+  status.value === "blocked" ? "封禁中" : status.value === "free" ? "已解封" : "全部",
+);
 
 const reasonText: Record<string, string> = {
   bot_ua: "爬虫UA",
@@ -117,11 +157,17 @@ function formatTime(ms?: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
-async function refresh() {
+async function load(opts?: { resetPage?: boolean }) {
   loading.value = true;
   error.value = "";
+  if (opts?.resetPage) page.value = 1;
   try {
-    const data = await loadBlacklist(200);
+    const data = await loadBlacklist({
+      limit: PAGE_SIZE,
+      offset: (page.value - 1) * PAGE_SIZE,
+      ip: ipFilter.value,
+      status: status.value,
+    });
     items.value = data.items ?? [];
     total.value = data.total ?? items.value.length;
   } catch (e: any) {
@@ -129,6 +175,17 @@ async function refresh() {
   } finally {
     loading.value = false;
   }
+}
+
+/** 筛选变化 → 回到第 1 页重新拉 */
+function doFilter() {
+  load({ resetPage: true });
+}
+
+function go(p: number) {
+  if (p < 1 || p > totalPages.value) return;
+  page.value = p;
+  load();
 }
 
 function askRemove(ip: string) {
@@ -146,9 +203,12 @@ async function doRemove(ip: string) {
   busyKey.value = `remove-${ip}`;
   try {
     await removeIp(ip);
+    // 从当前结果剔除该 IP 的行；若本页删空且不是第一页则回退一页
     items.value = items.value.filter((it) => it.ip !== ip);
     total.value = Math.max(0, total.value - 1);
+    if (items.value.length === 0 && page.value > 1) page.value -= 1;
     showToast(`已移除 ${ip}`, "success");
+    await load();
   } catch (e: any) {
     showToast(e?.message || "移除失败", "error");
     throw e; // 让 modal 保持打开显示错误
@@ -158,8 +218,24 @@ async function doRemove(ip: string) {
 }
 
 // 首次进入自动加载
-onMounted(refresh);
+onMounted(() => load());
 
 // 暴露给父组件（搜索记录拉黑后联动刷新）
-defineExpose({ refresh });
+defineExpose({ refresh: () => load() });
 </script>
+
+<style scoped>
+.bl-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px 0 4px;
+}
+.bl-pager-info {
+  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+  min-width: 60px;
+  text-align: center;
+}
+</style>

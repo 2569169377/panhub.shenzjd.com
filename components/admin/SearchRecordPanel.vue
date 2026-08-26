@@ -48,7 +48,7 @@
     <template v-if="searched">
       <div class="admin-list-head">
         <span>共 {{ total }} 条记录（{{ modeLabel }}：{{ lastKeyword }}）</span>
-        <span class="admin-list-muted">显示前 {{ items.length }} 条</span>
+        <span class="admin-list-muted">第 {{ page }} / {{ totalPages }} 页 · 每页 {{ PAGE_SIZE }}</span>
       </div>
 
       <div v-if="loading" class="admin-state">查询中…</div>
@@ -69,7 +69,7 @@
           </thead>
           <tbody>
             <tr v-for="(it, idx) in items" :key="idx">
-              <td class="mono">{{ idx + 1 }}</td>
+              <td class="mono">{{ (page - 1) * PAGE_SIZE + idx + 1 }}</td>
               <td class="cell-term">{{ it.term ?? "-" }}</td>
               <td v-if="mode === 'term' || mode === 'ip'" class="mono cell-openid">{{ it.openid ?? "-" }}</td>
               <td class="mono">{{ it.ip || "-" }}</td>
@@ -88,6 +88,17 @@
             </tr>
           </tbody>
         </table>
+
+        <!-- 分页 -->
+        <div v-if="totalPages > 1" class="sr-pager">
+          <button type="button" class="btn btn-neutral" :disabled="page <= 1 || loading" @click="goPage(page - 1)">
+            ← 上一页
+          </button>
+          <span class="sr-pager-info">{{ page }} / {{ totalPages }}</span>
+          <button type="button" class="btn btn-neutral" :disabled="page >= totalPages || loading" @click="goPage(page + 1)">
+            下一页 →
+          </button>
+        </div>
       </div>
     </template>
 
@@ -118,6 +129,9 @@ const total = ref(0);
 const searched = ref(false);
 const lastKeyword = ref("");
 const busyKey = ref("");
+const page = ref(1);
+const PAGE_SIZE = 50;
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
 /** 通知父层黑名单数据已变化（拉黑后联动刷新黑名单面板） */
 const emit = defineEmits<{ (e: "blocked"): void }>();
@@ -135,10 +149,23 @@ function formatTime(ms?: number): string {
 async function doSearch() {
   const kw = keyword.value.trim();
   if (!kw) return;
+  page.value = 1;
+  await doQuery();
+}
+
+async function doQuery() {
+  const kw = keyword.value.trim();
+  if (!kw) return;
   loading.value = true;
   error.value = "";
   try {
-    const data = await querySearchLog({ mode: mode.value, keyword: kw, days: days.value, limit: 100 });
+    const data = await querySearchLog({
+      mode: mode.value,
+      keyword: kw,
+      days: days.value,
+      limit: PAGE_SIZE,
+      offset: (page.value - 1) * PAGE_SIZE,
+    });
     items.value = data.items ?? [];
     total.value = data.total ?? items.value.length;
     lastKeyword.value = kw;
@@ -148,6 +175,12 @@ async function doSearch() {
   } finally {
     loading.value = false;
   }
+}
+
+function goPage(p: number) {
+  if (p < 1 || p > totalPages.value) return;
+  page.value = p;
+  doQuery();
 }
 
 /** 弹确认框（替换 window.confirm），确认后执行拉黑 */
@@ -166,11 +199,13 @@ async function doBlock(ip: string) {
   busyKey.value = `block-${ip}`;
   try {
     await blockIp(ip, "manual");
-    // 从当前结果剔除该 IP 的行，避免重复操作
+    // 本页剔除该 IP；若本页删空且非第 1 页则回退一页，再刷新
     items.value = items.value.filter((it) => it.ip !== ip);
     total.value = Math.max(0, total.value - 1);
+    if (items.value.length === 0 && page.value > 1) page.value -= 1;
     showToast(`已拉黑 ${ip}`, "success");
     emit("blocked");
+    await doQuery();
   } catch (e: any) {
     showToast(e?.message || "拉黑失败", "error");
     throw e; // 让 modal 保持打开显示错误
@@ -179,3 +214,19 @@ async function doBlock(ip: string) {
   }
 }
 </script>
+
+<style scoped>
+.sr-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px 0;
+}
+.sr-pager-info {
+  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+  min-width: 60px;
+  text-align: center;
+}
+</style>

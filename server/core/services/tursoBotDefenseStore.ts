@@ -261,14 +261,18 @@ export class TursoBotDefenseStore {
 
   /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案 + 未达阈值短记录），
-   * 按最近活动倒序。返回 ip/reason/hitCount/blockCount/firstAt/lastAt/expiresAt，
-   * 由调用方结合 now 计算"封禁中 / 剩余时长 / 已解封"。
+   * 按最近活动倒序。支持：
+   * - ipFilter：IP 子串模糊搜索（LIKE，含 IPv4/IPv6 部分匹配）
+   * - status：'blocked'（仅封禁中）| 'free'（仅已解封）| undefined（全部）
+   * - offset：分页偏移（配合 limit 翻页）
+   * 返回 { items, total }：total 为当前筛选条件下的总条数（供前端分页）。
    */
   async listEntries(
     now: number,
-    limit: number
-  ): Promise<
-    {
+    limit: number,
+    opts: { ipFilter?: string; status?: "blocked" | "free"; offset?: number } = {}
+  ): Promise<{
+    items: {
       ip: string;
       reason: string;
       hitCount: number;
@@ -276,24 +280,51 @@ export class TursoBotDefenseStore {
       firstAt: number;
       lastAt: number;
       expiresAt: number;
-    }[]
-  > {
+    }[];
+    total: number;
+  }> {
     await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 500);
+    const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const filter = (opts.ipFilter ?? "").trim();
+    if (filter) {
+      where.push("ip LIKE ?");
+      params.push(`%${filter}%`);
+    }
+    if (opts.status === "blocked") {
+      where.push("expires_at > ? AND block_count > 0");
+      params.push(now);
+    } else if (opts.status === "free") {
+      where.push("expires_at <= ? OR block_count = 0");
+      params.push(now);
+    }
+    const whereSql = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+
+    const countRow = (
+      await this.client.execute(`SELECT COUNT(*) AS c FROM rejected_ips${whereSql}`, params)
+    ).rows[0];
+    const total = (countRow?.c as number) ?? 0;
+
     const rows = await this.client.execute(
       `SELECT ip, reason, hit_count, block_count, first_at, last_at, expires_at
-       FROM rejected_ips
-       ORDER BY last_at DESC LIMIT ?`,
-      [Math.min(Math.max(1, limit), 500)]
+       FROM rejected_ips${whereSql}
+       ORDER BY last_at DESC LIMIT ? OFFSET ?`,
+      [...params, safe, offset]
     );
-    return rows.rows.map((r) => ({
-      ip: r.ip as string,
-      reason: r.reason as string,
-      hitCount: (r.hit_count as number) ?? 0,
-      blockCount: (r.block_count as number) ?? 0,
-      firstAt: (r.first_at as number) ?? 0,
-      lastAt: (r.last_at as number) ?? 0,
-      expiresAt: (r.expires_at as number) ?? 0,
-    }));
+    return {
+      total,
+      items: rows.rows.map((r) => ({
+        ip: r.ip as string,
+        reason: r.reason as string,
+        hitCount: (r.hit_count as number) ?? 0,
+        blockCount: (r.block_count as number) ?? 0,
+        firstAt: (r.first_at as number) ?? 0,
+        lastAt: (r.last_at as number) ?? 0,
+        expiresAt: (r.expires_at as number) ?? 0,
+      })),
+    };
   }
 
   /**

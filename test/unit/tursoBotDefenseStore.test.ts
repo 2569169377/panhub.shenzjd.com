@@ -109,15 +109,47 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     // 短计数记录（未达阈值，block_count=0）
     await store.recordRejection("hit-b", "bad_term", now - 2000);
 
-    const entries = await store.listEntries(now, 100);
-    expect(entries).toHaveLength(2);
+    const { items, total } = await store.listEntries(now, 100);
+    expect(total).toBe(2);
+    expect(items).toHaveLength(2);
     // 最近活动倒序：ban-a(last_at=now-1000) 在 hit-b(last_at=now-2000) 前
-    expect(entries[0].ip).toBe("ban-a");
-    expect(entries[0].blockCount).toBe(2);
-    expect(entries[0].expiresAt).toBe(now - 1000 + 7 * day);
-    expect(entries[0].hitCount).toBe(0);
-    expect(entries[1].ip).toBe("hit-b");
-    expect(entries[1].blockCount).toBe(0);
+    expect(items[0].ip).toBe("ban-a");
+    expect(items[0].blockCount).toBe(2);
+    expect(items[0].expiresAt).toBe(now - 1000 + 7 * day);
+    expect(items[0].hitCount).toBe(0);
+    expect(items[1].ip).toBe("hit-b");
+    expect(items[1].blockCount).toBe(0);
+  });
+
+  it("listEntries：IP 模糊搜索 + 状态筛选 + offset 分页", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    // 封禁中（block_count=1，24h 未过期）
+    await store.extendBlock("203.0.113.1", "bot_ua", now - 1000);
+    // 已解封（7 天前拉黑 24h，已过期）
+    await store.extendBlock("203.0.113.2", "rate_limit", now - 7 * day);
+    // 未拉黑计数记录（block_count=0）
+    await store.recordRejection("9.9.9.9", "bad_term", now - 500);
+
+    // 1. IP 模糊搜索（匹配两个 203.0.113.x）
+    const fuzzy = await store.listEntries(now, 100, { ipFilter: "203.0.113" });
+    expect(fuzzy.total).toBe(2);
+    expect(fuzzy.items.map((i) => i.ip).sort()).toEqual(["203.0.113.1", "203.0.113.2"]);
+
+    // 2. 状态筛选：封禁中
+    const blocked = await store.listEntries(now, 100, { status: "blocked" });
+    expect(blocked.total).toBe(1);
+    expect(blocked.items[0].ip).toBe("203.0.113.1");
+
+    // 3. 状态筛选：已解封（含从未拉黑的计数记录）
+    const free = await store.listEntries(now, 100, { status: "free" });
+    expect(free.total).toBe(2);
+    expect(free.items.map((i) => i.ip).sort()).toEqual(["203.0.113.2", "9.9.9.9"]);
+
+    // 4. 分页：limit=1 offset=1 → 返回第 2 条
+    const page2 = await store.listEntries(now, 1, { offset: 1 });
+    expect(page2.items).toHaveLength(1);
+    expect(page2.total).toBe(3);
   });
 
   it("manuallyBlock：管理页手动拉黑直接 30 天（block_count 从 0 跳到 3）", async () => {
