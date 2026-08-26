@@ -152,6 +152,81 @@ export class ChannelConfigService {
   }
 
   /**
+   * 保存频道配置（2026-08-26 管理后台 CRUD 落库）
+   *
+   * 全量替换语义：把 priorityChannels / defaultChannels 加密写入 Turso
+   * 新版本（version 递增），并更新内存缓存使搜索立即生效。
+   *
+   * 数据模型说明：priority 频道 = 不下发给第三方（fork 站）的"固定下发
+   * 渠道"；default 频道 = 常规下发。同一频道出现在两个数组时，下发侧
+   * getGrantedChannels 会将其从 default 剔除，因此"设优先"与"取消优先"
+   * 等价于在两组间移动。为减少意外，保存时强制去重（同一频道只允许
+   * 出现在 priority 或 default 一侧，若两侧都有则从 default 剔除）。
+   *
+   * 前置条件：必须配置 TURSO_URL + CHANNEL_KEY（否则无法持久化，
+   * 抛出错误由调用方提示"当前未配置数据库，修改不会生效"）。
+   */
+  async save(next: ChannelConfig): Promise<ChannelConfig> {
+    const { tursoUrl, authToken, channelKey } = this.options;
+    if (!tursoUrl || !channelKey) {
+      throw new Error("频道配置保存在本部署不可用：缺少 TURSO_URL / CHANNEL_KEY");
+    }
+
+    // 校验 + 规范化：数组、非空字符串、去重、长度上限
+    const norm = (key: "priorityChannels" | "defaultChannels"): string[] => {
+      const list = Array.isArray(next[key]) ? next[key] : [];
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const item of list) {
+        const v = typeof item === "string" ? item.trim() : "";
+        if (!v || v.length > 100) continue;
+        if (seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+      }
+      return out;
+    };
+    let priority = norm("priorityChannels");
+    let defaults = norm("defaultChannels");
+
+    // priority 与 default 互斥：同出现在 default 的 priority 自动剔除（与下发语义一致）
+    const priSet = new Set(priority);
+    defaults = defaults.filter((c) => !priSet.has(c));
+
+    // 空配置保护：不允许把两份都清空（防止误删全部频道导致服务不可用）
+    if (priority.length === 0 && defaults.length === 0) {
+      throw new Error("频道清单不能为空：至少保留一个频道");
+    }
+
+    const { createClient } = await import("@libsql/client");
+    const client = createClient({ url: tursoUrl, authToken: authToken || undefined });
+    try {
+      const rows = (
+        await client.execute("SELECT COALESCE(MAX(version), 0) AS v FROM channel_config")
+      ).rows;
+      const version = Number(rows[0]?.v) + 1; // 并发安全：DB 端取 MAX 递增
+      const plain = JSON.stringify({ priorityChannels: priority, defaultChannels: defaults });
+      const payload = encryptChannelConfig(plain, channelKey);
+      await client.execute(
+        "INSERT INTO channel_config (version, payload, updated_at) VALUES (?, ?, ?)",
+        [version, payload, Date.now()]
+      );
+      // 立即生效：更新内存缓存
+      this.config = { version, priorityChannels: priority, defaultChannels: defaults };
+      loggers.search.info("频道配置已保存（管理后台 CRUD）", {
+        version,
+        priorityCount: priority.length,
+        defaultCount: defaults.length,
+      });
+      return this.getSnapshot();
+    } finally {
+      try {
+        client.close();
+      } catch {}
+    }
+  }
+
+  /**
    * 强制重新加载（清缓存后重新走加载链；用于管理后台"重载配置"）。
    * 与 ensureLoaded 不同：忽略已有缓存，总是重新拉取最新配置并更新 this.config。
    * 加载失败保持旧配置可用（fail-safe），并把错误抛给调用方记录。

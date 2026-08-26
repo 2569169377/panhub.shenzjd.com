@@ -148,6 +148,71 @@ describe("ChannelConfigService", () => {
     });
   });
 
+  it("save 写入新版本并使内存缓存立即生效（priority 与 default 互斥去重）", async () => {
+    // 初始：v1（pri1 + default a/b/c）
+    const encrypted = encryptChannelConfig(
+      JSON.stringify({ priorityChannels: ["pri1"], defaultChannels: ["a", "b", "c"] }),
+      KEY
+    );
+    await client.execute(
+      "INSERT INTO channel_config (version, payload, updated_at) VALUES (?, ?, ?)",
+      [1, encrypted, Date.now()]
+    );
+
+    const service = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+    });
+    await service.ensureLoaded();
+    expect(service.getSnapshot().version).toBe(1);
+
+    // save：新增 d、把 a 升为 priority（同时出现在 default 应被剔除）
+    const saved = await service.save({
+      priorityChannels: ["pri1", "a", "pri1"],   // 重复 pri1 应去重
+      defaultChannels: ["a", "b", "c", "d"],     // a 与 priority 重复应被剔除
+    });
+
+    expect(saved.version).toBe(2);
+    expect(saved.priorityChannels).toEqual(["pri1", "a"]);
+    expect(saved.defaultChannels).toEqual(["b", "c", "d"]);
+
+    // 内存缓存立即生效（无需 reload）
+    const snap = service.getSnapshot();
+    expect(snap.version).toBe(2);
+    expect(snap.priorityChannels).toEqual(["pri1", "a"]);
+
+    // 落库可读回：新 service 从 Turso 拉到 v2
+    const fresh = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+    });
+    await fresh.ensureLoaded();
+    expect(fresh.getSnapshot().version).toBe(2);
+    expect(fresh.getSnapshot().priorityChannels).toEqual(["pri1", "a"]);
+    expect(fresh.getSnapshot().defaultChannels).toEqual(["b", "c", "d"]);
+  });
+
+  it("save: 不允许把两份都清空（空配置保护）", async () => {
+    const service = new ChannelConfigService({
+      tursoUrl: `file:${dbPath}`,
+      channelKey: KEY,
+      envJson: JSON.stringify({ version: 1, priorityChannels: ["p"], defaultChannels: ["d"] }),
+    });
+    await service.ensureLoaded();
+    await expect(
+      service.save({ priorityChannels: [], defaultChannels: [] })
+    ).rejects.toThrow("不能为空");
+  });
+
+  it("save: 未配置 Turso / CHANNEL_KEY 时拒绝持久化", async () => {
+    const service = new ChannelConfigService({
+      envJson: JSON.stringify({ version: 1, priorityChannels: [], defaultChannels: ["d"] }),
+    });
+    await expect(
+      service.save({ priorityChannels: [], defaultChannels: ["d"] })
+    ).rejects.toThrow("不可用");
+  });
+
   it("CHANNELS_JSON 兜底（无 Turso）", async () => {
     const service = new ChannelConfigService({
       envJson: JSON.stringify({ ...SAMPLE, version: 7 }),
