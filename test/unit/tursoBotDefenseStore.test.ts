@@ -80,6 +80,30 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     expect(r.hitCount).toBe(1);
   });
 
+  // 2026-08-27 用户实测回归：自己 IP 被假拉黑（block_count=0 / hit_count=1 /
+  // expires_at=1h 短标记）却命中蜜罐。根因 isBlocked 只看 expires_at > now，
+  // 把 recordRejection 的"累计期短过期标记"误判成封禁。正式拉黑才有
+  // block_count > 0（extendBlock / manuallyBlock），计数记录不应算封禁。
+  it("isBlocked：仅 recordRejection 计数（block_count=0）不算封禁", async () => {
+    const now = 1_700_000_000_000;
+    await store.recordRejection("counter-only", "bot_ua", now);
+    // 1h 短标记未过期，但从未正式拉黑 → 不算封禁
+    expect(await store.isBlocked("counter-only", now + 30 * 60_000)).toBe(false);
+    expect(await store.isBlocked("counter-only", now + 59 * 60_000)).toBe(false);
+  });
+
+  it("isBlocked：正式拉黑（block_count>0 且未过期）才算封禁", async () => {
+    const now = 1_700_000_000_000;
+    await store.extendBlock("really-blocked", "bot_ua", now);
+    expect(await store.isBlocked("really-blocked", now + 60_000)).toBe(true);
+    // 过期后放行
+    expect(await store.isBlocked("really-blocked", now + 25 * 60 * 60_000)).toBe(false);
+  });
+
+  it("isBlocked：从未有任何记录的 IP 返回 false", async () => {
+    expect(await store.isBlocked("no-record", 1_700_000_000_000)).toBe(false);
+  });
+
   it("prune 只删从未拉黑过的过期条目，惯犯档案保留（跨周期继续升级）", async () => {
     const now = 1_700_000_000_000;
     const day = 24 * 60 * 60_000;
