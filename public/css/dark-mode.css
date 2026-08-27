@@ -1,5 +1,18 @@
 /* 深色模式 - Obsidian Tide 主题 */
+
+/* W3C color-scheme：系统偏好深色时声明页面支持深色，
+   让浏览器原生控件（select/date/checkbox/滚动条等）与第三方组件自动适配。
+   站点深色完全跟随系统（useDarkMode 仅监听 prefers-color-scheme），
+   故 @media 与 .dark 等价，这里双写兜底，确保任何入口都生效。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
 .dark {
+  /* 深色 class 兜底：即使 @media 未命中（如手动强制），也声明为深色 */
+  color-scheme: dark;
   --primary: #2dd4bf;
   --primary-dark: #14b8a6;
   --secondary: #fbbf24;

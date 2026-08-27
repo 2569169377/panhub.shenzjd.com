@@ -3,6 +3,8 @@
 
 @layer base {
 :root {
+  /* W3C color-scheme：声明页面支持浅色，让浏览器原生控件/第三方组件正确渲染 */
+  color-scheme: light;
   --primary: #0f766e;
   --primary-dark: #115e59;
   --secondary: #f59e0b;
