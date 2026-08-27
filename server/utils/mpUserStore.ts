@@ -14,6 +14,7 @@ import { verifyMpBearerToken } from "./mpToken";
  *     openid TEXT PRIMARY KEY,
  *     nickname TEXT NOT NULL DEFAULT '',        -- 昵称（≤30 字）
  *     avatar TEXT NOT NULL DEFAULT '',          -- 头像 data URL（base64）
+ *     unionid TEXT NOT NULL DEFAULT '',         -- 微信 unionid（个人订阅号未认证暂拿不到，先留空，为将来公众号/小程序账号关联铺路）
  *     updated_at INTEGER NOT NULL              -- 最后更新时间戳（ms）
  *   )
  */
@@ -27,6 +28,7 @@ export interface MpUserProfile {
   openid: string;
   nickname: string;
   avatar: string;
+  unionid: string;
   updatedAt: number;
 }
 
@@ -63,6 +65,7 @@ export class MpUserStore {
         openid TEXT PRIMARY KEY,
         nickname TEXT NOT NULL DEFAULT '',
         avatar TEXT NOT NULL DEFAULT '',
+        unionid TEXT NOT NULL DEFAULT '',
         updated_at INTEGER NOT NULL
       )`
     );
@@ -84,7 +87,7 @@ export class MpUserStore {
     await this.waitForInit();
     const r = (
       await this.client.execute(
-        "SELECT nickname, avatar, updated_at FROM mp_user WHERE openid = ?",
+        "SELECT nickname, avatar, unionid, updated_at FROM mp_user WHERE openid = ?",
         [openid.slice(0, 128)]
       )
     ).rows[0];
@@ -93,6 +96,7 @@ export class MpUserStore {
       openid,
       nickname: (r.nickname as string) ?? "",
       avatar: (r.avatar as string) ?? "",
+      unionid: (r.unionid as string) ?? "",
       updatedAt: (r.updated_at as number) ?? 0,
     };
   }
@@ -111,6 +115,7 @@ export class MpUserStore {
       openid: o,
       nickname: "",
       avatar: "",
+      unionid: "",
       updatedAt: 0,
     };
 
@@ -127,16 +132,17 @@ export class MpUserStore {
     }
 
     await this.client.execute(
-      `INSERT INTO mp_user (openid, nickname, avatar, updated_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO mp_user (openid, nickname, avatar, unionid, updated_at)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(openid) DO UPDATE SET
          nickname = excluded.nickname,
          avatar = excluded.avatar,
+         unionid = excluded.unionid,
          updated_at = excluded.updated_at`,
-      [o, nickname, avatar, now]
+      [o, nickname, avatar, old.unionid, now]
     );
 
-    return { openid: o, nickname, avatar, updatedAt: now };
+    return { openid: o, nickname, avatar, unionid: old.unionid, updatedAt: now };
   }
 }
 
