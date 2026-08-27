@@ -398,6 +398,20 @@ export class HotSearchService {
     );
   }
 
+  /**
+   * 合并查 totalTerms + dailyDayCount（2026-08-27 优化：
+   * hot-calendar 原并行调两个方法各打一次库，合并为一次 batch 往返）
+   */
+  async getCalendarMeta(): Promise<{
+    totalTerms: number;
+    dailyDayCount: number;
+  }> {
+    await this.waitForInit();
+    return this.getCached("calendar_meta", READ_TTL_SLOW_MS, () =>
+      this.requireStore().getTotalTermsAndDailyDayCount()
+    );
+  }
+
   getStoreType(): "turso" | "unavailable" {
     return this.storeType;
   }

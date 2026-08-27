@@ -115,6 +115,8 @@ export class BotDefenseService {
   private hitTimestamps = new Map<string, number[]>();
   /** 黑名单命中探查计数（已拉黑 IP 封禁期内仍在探测 → 达到阈值自动升级档位） */
   private probeCounts = new Map<string, { count: number; resetAt: number }>();
+  /** in-flight 去重：同 IP 并发 isBlocked 复用同一 Promise，避免缓存击穿 */
+  private inflightBlocked = new Map<string, Promise<boolean>>();
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -196,8 +198,25 @@ export class BotDefenseService {
     const neg = this.negCache.get(nip);
     if (neg && neg.expiresAt > now) return false;
 
-    if (!this.store) return false;
+    // in-flight 去重（2026-08-27）：前端一次搜索并发 35+ 子请求，
+    // negCache 在首请求完成前不命中 → 全部打库（缓存击穿）。
+    // 复用同 IP 进行中的 Promise，35 个并发只查库 1 次。
+    const inflight = this.inflightBlocked.get(nip);
+    if (inflight) return inflight;
 
+    const p = this.queryBlockedFromStore(nip, now).finally(() => {
+      this.inflightBlocked.delete(nip);
+    });
+    this.inflightBlocked.set(nip, p);
+    return p;
+  }
+
+  /** 实际查库 + 回写缓存（抽出供 in-flight 去重复用） */
+  private async queryBlockedFromStore(
+    nip: string,
+    now: number
+  ): Promise<boolean> {
+    if (!this.store) return false;
     try {
       const blocked = await this.store.isBlocked(nip, now);
       if (blocked) {
@@ -476,6 +495,7 @@ export class BotDefenseService {
     this.negCache.clear();
     this.hitTimestamps.clear();
     this.probeCounts.clear();
+    this.inflightBlocked.clear();
   }
 
   getStoreType(): "turso" | "unavailable" {

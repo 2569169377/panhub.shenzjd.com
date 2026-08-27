@@ -76,6 +76,12 @@ export interface IHotSearchStore {
   getDailySearches(date: string): Promise<number>;
 
   /**
+   * 一次 batch 查 totalTerms + dailyDayCount（2026-08-27 优化：
+   * hot-calendar 原本并行调两个方法 = 2 次 HTTP 往返，合并为 1 次 batch）
+   */
+  getTotalTermsAndDailyDayCount(): Promise<{ totalTerms: number; dailyDayCount: number }>;
+
+  /**
    * 搜索次数是否已积累足够（记录天数 >= minDays 才可展示，用户拍板：攒一星期再展示）
    * 返回 daily_searches 中有记录的天数
    */

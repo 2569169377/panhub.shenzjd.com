@@ -82,26 +82,16 @@ export class TursoHotSearchStore implements IHotSearchStore {
     if (!normalized) return;
     const d = Math.max(1, delta);
 
-    // 全量词库表：每次搜索 count + d、更新 last_at（hot_searches 表已废弃，只写这一张）
-    const termRow = (
-      await this.client.execute(
-        "SELECT count FROM search_terms WHERE term = ?",
-        [normalized]
-      )
-    ).rows[0];
-    if (termRow) {
-      await this.client.execute(
-        "UPDATE search_terms SET count = count + ?, last_at = ? WHERE term = ?",
-        [d, now, normalized]
-      );
-      loggers.hotSearch.debug("搜索词", { term: normalized, isNew: false });
-    } else {
-      await this.client.execute(
-        "INSERT INTO search_terms (term, count, first_at, last_at) VALUES (?, ?, ?, ?)",
-        [normalized, d, now, now]
-      );
-      loggers.hotSearch.debug("搜索词", { term: normalized, isNew: true });
-    }
+    // 原子 upsert（2026-08-27 优化：消除 SELECT-then-UPDATE 两段式，
+    // 每次 flush 往返数减半；与 tursoBotDefenseStore.recordRejection 写法统一）
+    await this.client.execute(
+      `INSERT INTO search_terms (term, count, first_at, last_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(term) DO UPDATE SET
+         count = count + excluded.count,
+         last_at = excluded.last_at`,
+      [normalized, d, now, now]
+    );
   }
 
   /**
@@ -134,18 +124,28 @@ export class TursoHotSearchStore implements IHotSearchStore {
     await this.waitForInit();
     const dayStart = beijingDayStart(formatDateKey(Date.now()));
     const safeLimit = Math.min(Math.max(1, limit), 100);
+    // 2026-08-27 优化：去掉 ORDER BY RANDOM() 全表扫，
+    // 改为走索引 idx_search_terms_last 取候选池，内存 shuffle 后截取
+    const candidateLimit = Math.min(safeLimit * 4, 400);
     const rows = (
       await this.client.execute(
         `SELECT term, count, first_at, last_at FROM search_terms
          WHERE last_at >= ?
-         ORDER BY RANDOM()
+         ORDER BY last_at DESC
          LIMIT ?`,
-        [dayStart, safeLimit]
+        [dayStart, candidateLimit]
       )
     ).rows;
 
+    // Fisher-Yates 内存 shuffle，保证每次刷新有新鲜感
+    for (let i = rows.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rows[i], rows[j]] = [rows[j], rows[i]];
+    }
+    const picked = rows.slice(0, safeLimit);
+
     const out: HotSearchItem[] = [];
-    for (const obj of rows) {
+    for (const obj of picked) {
       out.push({
         term: obj.term as string,
         score: obj.count as number,
@@ -340,6 +340,24 @@ export class TursoHotSearchStore implements IHotSearchStore {
       await this.client.execute("SELECT COUNT(DISTINCT date) as c FROM daily_searches")
     ).rows[0];
     return (row?.c ?? 0) as number;
+  }
+
+  /**
+   * 一次 batch 查 totalTerms + dailyDayCount（2026-08-27 优化：
+   * hot-calendar 原并行调两个方法 = 2 次 HTTP 往返，合并为 1 次 batch）
+   */
+  async getTotalTermsAndDailyDayCount(): Promise<{
+    totalTerms: number;
+    dailyDayCount: number;
+  }> {
+    await this.waitForInit();
+    const results = await this.client.batch([
+      "SELECT COUNT(*) as c FROM search_terms",
+      "SELECT COUNT(DISTINCT date) as c FROM daily_searches",
+    ]);
+    const totalTerms = ((results[0].rows[0]?.c as number) ?? 0);
+    const dailyDayCount = ((results[1].rows[0]?.c as number) ?? 0);
+    return { totalTerms, dailyDayCount };
   }
 
   close(): void {

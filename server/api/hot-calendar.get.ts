@@ -38,13 +38,14 @@ export default defineEventHandler(async (event) => {
   }
 
   const today = formatDateKey(Date.now());
-  const [daysData, totalTerms, todaySearches, searchesDayCount] = await Promise.all([
+  const [daysData, meta, todaySearches] = await Promise.all([
     service.getCalendar(days),
-    service.getTotalTerms(),
+    service.getCalendarMeta(),
     service.getDailySearches(today),
-    service.getDailySearchesDayCount(),
   ]);
 
+  const totalTerms = meta.totalTerms;
+  const searchesDayCount = meta.dailyDayCount;
   const todayTerms = daysData.find((d) => d.date === today)?.count ?? 0;
 
   return {
