@@ -4,7 +4,7 @@
  *
  * 原因：
  * 1. 原实现用 fetch(/api/search?res=merged_by_type) 一次性等所有插件返回，体验极慢；
- *    首页 useSearch 是流式渐进渲染，且带用户设置/密码门/暂停续搜等完整能力。
+ *    首页 useSearch 是流式渐进渲染，且带用户设置/暂停续搜等完整能力。
  * 2. /s/[term] 是动态参数页，搜索引擎几乎无法批量收录，SEO 价值极低，反而分流用户。
  *
  * server 端由 nuxt.config.ts routeRules 直接 301 到 /?q=xxx（Nitro 层，不渲染本组件）；

@@ -19,7 +19,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   }
   return undefined;
 }
-import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
 import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
@@ -37,7 +37,6 @@ import {
 import type { GenericResponse, SearchRequest } from "../core/types/models";
 
 export default defineEventHandler(async (event) => {
-  requireSearchAuth(event);
   // IP 黑名单拦截（2026-08-24 用户拍板：累积到阈值的攻击源 24h 内拒绝所有搜索请求）
   // 2026-08-27 改为蜜罐假数据：不再 403（爬虫收到 403 仍会继续请求），
   // 改为返回标准结构的公众号宣传数据——无论搜什么都是同一份纯静态内容，

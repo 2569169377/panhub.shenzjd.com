@@ -1,6 +1,6 @@
 import { defineEventHandler, getQuery, createError, createEventStream } from "h3";
 import type { H3Event } from "h3";
-import { requireSearchAuth, requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
 import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
@@ -46,7 +46,6 @@ const SEARCH_MAX_RESULTS_DEFAULT = 90;
 
 export default defineEventHandler(async (event: H3Event) => {
   // ---- 入口鉴权（只做一次）----
-  requireSearchAuth(event);
   const ip = getClientIp(event);
   if (await getOrCreateBotDefenseService().isBlocked(ip)) {
     // 2026-08-27 改为蜜罐假数据：不再 403（爬虫收到 403 仍会继续请求），

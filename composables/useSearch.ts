@@ -26,7 +26,7 @@ export interface SearchOptions {
     concurrency: number;
     pluginTimeoutMs: number;
   };
-  /** 当搜索接口返回 401 时回调（密码门） */
+  /** 当搜索接口返回 401 时回调（公众号认证失效） */
   onAuthRequired?: () => void;
 }
 

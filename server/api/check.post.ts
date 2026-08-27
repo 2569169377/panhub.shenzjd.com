@@ -1,5 +1,4 @@
 import { defineEventHandler, readBody, sendError, createError } from "h3";
-import { requireSearchAuth } from "../utils/requireAuth";
 import { checkLinks } from "../core/services/linkChecker";
 import type { CheckItem, LinkCheckResult } from "../core/services/linkChecker";
 
@@ -14,8 +13,6 @@ const MAX_URL_LENGTH = 500;
  * -> { code: 0, message: "success", data: { results: LinkCheckResult[] } }
  */
 export default defineEventHandler(async (event) => {
-  requireSearchAuth(event);
-
   let body: any = null;
   try {
     body = await readBody(event);

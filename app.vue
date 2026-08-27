@@ -8,7 +8,7 @@
     </div>
 
     <!-- 布局切换（2026-08-25 重构）：正常客户页面 → layouts/default.vue
-         （导航/公告/密码门/浮窗）；admin 页 → layouts/admin.vue（纯净后台） -->
+         （导航/公告/浮窗）；admin 页 → layouts/admin.vue（纯净后台） -->
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

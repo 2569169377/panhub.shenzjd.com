@@ -1,5 +1,5 @@
 <template>
-  <!-- 正常客户页面布局（2026-08-25 从 app.vue 搬移）：导航/公告/密码门/浮窗 -->
+  <!-- 正常客户页面布局（2026-08-25 从 app.vue 搬移）：导航/公告/浮窗 -->
   <!-- admin 页面走 layouts/admin.vue（纯净后台），与本站完全解耦 -->
   <!-- 顶部导航：接入 site-navbar Web Component（头像登录依赖 wx-auth-sdk，脚本见下方 useHead） -->
   <ClientOnly>
@@ -26,15 +26,6 @@
     <span class="footer-sep">·</span>
     <span class="footer-copy">© {{ new Date().getFullYear() }} PanHub</span>
   </footer>
-
-  <!-- 密码门（仅在用户发起搜索时弹出） -->
-  <ClientOnly>
-    <PasswordGate
-      :show="showPasswordGate"
-      :error="auth.error.value || ''"
-      :submitting="unlockSubmitting"
-      @unlock="onUnlock" />
-  </ClientOnly>
 </template>
 
 <script setup lang="ts">
@@ -65,36 +56,9 @@ useHead({
 });
 
 const { loadSettings } = useSettings();
-const auth = useAuth();
-const showPasswordGate = ref(false);
-
-const unlockSubmitting = ref(false);
-const pendingOnUnlock = ref<(() => void) | null>(null);
-
-function requestUnlock(onSuccess?: () => void) {
-  pendingOnUnlock.value = onSuccess ?? null;
-  showPasswordGate.value = true;
-}
-
-async function onUnlock(password: string) {
-  unlockSubmitting.value = true;
-  const ok = await auth.unlock(password);
-  unlockSubmitting.value = false;
-  if (ok) {
-    showPasswordGate.value = false;
-    const cb = pendingOnUnlock.value;
-    pendingOnUnlock.value = null;
-    if (cb) {
-      nextTick(() => cb());
-    }
-  }
-}
-
-provide("requestUnlock", requestUnlock);
 
 onMounted(() => {
   loadSettings();
-  auth.fetchStatus();
   checkAnnouncement();
 });
 

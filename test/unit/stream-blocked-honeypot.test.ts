@@ -26,10 +26,9 @@ vi.mock("../../server/core/services/botDefense", () => ({
   }),
 }));
 
-// mock 鉴权：requireSearchAuth / requireHumanOrCredential / requireWxAuth
+// mock 鉴权：requireHumanOrCredential / requireWxAuth
 // 在测试环境直接放行（真实 handler 内部 useRuntimeConfig 依赖 Nitro 运行时）
 vi.mock("../../server/utils/requireAuth", () => ({
-  requireSearchAuth: () => {},
   requireHumanOrCredential: () => {},
   requireWxAuth: async () => {},
 }));
