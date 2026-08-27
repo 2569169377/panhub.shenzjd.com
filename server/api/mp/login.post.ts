@@ -1,6 +1,6 @@
 import { defineEventHandler, readBody, createError } from "h3";
-import { getMpTokenStore } from "../utils/mpToken";
-import { loggers } from "../core/utils/logger";
+import { getMpTokenStore } from "../../utils/mpToken";
+import { loggers } from "../../core/utils/logger";
 
 /**
  * 小程序登录接口（2026-08-28 新增）
