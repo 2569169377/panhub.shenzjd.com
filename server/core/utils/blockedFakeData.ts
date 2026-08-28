@@ -20,7 +20,7 @@ import type { GenericResponse, MergedLinks, SearchResponse } from "../types/mode
 
 /** 假数据宣传文案（纯静态，所有黑名单 IP 通用） */
 const FAKE_NOTE =
-  "🔍 资源已被保护，请关注公众号【神族九帝】回复“网盘”获取最新资源";
+  "资源已被保护，请关注公众号【神族九帝】 https://panhub.shenzjd.com/";
 
 /** 假数据跳转目标：指向本站官网（页面带公众号二维码引导关注） */
 const FAKE_URL = "https://panhub.shenzjd.com/";

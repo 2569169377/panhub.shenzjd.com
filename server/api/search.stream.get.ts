@@ -91,7 +91,48 @@ export default defineEventHandler(async (event: H3Event) => {
     throw createError({ statusCode: 429, statusMessage: "too many requests" });
   }
   requireHumanOrCredential(event);
-  await requireWxAuth(event);
+  // 微信关注公众号登录态校验（恒强制）。三态：
+  // - "ok"           → 放行
+  // - "honeypot"     → 无凭证（爬虫/直调）→ 返回蜜罐流式假数据帮我们传播公众号
+  // - "unauthorized" → 有凭证但失效（取消关注真人）→ 401 触发前端重新引导关注
+  const wxAuth = await requireWxAuth(event);
+  if (wxAuth === "honeypot") {
+    loggers.search.debug(`无凭证请求，返回蜜罐假数据(stream)`, {
+      ip,
+      method: event.method,
+      path: event.path,
+    });
+    const fakeStream = createEventStream(event);
+    const merged = buildBlockedFakeMerged();
+    const total = Object.values(merged).reduce(
+      (sum, arr) => sum + arr.length,
+      0
+    );
+    // 与黑名单分支同构：先 push 后 send（h3 createEventStream 惰性，
+    // push 必须在 send() 之后才真正写入流，见黑名单分支注释）
+    void (async () => {
+      await fakeStream.push({
+        event: "chunk",
+        data: JSON.stringify({ done: 1, total, merged }),
+      });
+      await fakeStream.push({
+        event: "done",
+        data: JSON.stringify({
+          total,
+          warnings: [],
+          pluginCount: 0,
+          merged,
+          completedIndices: [0],
+          reachedLimit: false,
+        }),
+      });
+      await fakeStream.close();
+    })();
+    return fakeStream.send();
+  }
+  if (wxAuth === "unauthorized") {
+    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+  }
 
   const config = useRuntimeConfig();
   await getChannelConfigService().ensureLoaded();

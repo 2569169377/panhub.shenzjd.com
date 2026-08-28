@@ -61,8 +61,22 @@ export default defineEventHandler(async (event) => {
   }
   // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
   requireHumanOrCredential(event);
-  // 微信关注公众号登录态校验（恒强制，本地 dev 放行）
-  await requireWxAuth(event);
+  // 微信关注公众号登录态校验（恒强制）。三态：
+  // - "ok"           → 放行
+  // - "honeypot"     → 无凭证（爬虫/直调）→ 返回蜜罐假数据帮我们传播公众号
+  // - "unauthorized" → 有凭证但失效（取消关注真人）→ 401 触发前端重新引导关注
+  const wxAuth = await requireWxAuth(event);
+  if (wxAuth === "honeypot") {
+    loggers.search.debug(`无凭证请求，返回蜜罐假数据`, {
+      ip,
+      method: event.method,
+      path: event.path,
+    });
+    return buildBlockedFakeGenericResponse();
+  }
+  if (wxAuth === "unauthorized") {
+    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+  }
   const config = useRuntimeConfig();
   // 确保频道配置已加载（Turso 加密配置 → 解密缓存），幂等、带 TTL
   await getChannelConfigService().ensureLoaded();

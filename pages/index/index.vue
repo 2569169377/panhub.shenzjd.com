@@ -184,7 +184,10 @@ onMounted(async () => {
       kw.value = q; // 仍回填输入框，页面可读
     } else {
       kw.value = q;
-      await doSearch();
+      // 2026-08-28：必须走 onSearch（内部先 checkSearchAuth），不能直接
+      // doSearch——否则 URL 带 ?q= 时绕过公众号认证，无凭证真人会拿到
+      // 蜜罐数据而非弹出认证弹窗（与用户手动搜索行为一致）。
+      await onSearch();
     }
   }
   if (doubanHotRef.value) await doubanHotRef.value.init();

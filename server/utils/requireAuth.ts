@@ -3,7 +3,7 @@ import { createError, getHeader, getRequestHeader } from "h3";
 import { isBotUA } from "../../utils/botUA";
 import { loggers } from "../core/utils/logger";
 import { getClientIp } from "../middleware/rateLimiter";
-import { verifyWxAuthOnceCached } from "./wxAuthCheck";
+import { getWxAuthCredential, verifyWxAuthOnceCached } from "./wxAuthCheck";
 import { verifyMpBearerToken } from "./mpToken";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 
@@ -71,8 +71,25 @@ export function requireHumanOrCredential(event: H3Event): void {
  * 2026-08-28 变更：
  * - 删除 x-panhub-client-secret 放行（无校验，安全漏洞）
  * - Bearer 从"直接放行"改为"校验 token 有效性"
+ *
+ * 2026-08-28 蜜罐化改造：
+ * - 返回值从 void 改为三态 WxAuthResult：
+ *   - "ok"           → 放行（有效凭证）
+ *   - "honeypot"     → 完全无凭证（爬虫/脚本/直调）→ 调用方返回蜜罐假数据
+ *   - "unauthorized" → 有凭证但失效（如取消关注）→ 调用方返回 401 引导重新关注
+ * - 不再 recordRejection 拉黑（用户拍板：让爬虫持续抓蜜罐假数据传播公众号，不封禁）
+ * - 蜜罐假数据由各搜索接口在返回 "honeypot" 时返回
+ *   （复用黑名单蜜罐 buildBlockedFake*，见 search.get/post/stream）
+ *
+ * 区分"无凭证/凭证失效"的原因（2026-08-28 用户拍板）：
+ * - 页面用户搜索前必过前端 checkSearchAuth（读 cookie 判断），无 cookie 时
+ *   前端直接弹窗、根本不会发请求 → 后端收到的"无凭证"请求只可能是爬虫/直调
+ * - 但"有凭证但失效"（如取消关注）时，前端 isVerified 缓存仍为 true 会放行
+ *   发请求，此时必须返回 401 触发前端 forceVerify 重新引导关注，不能给蜜罐
  */
-export async function requireWxAuth(event: H3Event): Promise<void> {
+export type WxAuthResult = "ok" | "honeypot" | "unauthorized";
+
+export async function requireWxAuth(event: H3Event): Promise<WxAuthResult> {
   // 小程序 Bearer token：校验有效性，有效放行
   const auth = getRequestHeader(event, "authorization");
   if (auth && auth.startsWith("Bearer ")) {
@@ -82,17 +99,16 @@ export async function requireWxAuth(event: H3Event): Promise<void> {
       if (openid) {
         (event.context as Record<string, any>).__wxAuthOpenid = openid;
       }
-      return;
+      return "ok";
     }
-    // 无效 token → 401（不降级走公众号校验，语义清晰）
+    // 无效 Bearer token → 有凭证但失效 → 401（不降级走公众号校验，语义清晰）
     const ip = getClientIp(event);
     loggers.search.warn(`拦截无效 Bearer token`, {
       ip,
       path: event.path,
       method: event.method,
     });
-    void getOrCreateBotDefenseService().recordRejection(ip, "bot_ua");
-    throw createError({ statusCode: 401, statusMessage: "invalid token" });
+    return "unauthorized";
   }
 
   const ok = await verifyWxAuthOnceCached(event);
@@ -103,8 +119,13 @@ export async function requireWxAuth(event: H3Event): Promise<void> {
       path: event.path,
       method: event.method,
     });
-    // 累积到 IP 黑名单：未关注公众号却直调搜索 API 的脚本行为，等同攻击意图
-    void getOrCreateBotDefenseService().recordRejection(ip, "bot_ua");
-    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+    // 区分"无凭证"（爬虫→蜜罐）与"有凭证但失效"（取消关注真人→401）：
+    // 无凭证 = 未携带 wxauth-token/wxauth-openid cookie，只可能是爬虫/直调
+    const cred = getWxAuthCredential(event);
+    if (!cred.token && !cred.openid) {
+      return "honeypot";
+    }
+    return "unauthorized";
   }
+  return "ok";
 }
