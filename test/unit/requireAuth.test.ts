@@ -1,16 +1,15 @@
 /**
  * requireAuth（requireHumanOrCredential / requireWxAuth）单元测试
  *
- * 验证（2026-08-28 更新：Bearer 改为校验 token，删除 client-secret；
+ * 验证（2026-08-28 更新：Bearer 统一走 wx-auth 远程校验，自建 mpToken 已删除；
  * 2026-08-28 蜜罐化：requireWxAuth 返回三态，未认证不再抛 401）：
  * - bot/第三方 API UA 无 Bearer → 403（入口拦截，不执行搜索）
  * - bot/第三方 API UA 带 Bearer → 放行（有效性由 requireWxAuth 校验）
  * - 正常浏览器 UA → 放行
  * - requireWxAuth 三态：
- *   - "ok"           → 有效凭证，放行
+ *   - "ok"           → 有效凭证（Bearer 或 cookie），放行
  *   - "honeypot"     → 无凭证（爬虫/直调）→ 调用方返回蜜罐假数据
- *   - "unauthorized" → 有凭证但失效（取消关注真人）→ 调用方返回 401
- *   - 有 Bearer：有效 → ok，无效 → unauthorized
+ *   - "unauthorized" → 有凭证但失效（无效 Bearer / 取消关注）→ 调用方返回 401
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -23,16 +22,11 @@ vi.mock("h3", () => ({
   getRequestHeader: vi.fn(),
 }));
 
-// mock wxAuthCheck：避免测试触发远程 HTTP
+// mock wxAuthCheck：避免测试触发远程 HTTP（Bearer 与 cookie 统一走它）
 vi.mock("../../server/utils/wxAuthCheck", () => ({
   verifyWxAuthOnceCached: vi.fn(async () => true),
   getWxAuthCredential: vi.fn(() => ({})),
-}));
-
-// mock mpToken：verifyMpBearerToken 可控
-vi.mock("../../server/utils/mpToken", () => ({
-  verifyMpBearerToken: vi.fn(async () => ({ valid: false })),
-  getMpTokenStore: vi.fn(() => null),
+  getBearerToken: vi.fn(() => null),
 }));
 
 // mock rateLimiter：避免加载 h3 defineEventHandler（getClientIp 供 requireAuth 日志用）
@@ -51,11 +45,10 @@ vi.mock("../../server/core/services/botDefense", () => ({
 import { requireHumanOrCredential, requireWxAuth } from "../../server/utils/requireAuth";
 import * as h3 from "h3";
 import * as wxAuthCheck from "../../server/utils/wxAuthCheck";
-import * as mpToken from "../../server/utils/mpToken";
 
 const mockedVerifyWxAuthOnce = vi.mocked(wxAuthCheck.verifyWxAuthOnceCached);
 const mockedGetWxAuthCredential = vi.mocked(wxAuthCheck.getWxAuthCredential);
-const mockedVerifyMpBearer = vi.mocked(mpToken.verifyMpBearerToken);
+const mockedGetBearerToken = vi.mocked(wxAuthCheck.getBearerToken);
 
 const mockedGetHeader = vi.mocked(h3.getHeader);
 const mockedGetRequestHeader = vi.mocked(h3.getRequestHeader);
@@ -147,62 +140,58 @@ describe("isBotUA（依赖引用完整性）", () => {
 describe("requireWxAuth", () => {
   beforeEach(() => {
     mockedVerifyWxAuthOnce.mockReset();
-    mockedVerifyMpBearer.mockReset();
     mockedGetWxAuthCredential.mockReset();
+    mockedGetBearerToken.mockReset();
     mockedGetHeader.mockReset();
     mockedGetRequestHeader.mockReset();
   });
 
-  it("有效 Bearer token → 返回 ok（小程序）", async () => {
-    mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
-      name.toLowerCase() === "authorization" ? "Bearer abc" : undefined
-    );
-    mockedVerifyMpBearer.mockResolvedValue({ valid: true, openid: "mp-openid-1" });
+  it("有效 Bearer token（wx-auth 校验通过）→ 返回 ok（小程序）", async () => {
+    mockedGetBearerToken.mockReturnValue("abc");
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(true);
     await expect(requireWxAuth(makeEvent())).resolves.toBe("ok");
-    expect(mockedVerifyMpBearer).toHaveBeenCalled();
-    expect(mockedVerifyWxAuthOnce).not.toHaveBeenCalled();
+    expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
   });
 
-  it("无效 Bearer token → 返回 unauthorized（不降级走公众号校验）", async () => {
-    mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
-      name.toLowerCase() === "authorization" ? "Bearer invalid" : undefined
-    );
-    mockedVerifyMpBearer.mockResolvedValue({ valid: false });
+  it("无效 Bearer token → 返回 unauthorized（有凭证但失效，不降级）", async () => {
+    mockedGetBearerToken.mockReturnValue("invalid");
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
     await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
-    expect(mockedVerifyMpBearer).toHaveBeenCalled();
-    expect(mockedVerifyWxAuthOnce).not.toHaveBeenCalled();
   });
 
   it("无 Bearer + 无凭证 cookie → honeypot（爬虫/直调，蜜罐由调用方返回）", async () => {
-    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    mockedGetBearerToken.mockReturnValue(null);
     mockedGetWxAuthCredential.mockReturnValue({});
-    mockedGetRequestHeader.mockReturnValue(undefined);
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
     await expect(requireWxAuth(makeEvent())).resolves.toBe("honeypot");
     expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
   });
 
   it("无 Bearer + 有凭证但失效 → unauthorized（取消关注真人，401 引导重新关注）", async () => {
-    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    mockedGetBearerToken.mockReturnValue(null);
     mockedGetWxAuthCredential.mockReturnValue({ token: "expired-token" });
-    mockedGetRequestHeader.mockReturnValue(undefined);
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
     await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
     expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
   });
 
-  it("无 Bearer：校验通过 → 返回 ok", async () => {
+  it("无 Bearer：cookie 校验通过 → 返回 ok", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({ token: "tok" });
     mockedVerifyWxAuthOnce.mockResolvedValue(true);
-    mockedGetRequestHeader.mockReturnValue(undefined);
     await expect(requireWxAuth(makeEvent())).resolves.toBe("ok");
   });
 
-  it("不再放行 x-panhub-client-secret（2026-08-28 删除）→ 走公众号校验", async () => {
-    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+  it("不再放行 x-panhub-client-secret（2026-08-28 删除）→ 无凭证按蜜罐处理", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
     mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
     mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
       name.toLowerCase() === "x-panhub-client-secret" ? "secret" : undefined
     );
     await expect(requireWxAuth(makeEvent())).resolves.toBe("honeypot");
-    expect(mockedVerifyMpBearer).not.toHaveBeenCalled();
     expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
   });
 });

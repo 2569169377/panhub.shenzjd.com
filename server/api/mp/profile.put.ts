@@ -2,10 +2,10 @@ import { defineEventHandler, readBody, createError } from "h3";
 import { getMpUserStore, getOpenidFromBearer } from "../../utils/mpUserStore";
 
 /**
- * 更新小程序用户资料（2026-08-28 新增）
+ * 更新小程序用户资料（2026-08-28 新增，同日改为 wx-auth 认证）
  *
  * PUT /api/mp/profile
- * Header: Authorization: Bearer <mp token>
+ * Header: Authorization: Bearer <wx-auth token>（wx-auth /api/auth/mp-login 签发）
  * Body: { nickname?: string, avatar?: string }
  *   - nickname ≤30 字（超出截断）；avatar 为 data URL（base64，≤256KB）
  *   - 只更新传入的字段

@@ -100,10 +100,10 @@ export default defineNuxtConfig({
       // 2026-08-26：微信认证已写死强制（无开关）——不再有 wxAuthEnforce/
       // NUXT_PUBLIC_WX_AUTH_ENFORCE 配置项。前端 useWxAuth 恒 required，
       // 后端 requireWxAuth 恒拦截（详见两处代码注释）。
-      // 2026-08-28：小程序登录走独立通道（不依赖公众号认证）：
-      // 环境变量 MP_APPID / MP_SECRET 配置小程序凭证，
-      // /api/mp/login 用 code2session 换 openid → 签发 Bearer token，
-      // requireWxAuth 校验 Bearer 有效性（详见 server/utils/mpToken.ts）。
+      // 2026-08-28：认证统一收敛到 wx-auth 服务（唯一登录通道）：
+      // 小程序 Bearer token 由 wx-auth /api/auth/mp-login 签发，网页端
+      // 公众号 cookie 由 wx-auth-sdk 种下，panhub 只做转发校验
+      // （server/utils/wxAuthCheck.ts），不再持有微信密钥/自建登录。
     },
   },
 });

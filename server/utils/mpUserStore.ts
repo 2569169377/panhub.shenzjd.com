@@ -1,6 +1,6 @@
 import type { H3Event } from "h3";
 import { createClient, type Client } from "@libsql/client";
-import { verifyMpBearerToken } from "./mpToken";
+import { getWxAuthUserFromBearer } from "./wxAuthCheck";
 
 /**
  * 小程序用户资料存储（2026-08-28 新增）
@@ -169,12 +169,18 @@ export function resetMpUserStore(): void {
 }
 
 /**
- * 从请求头提取 Bearer token 对应的 openid（小程序登录态）。
- * 复用 mpToken 的校验（verifyMpBearerToken），无效/无 token 返回 null。
+ * 从请求头 Bearer token 解出 openid（2026-08-28 起改走 wx-auth）
+ *
+ * token 由 wx-auth /api/auth/mp-login 签发（自建登录已下线），校验转发
+ * wx-auth /api/auth/check（含 10min 跨请求缓存）。身份取法：
+ * - 小程序用户 → user.mpOpenid（裸 openid，mp_user 表的 key）
+ * - 公众号用户 → user.openid
+ * 无 Bearer / 未认证 / wx-auth 故障 → null（调用方 401，fail-closed）。
  */
 export async function getOpenidFromBearer(
   event: H3Event
 ): Promise<string | null> {
-  const { valid, openid } = await verifyMpBearerToken(event);
-  return valid ? (openid ?? null) : null;
+  const user = await getWxAuthUserFromBearer(event);
+  if (!user) return null;
+  return user.mpOpenid || user.openid || null;
 }

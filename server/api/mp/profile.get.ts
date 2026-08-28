@@ -2,10 +2,10 @@ import { defineEventHandler, createError } from "h3";
 import { getMpUserStore, getOpenidFromBearer } from "../../utils/mpUserStore";
 
 /**
- * 获取小程序用户资料（2026-08-28 新增）
+ * 获取小程序用户资料（2026-08-28 新增，同日改为 wx-auth 认证）
  *
  * GET /api/mp/profile
- * Header: Authorization: Bearer <mp token>
+ * Header: Authorization: Bearer <wx-auth token>（wx-auth /api/auth/mp-login 签发）
  * 返回 { code: 0, data: { nickname, avatar, updatedAt } }
  * 未设置过资料时 data 里 nickname/avatar 为空串（前端用默认头像/占位文案）。
  */
