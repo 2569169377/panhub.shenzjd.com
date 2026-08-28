@@ -9,10 +9,11 @@
         <!-- 品牌（设计稿：渐变 Logo + 名称） -->
         <NuxtLink to="/" class="admin-brand" title="返回首页">
           <span class="admin-brand-badge">
-            <!-- 设计稿 LogoMark（SVG 白 P 形） -->
-            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-              <path d="M3 15V4h6.2c2.2 0 3.8 1.4 3.8 3.5 0 2-1.5 3.5-3.7 3.5H6.4V15H3Zm3.4-6.2h2.5c.9 0 1.5-.5 1.5-1.3 0-.8-.6-1.3-1.5-1.3H6.4v2.6Z" fill="currentColor" />
-            </svg>
+            <img
+              src="https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260828-151509-5bk7.svg"
+              alt="PanHub"
+              class="admin-brand-logo"
+            />
           </span>
           <span class="admin-brand-name">PanHub 管理后台</span>
         </NuxtLink>
@@ -214,12 +215,18 @@ provide(ADMIN_NAV_KEY, { activeKey, setActive });
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #2563eb, #2151c7);
-  color: #fff;
+  background: #fff;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 2px 6px rgba(15, 118, 110, 0.2);
+  overflow: hidden;
+}
+.admin-brand-logo {
+  width: 30px;
+  height: 30px;
+  display: block;
+  object-fit: cover;
 }
 .admin-brand-name {
   font-size: 15px;
