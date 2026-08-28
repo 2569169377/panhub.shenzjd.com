@@ -45,10 +45,6 @@ docker run -d -p 4000:4000 -v /root/panhub/data:/app/data \
 
 - [Bot 防御与黑名单运维](./docs/bot-defense-and-tuning.md)：IP 黑名单机制、公众号登录强制认证说明、手工解封 SQL
 
-## 💎 赞助商
-
-[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_c7ff4ca1ff8b13e2b914)
-
 ## 📄 版权声明
 
 Copyright © 2025-2026 shenzjd. All rights reserved.
