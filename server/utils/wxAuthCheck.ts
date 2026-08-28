@@ -13,7 +13,7 @@ import { loggers } from "../core/utils/logger";
  * - authenticated: true → 放行，user 里带身份：
  *   - user.openid   全局唯一身份（小程序用户形如 mp:oXXXX，公众号用户是 oXXXX）
  *   - user.type     "mp"（小程序）/ "official"（公众号）
- *   - user.mpOpenid 小程序用户的裸 openid（panhub 本地 mp_user 表的 key）
+ *   - user.mpOpenid 小程序用户的裸 openid（资料存 wx-auth 账号系统，panhub 不再本地存储）
  *   老调用方（如 parse）只读 authenticated，不受影响。
  *
  * 关键设计（2026-08-26 用户拍板：写死强制，移除开关）：
@@ -39,7 +39,7 @@ export interface WxAuthUser {
   openid: string;
   /** "mp"（小程序）/ "official"（公众号） */
   type: string;
-  /** 小程序用户的裸 openid（panhub mp_user 表的 key）；公众号用户为 null */
+  /** 小程序用户的裸 openid（wx-auth 账号体系身份）；公众号用户为 null */
   mpOpenid: string | null;
 }
 
@@ -103,7 +103,7 @@ async function remoteCheck(cred: Credential): Promise<{ ok: boolean; user?: WxAu
     };
     if (data.authenticated === true) {
       // 2026-08-28：check 响应带用户身份（openid/type/mpOpenid），
-      // mpOpenid 是 panhub mp_user 表的 key（见 mpUserStore.getOpenidFromBearer）
+      // mpOpenid 是小程序用户的裸 openid（资料已收编 wx-auth，panhub 不再本地存头像昵称）
       const u = data.user;
       const user: WxAuthUser | undefined = u?.openid
         ? {
@@ -272,7 +272,7 @@ export async function verifyWxAuthOnceCached(event: H3Event): Promise<boolean> {
  * 从 Bearer token 解出已认证用户（小程序登录态，2026-08-28 新增）
  *
  * 走 wx-auth /api/auth/check（Authorization: Bearer），复用跨请求缓存。
- * 有效 → 返回用户身份（mpOpenid = panhub mp_user 表的 key）；
+ * 有效 → 返回用户身份（含 openid / mpOpenid）；
  * 无 Bearer / 未认证 / 服务故障 → null（调用方 401，fail-closed）。
  */
 export async function getWxAuthUserFromBearer(

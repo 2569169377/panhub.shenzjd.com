@@ -121,7 +121,7 @@ wx-auth 用小程序 appid+secret 调微信 code2session → openid
   ↓
 小程序后续请求带 Authorization: Bearer <token>
   ↓ requireWxAuth → wxAuthCheck 转发 wx-auth /api/auth/check（10min 缓存）
-authenticated=true → 放行（user.mpOpenid 即本地 mp_user 表的 key）
+authenticated=true → 放行（user 带 openid / mpOpenid 身份）
 authenticated=false → 401（小程序端清 token 重新走 mp-login）
 ```
 
@@ -138,8 +138,8 @@ WX_AUTH_API_BASE=https://wx-auth.shenzjd.com
 
 - **登录权威在 wx-auth**：token 由 wx-auth 签发/吊销，panhub 只做转发校验，无本地凭证存储（原 `mp_token` 表已废弃，可择期清理）
 - **fail-closed**：wx-auth 不可达/超时/非 2xx → 拒绝，不降级放行
-- **10min 跨请求缓存**：同一 token 短 TTL 内不重复打远程（含 false 结果；缓存条目带 user 身份，profile 接口复用）
-- 用户资料（昵称/头像）仍存本项目 `mp_user` 表，key 为 wx-auth check 返回的 `user.mpOpenid`
+- **10min 跨请求缓存**：同一 token 短 TTL 内不重复打远程（含 false 结果；缓存条目带 user 身份）
+- 用户资料（昵称/头像）已收编 wx-auth 账号系统（2026-08-29，user_avatars / nickname），本项目不再存储；原 `mp_user` 表已废弃删除
 
 ### ⚠️ 上线前必做：本地验证手册
 

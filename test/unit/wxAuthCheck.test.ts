@@ -200,7 +200,7 @@ describe("getWxAuthUserFromBearer（小程序 Bearer 身份解析，2026-08-28�
     resetWxAuthCache();
   });
 
-  it("有效 Bearer → 返回用户身份（mpOpenid 供 mp_user 表使用）", async () => {
+  it("有效 Bearer → 返回用户身份（含 mpOpenid）", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
