@@ -91,8 +91,27 @@ export function requireHumanOrCredential(event: H3Event): void {
  *   前端直接弹窗、根本不会发请求 → 后端收到的"无凭证"请求只可能是爬虫/直调
  * - 但"有凭证但失效"（如取消关注）时，前端 isVerified 缓存仍为 true 会放行
  *   发请求，此时必须返回 401 触发前端 forceVerify 重新引导关注，不能给蜜罐
+ *
+ * 2026-08-29 修正（蜜罐误伤小程序真人）：
+ * - 上述"无凭证只可能是爬虫"的假设对小程序不成立：小程序不走 cookie，
+ *   凭证只靠 Authorization 头，登录态缺失（静默登录失败/未登录先搜索）
+ *   时会发出零凭证请求，此前被喂蜜罐假数据（实测 2026-08-29）
+ * - 现按 UA 区分：微信渠道（MicroMessenger/wechatdevtools）无凭证 →
+ *   unauthorized（401 引导重新登录）；其余无凭证 → 蜜罐不变
  */
 export type WxAuthResult = "ok" | "honeypot" | "unauthorized";
+
+/**
+ * 微信客户端 UA 识别（2026-08-29）：
+ * - 小程序 wx.request 真机 UA 形如 "...MicroMessenger/8.0.49..."
+ * - 微信开发者工具 UA 含 wechatdevtools（部分版本带 MicroMessenger 模拟 UA）
+ * - 微信内置浏览器（H5 分享页）同样含 MicroMessenger
+ * 命中即视为"真实微信渠道"：无凭证时应走 401 引导重新登录，而不是蜜罐。
+ */
+function isWeChatUA(ua: string | undefined | null): boolean {
+  if (!ua) return false;
+  return /MicroMessenger|wechatdevtools/i.test(ua);
+}
 
 export async function requireWxAuth(event: H3Event): Promise<WxAuthResult> {
   // 统一校验：Bearer（小程序）优先，其次 cookie（网页端公众号），
@@ -104,6 +123,15 @@ export async function requireWxAuth(event: H3Event): Promise<WxAuthResult> {
   const bearer = getBearerToken(event);
   const cred = getWxAuthCredential(event);
   if (!bearer && !cred.token && !cred.openid) {
+    // 2026-08-29：微信渠道的"无凭证"请求不再喂蜜罐 → 401 引导重新登录。
+    // 背景：小程序登录态缺失（静默登录失败/未登录先搜索）时请求不带任何
+    // 凭证，此前被当爬虫返回蜜罐假数据——结构 100% 与真实结果一致，
+    // 真人用户毫无感知地看到假资源。微信 UA 的请求视为真实客户端，
+    // 转 unauthorized（401）走重新登录链路。爬虫伪装 MicroMessenger UA
+    // 可绕过蜜罐，但 401 同样不给数据，蜜罐收益损失可接受。
+    if (isWeChatUA(getHeader(event, "user-agent"))) {
+      return "unauthorized";
+    }
     return "honeypot";
   }
 

@@ -194,4 +194,45 @@ describe("requireWxAuth", () => {
     await expect(requireWxAuth(makeEvent())).resolves.toBe("honeypot");
     expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
   });
+
+  it("小程序 UA（MicroMessenger）无凭证 → unauthorized（2026-08-29：401 引导重新登录，不喂蜜罐）", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    mockedGetHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "user-agent"
+        ? "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.49.2600"
+        : undefined
+    );
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
+  });
+
+  it("微信开发者工具 UA（wechatdevtools）无凭证 → unauthorized", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    mockedGetHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "user-agent"
+        ? "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 MicroMessenger/8.0.20 wechatdevtools"
+        : undefined
+    );
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
+  });
+
+  it("非微信 UA（curl）无凭证 → 仍返回 honeypot（蜜罐只让路给微信渠道）", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    mockedGetHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "user-agent" ? "curl/8.7.1" : undefined
+    );
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("honeypot");
+  });
+
+  it("无 UA 无凭证 → 仍返回 honeypot（保持 2026-08-28 行为）", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("honeypot");
+  });
 });
