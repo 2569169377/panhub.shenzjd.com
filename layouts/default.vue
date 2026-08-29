@@ -34,6 +34,9 @@
 // 布局隔离即隔离，2026-08-25 重构，修复 app.vue 全局 500）
 // 顶部导航 site-navbar Web Component + 头像登录依赖 wx-auth-sdk。
 // 顺序：先 wx-auth-sdk（silent 静默校验登录态、required:false 可选认证），再 site-navbar。
+// （2026-08-29 起）该 UMD 全局单例（window.WxAuth，弹窗样式内联注入）是全站唯一
+// SDK 实例：composables/useWxAuth.ts、useAdminApi.ts 复用它，不再打包 npm 版，
+// SDK 发新版无需改本仓库依赖。搜索页 useWxAuth 会用强制认证配置重新 init。
 useHead({
   script: [
     {

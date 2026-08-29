@@ -89,8 +89,11 @@ export function useAdminApi() {
       // 此前优化"有 wxauth-token cookie 就跳过"有个隐患：SDK 可能凭 localStorage
       // 残留通过 silentCheck 写 cookie，但若写失败/被清，则出现"内存有 token、
       // cookie 没有"——搜索能过（token 兜底），管理接口却 401（只认 token cookie）。
-      const { WxAuth } = await import("wx-auth-sdk");
-      await WxAuth.silentCheck().catch(() => {});
+      // 2026-08-29：SDK 走 UMD 全局单例（resolveWxAuth 等待就绪，admin 布局
+      // 没引脚本时会自行补插）。加载失败仅跳过补 cookie，不影响后续接口
+      // 探测（401 走 no-login 兜底）。
+      const wxAuth = await resolveWxAuth().catch(() => null);
+      if (wxAuth) await wxAuth.silentCheck().catch(() => {});
       // 探测：拉一次黑名单（管理员接口），成功即管理员
       await request("/api/blacklist?limit=1");
       authStatus.value = "ok";
