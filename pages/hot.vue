@@ -45,7 +45,19 @@
     <section class="panel calendar-panel">
       <div class="panel-head">
         <h2 class="panel-title">搜索日历</h2>
-        <span class="panel-hint">30 天</span>
+        <div class="panel-actions">
+          <span class="panel-hint">30 天</span>
+          <div class="view-toggle" role="group" aria-label="日历数值口径">
+            <button
+              :class="['view-btn', { active: metric === 'searches' }]"
+              type="button"
+              @click="metric = 'searches'">搜索次数</button>
+            <button
+              :class="['view-btn', { active: metric === 'terms' }]"
+              type="button"
+              @click="metric = 'terms'">词数</button>
+          </div>
+        </div>
       </div>
 
       <ClientOnly>
@@ -80,7 +92,7 @@
                 :aria-label="cellTitle(d)"
                 @click="selectDate(d.date)">
                 <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
-                <span v-if="d.searches !== null && d.searches > 0" class="cal-cell__count">{{ formatNum(d.searches) }}</span>
+                <span v-if="cellCount(d) > 0" class="cal-cell__count">{{ formatNum(cellCount(d)) }}</span>
               </button>
             </div>
 
@@ -95,14 +107,14 @@
             </button>
           </div>
 
-          <!-- 30 天搜索次数趋势 sparkline（选中日高亮；早期无记录的天记 0） -->
+          <!-- 30 天趋势 sparkline（随口径切换“搜索次数/词数”；选中日高亮；searches 早期无记录的天记 0） -->
           <div v-if="sparkPoints.length > 1" class="sparkline">
             <svg
               class="sparkline__svg"
               :viewBox="`0 0 ${sparkW} ${sparkH}`"
               preserveAspectRatio="none"
               role="img"
-              :aria-label="`近 ${days.length} 天每日搜索次数趋势`">
+              :aria-label="`近 ${days.length} 天每日${metricLabel}趋势`">
               <polyline
                 :points="sparkLine"
                 fill="none"
@@ -129,7 +141,7 @@
                 stroke="var(--bg-surface)"
                 stroke-width="1.5" />
             </svg>
-            <span class="sparkline__hint">近 {{ days.length }} 天搜索次数趋势</span>
+            <span class="sparkline__hint">近 {{ days.length }} 天{{ metricLabel }}趋势</span>
           </div>
         </div>
 
@@ -241,6 +253,8 @@ const days = ref<DayInfo[]>([]);
 const dayItems = ref<DayItem[]>([]);
 const selected = ref("");
 const view = ref<"cloud" | "list">("cloud");
+/** 日历数值口径：搜索次数（daily_searches 口径）或词数（search_terms 口径） */
+const metric = ref<"searches" | "terms">("searches");
 const calendarLoading = ref(false);
 const dayLoading = ref(false);
 const refreshing = ref(false);
@@ -259,12 +273,24 @@ const todayKey = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 });
 
-/* ---------- sparkline（近 N 天每日搜索次数趋势） ---------- */
+/* ---------- sparkline（近 N 天每日趋势，随口径切换） ---------- */
 
 const sparkW = 600;
 const sparkH = 44;
 
-const sparkPoints = computed(() => days.value.map((d) => d.searches ?? 0));
+/** 口径展示名：搜索次数 / 搜索词数 */
+const metricLabel = computed(() =>
+  metric.value === "searches" ? "搜索次数" : "搜索词数"
+);
+
+/** 日历格子展示的数值：词数口径用 count，次数口径用 searches（早期无记录记 0） */
+function cellCount(d: DayInfo): number {
+  return metric.value === "terms" ? d.count : (d.searches ?? 0);
+}
+
+const sparkPoints = computed(() =>
+  days.value.map((d) => (metric.value === "terms" ? d.count : (d.searches ?? 0)))
+);
 
 /** 当前选中日期在 sparkline 中的索引（无则 -1） */
 const sparkSelectedIndex = computed(() => days.value.findIndex((d) => d.date === selected.value));
