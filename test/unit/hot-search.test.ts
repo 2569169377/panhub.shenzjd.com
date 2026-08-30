@@ -181,6 +181,45 @@ describe("HotSearchService (Turso store, local file::memory:)", () => {
     expect(await service.getDailySearches(todayKey)).toBe(3);
   });
 
+  it("getCalendar 分离返回每天的词数与次数（2026-08-30 用户拍板，不再混用）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("历词A");
+    await service.recordSearch("历词A");
+    await service.recordSearch("历词B");
+    await service.flush();
+
+    const today = new Date(Date.now() + 8 * 3600 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const todayKey = `${today.getUTCFullYear()}-${pad(today.getUTCMonth() + 1)}-${pad(today.getUTCDate())}`;
+
+    const calendar = await service.getCalendar(3);
+    const todayRow = calendar.find((d) => d.date === todayKey);
+    expect(todayRow).toBeDefined();
+    // 词数：历词A / 历词B 共 2 个词（search_terms 口径）
+    expect(todayRow!.count).toBe(2);
+    // 次数：2 + 1 = 3 次搜索（daily_searches 口径），两者独立不覆盖
+    expect(todayRow!.searches).toBe(3);
+
+    // 早期无次数记录的天：searches 为 null（不得拿词数冒充次数）
+    const earlyRow = calendar[0];
+    expect(earlyRow.date).not.toBe(todayKey);
+    expect(earlyRow.searches).toBeNull();
+    expect(earlyRow.count).toBe(0);
+  });
+
+  it("getCalendarMeta 一次返回总词数/总次数/有记录天数", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("页头词A");
+    await service.recordSearch("页头词A");
+    await service.recordSearch("页头词B");
+    await service.flush();
+
+    const meta = await service.getCalendarMeta();
+    expect(meta.totalTerms).toBe(2);
+    expect(meta.totalSearches).toBe(3);
+    expect(meta.dailyDayCount).toBeGreaterThan(0);
+  });
+
   it("应该返回词库累计词数（service 层转发冒烟）", async () => {
     await service.clearHotSearches();
     await service.recordSearch("词数A");

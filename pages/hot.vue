@@ -7,21 +7,28 @@
         <h1 class="title">每一天，大家在搜什么</h1>
         <p class="desc">按天记录全网用户的真实搜索词 · 点击日期查看当天全部搜索词 · 点击词条立即搜索</p>
 
-        <!-- 量级统计：累计词数 + 今日搜索次数（2026-08-25：去掉"今日搜索
-             词数"——当天精确词数刚上线偏小；次数用 daily_searches 精确值） -->
+        <!-- 量级统计 4 词条（2026-08-30 用户拍板：次数/词数各配今日+总量，
+             全部真实数据：次数来自 daily_searches 精确记录与 SUM(count)，词数来自 search_terms） -->
         <div v-if="totalTerms > 0" class="hero-stats">
           <div class="hero-stat">
-            <span class="hero-stat__num">{{ formatNum(totalTerms) }}</span>
-            <span class="hero-stat__label">累计搜索词数</span>
+            <span class="hero-stat__num">{{ formatNum(todaySearches) }}</span>
+            <span class="hero-stat__label">今日搜索次数</span>
           </div>
-
-          <template v-if="searchesReady">
-            <div class="hero-stat__sep"></div>
-            <div class="hero-stat">
-              <span class="hero-stat__num">{{ formatNum(todaySearches) }}</span>
-              <span class="hero-stat__label">今日搜索次数</span>
-            </div>
-          </template>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(totalSearches) }}</span>
+            <span class="hero-stat__label">总搜索次数</span>
+          </div>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(todayTerms) }}</span>
+            <span class="hero-stat__label">今日搜索词数</span>
+          </div>
+          <div class="hero-stat__sep"></div>
+          <div class="hero-stat">
+            <span class="hero-stat__num">{{ formatNum(totalTerms) }}</span>
+            <span class="hero-stat__label">总搜索词数</span>
+          </div>
         </div>
       </div>
       <button
@@ -38,7 +45,7 @@
     <section class="panel calendar-panel">
       <div class="panel-head">
         <h2 class="panel-title">搜索日历</h2>
-        <span class="panel-hint">最近 {{ days.length }} 天 · 数字为当天搜索次数（早期无次数数据时显示词数）</span>
+        <span class="panel-hint">30 天</span>
       </div>
 
       <ClientOnly>
@@ -73,7 +80,7 @@
                 :aria-label="cellTitle(d)"
                 @click="selectDate(d.date)">
                 <span class="cal-cell__day">{{ dayOfMonth(d.date) }}</span>
-                <span v-if="d.count > 0" class="cal-cell__count">{{ d.count }}</span>
+                <span v-if="d.searches !== null && d.searches > 0" class="cal-cell__count">{{ formatNum(d.searches) }}</span>
               </button>
             </div>
 
@@ -88,14 +95,14 @@
             </button>
           </div>
 
-          <!-- 30 天搜索词数趋势 sparkline（选中日高亮） -->
+          <!-- 30 天搜索次数趋势 sparkline（选中日高亮；早期无记录的天记 0） -->
           <div v-if="sparkPoints.length > 1" class="sparkline">
             <svg
               class="sparkline__svg"
               :viewBox="`0 0 ${sparkW} ${sparkH}`"
               preserveAspectRatio="none"
               role="img"
-              :aria-label="`近 ${days.length} 天每日搜索词数趋势`">
+              :aria-label="`近 ${days.length} 天每日搜索次数趋势`">
               <polyline
                 :points="sparkLine"
                 fill="none"
@@ -141,7 +148,7 @@
       <div class="panel-head">
         <h2 class="panel-title">{{ selectedTitle }}</h2>
         <div class="panel-actions">
-          <span v-if="!dayLoading" class="panel-hint">共 {{ dayItems.length }} 个搜索词</span>
+          <span v-if="!dayLoading" class="panel-hint">共 {{ formatNum(dayItems.length) }} 个搜索词<template v-if="selectedDaySearches"> · 搜索 {{ formatNum(selectedDaySearches) }} 次</template></span>
           <div class="view-toggle" role="group" aria-label="视图切换">
             <button
               :class="['view-btn', { active: view === 'cloud' }]"
@@ -212,7 +219,10 @@ import { ref, computed, nextTick } from "vue";
 
 interface DayInfo {
   date: string;
+  /** 当天搜索词数（search_terms 口径） */
   count: number;
+  /** 当天真实搜索次数（daily_searches 口径；null = 早期无次数记录） */
+  searches: number | null;
   top: string[];
 }
 
@@ -235,8 +245,9 @@ const calendarLoading = ref(false);
 const dayLoading = ref(false);
 const refreshing = ref(false);
 const totalTerms = ref(0);
+const totalSearches = ref(0);
+const todayTerms = ref(0);
 const todaySearches = ref(0);
-const searchesReady = ref(false);
 const calendarRef = ref<HTMLElement | null>(null);
 const canScrollLeft = ref(false);
 const canScrollRight = ref(false);
@@ -248,12 +259,12 @@ const todayKey = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 });
 
-/* ---------- sparkline（近 N 天每日搜索词数趋势） ---------- */
+/* ---------- sparkline（近 N 天每日搜索次数趋势） ---------- */
 
 const sparkW = 600;
 const sparkH = 44;
 
-const sparkPoints = computed(() => days.value.map((d) => d.count));
+const sparkPoints = computed(() => days.value.map((d) => d.searches ?? 0));
 
 /** 当前选中日期在 sparkline 中的索引（无则 -1） */
 const sparkSelectedIndex = computed(() => days.value.findIndex((d) => d.date === selected.value));
@@ -285,6 +296,12 @@ const selectedTitle = computed(() => {
   return `${y} 年 ${Number(m)} 月 ${Number(d)} 日`;
 });
 
+/** 选中日期的真实搜索次数（早期无记录为 null，不展示） */
+const selectedDaySearches = computed(() => {
+  const d = days.value.find((x) => x.date === selected.value);
+  return d && d.searches !== null && d.searches > 0 ? d.searches : 0;
+});
+
 async function loadCalendar() {
   calendarLoading.value = true;
   try {
@@ -292,8 +309,9 @@ async function loadCalendar() {
     const data = await res.json();
     days.value = data.code === 0 ? data.data.days : [];
     totalTerms.value = data.code === 0 ? (data.data.totalTerms ?? 0) : 0;
+    totalSearches.value = data.code === 0 ? (data.data.totalSearches ?? 0) : 0;
+    todayTerms.value = data.code === 0 ? (data.data.todayTerms ?? 0) : 0;
     todaySearches.value = data.code === 0 ? (data.data.todaySearches ?? 0) : 0;
-    searchesReady.value = data.code === 0 ? !!data.data.searchesReady : false;
     // 默认选中今天（日历最后一天）；今天无数据则选有数据的最近一天
     const today = todayKey.value;
     const hasToday = days.value.some((d) => d.date === today && d.count > 0);
@@ -377,9 +395,12 @@ function dayOfMonth(date: string): string {
 function cellTitle(d: DayInfo): string {
   const [y, m, day] = d.date.split("-");
   const base = `${y} 年 ${Number(m)} 月 ${Number(day)} 日`;
-  if (d.count === 0) return `${base} · 无记录`;
+  const parts: string[] = [];
+  if (d.searches !== null && d.searches > 0) parts.push(`搜索 ${formatNum(d.searches)} 次`);
+  if (d.count > 0) parts.push(`${formatNum(d.count)} 个搜索词`);
+  if (parts.length === 0) return `${base} · 无记录`;
   const top = d.top.length ? ` · ${d.top.join(" / ")}` : "";
-  return `${base} · ${d.count} 个搜索词${top}`;
+  return `${base} · ${parts.join(" · ")}${top}`;
 }
 
 /* ---------- 词云样式 ---------- */
@@ -454,7 +475,9 @@ onMounted(() => {
 .hero-stats {
   display: flex;
   align-items: center;
-  gap: 22px;
+  flex-wrap: wrap;
+  gap: 18px;
+  row-gap: 12px;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border-light);

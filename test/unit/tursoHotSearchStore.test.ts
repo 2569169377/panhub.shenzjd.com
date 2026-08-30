@@ -149,6 +149,8 @@ describe("TursoHotSearchStore", () => {
     const today = calendar[calendar.length - 1];
     expect(today.date).toBe(dateKey(now));
     expect(today.count).toBe(3);
+    // store 层不填次数（次数由 service 层用 getDailySearchesRange 合并）
+    expect(today.searches).toBeNull();
     expect(today.top).toEqual(["词丙", "词乙", "词甲"]);
   });
 
@@ -209,6 +211,18 @@ describe("TursoHotSearchStore", () => {
     await store.recordDailySearches("2026-08-21", 1);
     await store.recordDailySearches("2026-08-22", 1);
     expect(await store.getDailySearchesDayCount()).toBe(3);
+  });
+
+  it("getCalendarMeta 一次 batch 返回总词数/总次数/有记录天数", async () => {
+    const now = Date.now();
+    await store.recordSearch("甲", now, 3);
+    await store.recordSearch("乙", now, 2);
+    await store.recordDailySearches("2026-08-22", 5);
+
+    const meta = await store.getCalendarMeta();
+    expect(meta.totalTerms).toBe(2);
+    expect(meta.totalSearches).toBe(5);
+    expect(meta.dailyDayCount).toBe(1);
   });
 
   it("clearHotSearches 同时清空 daily_searches", async () => {

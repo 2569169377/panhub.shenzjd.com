@@ -1,7 +1,6 @@
 import type { IHotSearchStore, HotSearchItem, HotSearchStats, TopTerm, DaySnapshot, DayTerm } from "./hotSearchStore";
 import { loggers } from "../utils/logger";
 import { normalize, formatDateKey, beijingDayStart } from "./hotSearchUtils";
-import { getSearchLogStore } from "./tursoSearchLogStore";
 
 /**
  * 写聚合缓冲配置
@@ -316,13 +315,12 @@ export class HotSearchService {
   }
 
   /**
-   * 每日榜单日历：近 N 天每天词数 + top3（日历热力图）。
-   * 2026-08-25 用户拍板：**有次数显示次数，没次数显示词数**——
-   * 数字优先级：
-   *   1. daily_searches 当天搜索次数（22 号起精确，量级最大）
-   *   2. search_log 当天词数（今天起精确）
-   *   3. search_terms 当天词数（历史全有，兜底展示不空白）
-   * 等 daily_searches 攒满 30 天后再全量切次数口径。
+   * 每日榜单日历：近 N 天每天词数 + 次数 + top3（日历热力图）。
+   * 2026-08-30 用户拍板：次数与词数彻底分离，不再混用——
+   *   - count：当天搜索词数（search_terms 按 last_at 分组，历史全有）
+   *   - searches：当天真实搜索次数（daily_searches 精确记录，2026-08-22 起；
+   *     无记录为 null，前端不得拿词数冒充次数）
+   * 日历格子只展示次数；词数在当日词单面板展示。
    */
   async getCalendar(days: number): Promise<DaySnapshot[]> {
     await this.waitForInit();
@@ -330,25 +328,14 @@ export class HotSearchService {
       const safeDays = Math.min(Math.max(1, days), 90);
       const startTs =
         beijingDayStart(formatDateKey(Date.now())) - (safeDays - 1) * 86400000;
-      const logStore = getSearchLogStore();
-      // 1. daily_searches 当天次数（精确，有记录的天才在 map 中）
+      // daily_searches 当天次数（精确，有记录的天才在 map 中）
       const dailyByDate = await this.requireStore().getDailySearchesRange(startTs, safeDays);
-      // 2. search_log 当天词数（今天起）
-      const logDays = logStore
-        ? await logStore.getDaySummaries(startTs, safeDays)
-        : [];
-      const logByDate = new Map(logDays.map((d) => [d.date, d]));
-      // 3. search_terms 当天词数（历史全有，最终兜底）
+      // search_terms 当天词数（历史全有）
       const termDays = await this.requireStore().getCalendar(safeDays);
-      return termDays.map((td) => {
-        const daily = dailyByDate.get(td.date);
-        if (daily !== undefined && daily > 0) {
-          return { ...td, count: daily }; // 有次数 → 显示次数
-        }
-        const log = logByDate.get(td.date);
-        if (log && log.count > 0) return log; // 有 search_log 词数
-        return td; // search_terms 词数兜底
-      });
+      return termDays.map((td) => ({
+        ...td,
+        searches: dailyByDate.get(td.date) ?? null,
+      }));
     });
   }
 
@@ -399,16 +386,17 @@ export class HotSearchService {
   }
 
   /**
-   * 合并查 totalTerms + dailyDayCount（2026-08-27 优化：
-   * hot-calendar 原并行调两个方法各打一次库，合并为一次 batch 往返）
+   * 合并查日历页头指标（2026-08-30 扩展：totalTerms + totalSearches +
+   * dailyDayCount 一次 batch 往返，避免多次打库）
    */
   async getCalendarMeta(): Promise<{
     totalTerms: number;
+    totalSearches: number;
     dailyDayCount: number;
   }> {
     await this.waitForInit();
     return this.getCached("calendar_meta", READ_TTL_SLOW_MS, () =>
-      this.requireStore().getTotalTermsAndDailyDayCount()
+      this.requireStore().getCalendarMeta()
     );
   }
 

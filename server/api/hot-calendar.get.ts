@@ -3,14 +3,16 @@ import { getOrCreateHotSearchService } from "../core/services/hotSearchService";
 import { formatDateKey } from "../core/services/hotSearchUtils";
 
 /**
- * 每日榜单日历：近 N 天每天的词数与 top3（供日历热力图使用）
- * 附带量级统计：累计词数 / 今日词数（精确），以及从部署起精确记录的每日搜索次数。
+ * 每日榜单日历：近 N 天每天的搜索词数与真实搜索次数（分离返回，不混用），
+ * 附页头 4 指标：今日搜索次数 / 总搜索次数 / 今日搜索词数 / 总搜索词数。
  * GET /api/hot-calendar?days=30
  *
- * 搜索次数口径（2026-08-22 用户拍板）：
- * - search_terms.count 是每词历史累计值，无法精确拆分"今日新增"→ 不展示累计搜索次数
- * - 新增 daily_searches 表：从部署起每次搜索 +delta 精确记录，攒满 7 天（searchesReady）
- *   前端才展示今日搜索次数，避免 0 或虚高误导
+ * 口径（2026-08-30 用户拍板，替代 08-25"有次数显示次数，没次数显示词数"）：
+ * - days[].searches：daily_searches 当天精确搜索次数（2026-08-22 部署起记录，
+ *   无记录为 null）；日历格子只展示次数，无记录的天不显示数字
+ * - days[].count：search_terms 当天词数（历史全有）；在当日词单面板展示
+ * - totalSearches：search_terms 全表 SUM(count)，建库以来累计搜索次数
+ * - totalTerms：search_terms 全表 COUNT(*)，累计搜索词数
  */
 export default defineEventHandler(async (event) => {
   const service = getOrCreateHotSearchService();
@@ -29,37 +31,31 @@ export default defineEventHandler(async (event) => {
       data: {
         days: [],
         totalTerms: 0,
+        totalSearches: 0,
         todayTerms: 0,
         todaySearches: 0,
-        searchesReady: false,
         configured: false,
       },
     };
   }
 
   const today = formatDateKey(Date.now());
-  const [daysData, meta, todaySearches] = await Promise.all([
+  const [daysData, meta] = await Promise.all([
     service.getCalendar(days),
     service.getCalendarMeta(),
-    service.getDailySearches(today),
   ]);
 
-  const totalTerms = meta.totalTerms;
-  const searchesDayCount = meta.dailyDayCount;
-  const todayTerms = daysData.find((d) => d.date === today)?.count ?? 0;
+  const todaySnapshot = daysData.find((d) => d.date === today);
 
   return {
     code: 0,
     message: "success",
     data: {
       days: daysData,
-      totalTerms,
-      todayTerms,
-      todaySearches,
-      // 2026-08-25 用户拍板：去掉"攒满 7 天才展示次数"门槛——
-      // 只要今日有搜索次数（>0）就展示（daily_searches 从部署起精确记录，
-      // 4 天数据已足够真实），避免页面显得数据少
-      searchesReady: todaySearches > 0,
+      totalTerms: meta.totalTerms,
+      totalSearches: meta.totalSearches,
+      todayTerms: todaySnapshot?.count ?? 0,
+      todaySearches: todaySnapshot?.searches ?? 0,
       configured: true,
     },
   };

@@ -46,8 +46,8 @@ export interface IHotSearchStore {
   getStats(): Promise<HotSearchStats>;
 
   /**
-   * 获取每日榜单日历（近 N 天，每天词数与 top3）
-   * 实时聚合 search_terms / termDict，日期按北京时间
+   * 获取每日榜单日历（近 N 天，每天词数与 top3；次数由 getDailySearchesRange 单独提供）
+   * 实时聚合 search_terms，日期按北京时间
    */
   getCalendar(days: number): Promise<DaySnapshot[]>;
 
@@ -76,10 +76,16 @@ export interface IHotSearchStore {
   getDailySearches(date: string): Promise<number>;
 
   /**
-   * 一次 batch 查 totalTerms + dailyDayCount（2026-08-27 优化：
-   * hot-calendar 原本并行调两个方法 = 2 次 HTTP 往返，合并为 1 次 batch）
+   * 一次 batch 查日历页头三件套：totalTerms（总词数 COUNT(*)）、
+   * totalSearches（总次数 SUM(count)）、dailyDayCount（有次数记录的天数）
+   * （2026-08-30 扩展：原 totalTerms + dailyDayCount 两查合并 batch 的基础上，
+   * 再并入总搜索次数，hot-calendar 一次往返拿全页头指标）
    */
-  getTotalTermsAndDailyDayCount(): Promise<{ totalTerms: number; dailyDayCount: number }>;
+  getCalendarMeta(): Promise<{
+    totalTerms: number;
+    totalSearches: number;
+    dailyDayCount: number;
+  }>;
 
   /**
    * 搜索次数是否已积累足够（记录天数 >= minDays 才可展示，用户拍板：攒一星期再展示）
@@ -125,8 +131,13 @@ export interface TopTerm {
 export interface DaySnapshot {
   /** 日期键 YYYY-MM-DD */
   date: string;
-  /** 当天搜索词总数 */
+  /** 当天搜索词数（search_terms 按 last_at 分组计数，历史全有） */
   count: number;
+  /**
+   * 当天真实搜索次数（daily_searches 精确记录，2026-08-22 起有值）。
+   * null = 当天无次数记录（早于记录起始日），展示层不得拿词数冒充次数。
+   */
+  searches: number | null;
   /** 当天热度最高的 3 个词 */
   top: string[];
 }

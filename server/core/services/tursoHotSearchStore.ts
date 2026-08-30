@@ -256,6 +256,8 @@ export class TursoHotSearchStore implements IHotSearchStore {
       out.push({
         date,
         count: countMap.get(date) ?? 0,
+        // 次数不在本查询内：由 service 层用 getDailySearchesRange 合并（职责分离）
+        searches: null,
         top: topMap.get(date) ?? [],
       });
     }
@@ -343,21 +345,24 @@ export class TursoHotSearchStore implements IHotSearchStore {
   }
 
   /**
-   * 一次 batch 查 totalTerms + dailyDayCount（2026-08-27 优化：
-   * hot-calendar 原并行调两个方法 = 2 次 HTTP 往返，合并为 1 次 batch）
+   * 一次 batch 查日历页头三件套（2026-08-30 扩展：在原 totalTerms + dailyDayCount
+   * 基础上并入 SUM(count) 总搜索次数，hot-calendar 一次往返拿全页头指标）
    */
-  async getTotalTermsAndDailyDayCount(): Promise<{
+  async getCalendarMeta(): Promise<{
     totalTerms: number;
+    totalSearches: number;
     dailyDayCount: number;
   }> {
     await this.waitForInit();
     const results = await this.client.batch([
       "SELECT COUNT(*) as c FROM search_terms",
+      "SELECT COALESCE(SUM(count), 0) as s FROM search_terms",
       "SELECT COUNT(DISTINCT date) as c FROM daily_searches",
     ]);
     const totalTerms = ((results[0].rows[0]?.c as number) ?? 0);
-    const dailyDayCount = ((results[1].rows[0]?.c as number) ?? 0);
-    return { totalTerms, dailyDayCount };
+    const totalSearches = ((results[1].rows[0]?.s as number) ?? 0);
+    const dailyDayCount = ((results[2].rows[0]?.c as number) ?? 0);
+    return { totalTerms, totalSearches, dailyDayCount };
   }
 
   close(): void {
