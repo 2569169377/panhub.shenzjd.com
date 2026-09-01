@@ -9,7 +9,7 @@
   <!-- 公告条（全站导航栏下方；关闭后不再显示，改公告内容时升级 key 版本号重新展示） -->
   <div v-if="showAnnouncement" class="announce-bar" role="status">
     <span class="announce-bar__text">
-      📢 小程序端已上线，支持小程序登录，可扫描<strong>右侧小程序码</strong>体验
+      📢 为防止失联，请关注<strong>右侧公众号</strong>，最新动态与服务通知将第一时间发布
     </span>
     <button class="announce-bar__close" type="button" @click="dismissAnnouncement" aria-label="关闭公告" title="关闭">✕</button>
   </div>
@@ -64,8 +64,8 @@ onMounted(() => {
   checkAnnouncement();
 });
 
-// 公告条（v3：小程序端上线宣传。改公告内容时升级 key 版本号，让已关闭用户重新看到）
-const ANNOUNCEMENT_KEY = "panhub:announcement-dismissed:v3";
+// 公告条（v4：防失联引导关注公众号。改公告内容时升级 key 版本号，让已关闭用户重新看到）
+const ANNOUNCEMENT_KEY = "panhub:announcement-dismissed:v4";
 const showAnnouncement = ref(false);
 function checkAnnouncement() {
   try {
