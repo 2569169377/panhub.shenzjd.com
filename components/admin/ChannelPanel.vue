@@ -1,153 +1,143 @@
 <template>
-  <section class="admin-card">
-    <div class="admin-card-head">
-      <div>
-        <h2>频道管理</h2>
-        <p class="admin-card-desc">
-          全部频道 {{ allCount }} 个 · 固定 {{ priorityCount }} + 搜索 {{ defaultCount }} ·
-          版本 v{{ version || "-" }}
-        </p>
-      </div>
+  <t-card title="频道管理" :description="cardDesc">
+    <template #actions>
       <div class="admin-head-actions">
-        <button type="button" class="btn btn-neutral" :disabled="loading || saving" @click="load">
-          {{ loading ? "加载中…" : "刷新" }}
-        </button>
-        <button type="button" class="btn btn-neutral" :disabled="loading || saving" @click="askReload">
+        <t-button variant="outline" :disabled="loading || saving" @click="load">刷新</t-button>
+        <t-button variant="outline" :disabled="loading || saving" @click="askReload">
           {{ reloading ? "重载中…" : "重新加载" }}
-        </button>
-        <button type="button" class="btn btn-primary" :disabled="saving || !dirty" @click="askSave">
-          {{ saving ? "保存中…" : "保存全部" }}
-        </button>
+        </t-button>
+        <t-button theme="primary" :disabled="saving || !dirty" :loading="saving" @click="askSave">
+          保存全部
+        </t-button>
       </div>
-    </div>
+    </template>
 
-    <p v-if="error" class="admin-notice admin-notice-error">{{ error }}</p>
-    <p v-else-if="reloadMsg" class="admin-notice admin-notice-ok">{{ reloadMsg }}</p>
+    <t-alert v-if="error" theme="error" :message="error" class="channel-alert" />
+    <t-alert v-else-if="reloadMsg" theme="success" :message="reloadMsg" class="channel-alert" />
 
     <!-- 新增频道 -->
     <div class="channel-add">
-      <input
+      <t-input
         v-model="newId"
-        type="text"
         class="channel-input"
         placeholder="输入频道 ID（TG 用户名），如 tgsearchers3"
         :disabled="saving"
-        @keyup.enter="addChannel"
+        clearable
+        @enter="addChannel"
       />
-      <input
+      <t-input
         v-model="newDisplay"
-        type="text"
         class="channel-input channel-input-sm"
         placeholder="频道名字（备注，可选）"
         :disabled="saving"
-        @keyup.enter="addChannel"
+        clearable
+        @enter="addChannel"
       />
-      <button type="button" class="btn btn-neutral" :disabled="saving || !newId.trim()" @click="addChannel">
+      <t-button variant="outline" :disabled="saving || !newId.trim()" @click="addChannel">
         + 添加频道
-      </button>
+      </t-button>
     </div>
 
-    <div v-if="loading" class="admin-state">加载中…</div>
-    <template v-else>
-      <p v-if="dirty" class="admin-notice admin-notice-warn">
-        有未保存的修改，点击「保存全部」生效
-      </p>
+    <t-loading :loading="loading" text="加载中…" show-overlay class="channel-body">
+      <t-alert
+        v-if="dirty"
+        theme="warning"
+        message="有未保存的修改，点击「保存全部」生效"
+        class="channel-alert"
+      />
       <p class="channel-tip">
         <b>固定</b>：不下发给第三方站、也不参与本站搜索；<b>搜索</b>：按表格顺序逐批搜索，
         排在前面的频道更早发起请求。可用 ↑↓ 调整搜索顺序。
       </p>
 
-      <div v-if="rows.length" class="channel-table-wrap">
-        <table class="channel-table">
-          <thead>
-            <tr>
-              <th class="col-pri">固定下发</th>
-              <th class="col-id">频道 ID</th>
-              <th class="col-name">频道名字</th>
-              <th class="col-ops">操作</th>
-            </tr>
-          </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <!-- 固定下发 -->
-            <td class="col-pri">
-              <span :class="['channel-pri-badge', { 'is-pri': row.priority }]">
-                {{ row.priority ? "固定" : "搜索" }}
-              </span>
-            </td>
-            <!-- 频道 ID（不可改） -->
-            <td class="col-id channel-id" :title="row.id">{{ row.id }}</td>
-            <!-- 频道名字（备注，可编辑） -->
-            <td class="col-name">
-              <input
-                v-model="row.name"
-                type="text"
-                class="row-input"
-                :placeholder="'未备注'"
-                :disabled="saving"
-                @input="onNameInput(row)"
-              />
-            </td>
-            <!-- 操作 -->
-            <td class="col-ops">
-              <!-- 排序（仅"搜索"频道：组内上移/下移，数组顺序 = 搜索顺序） -->
-              <template v-if="!row.priority">
-                <button
-                  type="button"
-                  class="ops-btn"
-                  :disabled="isFirstOfGroup(row)"
-                  title="上移（搜索更靠前）"
-                  @click="moveRow(row, -1)">
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  class="ops-btn"
-                  :disabled="isLastOfGroup(row)"
-                  title="下移（搜索更靠后）"
-                  @click="moveRow(row, 1)">
-                  ↓
-                </button>
-              </template>
-              <!-- 固定 ⇄ 搜索 切换 -->
-              <button
-                type="button"
-                class="ops-btn"
-                :title="row.priority ? '取消固定（参与搜索）' : '设为固定（不下发且不参与搜索）'"
-                @click="row.priority ? unpick(row.id) : prioritize(row.id)">
-                {{ row.priority ? "◁" : "📌" }}
-              </button>
-              <button type="button" class="ops-btn ops-btn-danger" title="删除" @click="askRemove(row.id)">✕</button>
-            </td>
-          </tr>
-        </tbody>
-        </table>
-      </div>
+      <t-table
+        v-if="rows.length"
+        row-key="id"
+        :data="rows"
+        :columns="columns"
+        :max-height="460"
+        size="small"
+        lazy
+      >
+        <!-- 固定下发徽章 -->
+        <template #pri-slot="{ row }">
+          <t-tag :theme="row.priority ? 'primary' : 'default'" variant="light">
+            {{ row.priority ? "固定" : "搜索" }}
+          </t-tag>
+        </template>
+        <!-- 频道 ID（不可改） -->
+        <template #id-slot="{ row }">
+          <span class="channel-id">{{ row.id }}</span>
+        </template>
+        <!-- 频道名字（备注，可编辑） -->
+        <template #name-slot="{ row }">
+          <t-input
+            v-model="row.name"
+            size="small"
+            class="row-input"
+            placeholder="未备注"
+            :disabled="saving"
+            :borderless="!row.name"
+            @change="onNameInput(row)"
+          />
+        </template>
+        <!-- 操作 -->
+        <template #ops-slot="{ row }">
+          <div class="ops-cell">
+            <template v-if="!row.priority">
+              <t-button
+                variant="text"
+                size="small"
+                :disabled="isFirstOfGroup(row)"
+                title="上移（搜索更靠前）"
+                @click="moveRow(row, -1)">
+                ↑
+              </t-button>
+              <t-button
+                variant="text"
+                size="small"
+                :disabled="isLastOfGroup(row)"
+                title="下移（搜索更靠后）"
+                @click="moveRow(row, 1)">
+                ↓
+              </t-button>
+            </template>
+            <!-- 固定 ⇄ 搜索 切换 -->
+            <t-button
+              variant="text"
+              size="small"
+              :title="row.priority ? '取消固定（参与搜索）' : '设为固定（不下发且不参与搜索）'"
+              @click="row.priority ? unpick(row.id) : prioritize(row.id)">
+              {{ row.priority ? "◁" : "📌" }}
+            </t-button>
+            <t-button variant="text" theme="danger" size="small" title="删除" @click="askRemove(row.id)">✕</t-button>
+          </div>
+        </template>
+      </t-table>
       <p v-if="rows.length > 12" class="channel-table-hint">↑ 表格内部滚动 · 共 {{ rows.length }} 个频道</p>
       <div v-else-if="rows.length === 0" class="admin-empty">暂无频道</div>
-    </template>
+    </t-loading>
 
     <AdminModal ref="modal" :title="'确认操作'" tone="primary" confirm-text="确认" />
-  </section>
+  </t-card>
 </template>
 
 <script setup lang="ts">
 /**
- * 频道管理面板（2026-08-26 CRUD v3：ID + 备注名表格）
+ * 频道管理面板（2026-09-01 TDesign 化：t-table + t-input/t-tag/t-button）
  *
  * 表格列：优先级 / 频道 ID（不可改，即 TG username）/ 频道名字（备注，可编辑）
-
  *  - 增：顶部输入 ID + 可选名字，添加进默认频道
  *  - 删：操作列 ✕（确认弹窗）
- *  - 改：EDshift 名字输入框直接编辑、⬆/⬇ 切换优先级、删除
+ *  - 改：名字输入框直接编辑、⬆/⬇ 调整搜索顺序、固定 ⇄ 搜索切换
  *  - 查：全量列出（优先在前）
  * 本地编辑 → 批量「保存全部」（PUT 全量，含 channelNames）
  */
+import { MessagePlugin } from "tdesign-vue-next";
 import { useAdminApi, type ChannelAdminData } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
 
 const { loadChannels, saveChannels, reloadChannels } = useAdminApi();
-const { showToast } = useToast();
 const modalRef = ref<InstanceType<typeof AdminModal>>();
 
 const loading = ref(false);
@@ -169,10 +159,23 @@ interface ChannelRow {
 }
 const rows = ref<ChannelRow[]>([]);
 
+/** t-table 列定义（cell 指向上方具名插槽） */
+const columns = [
+  { colKey: "priority", title: "固定下发", cell: "pri-slot", width: 96 },
+  { colKey: "id", title: "频道 ID", cell: "id-slot", width: 200 },
+  { colKey: "name", title: "频道名字", cell: "name-slot" },
+  { colKey: "ops", title: "操作", cell: "ops-slot", width: 170 },
+];
+
 const version = computed(() => base.value?.version ?? 0);
 const allCount = computed(() => rows.value.length);
 const priorityCount = computed(() => rows.value.filter((r) => r.priority).length);
 const defaultCount = computed(() => rows.value.filter((r) => !r.priority).length);
+
+/** t-card 头部描述 */
+const cardDesc = computed(
+  () => `全部频道 ${allCount.value} 个 · 固定 ${priorityCount.value} + 搜索 ${defaultCount.value} · 版本 v${version.value || "-"}`,
+);
 
 /** 从后端数据构建表格行 */
 function buildRows(data: ChannelAdminData): ChannelRow[] {
@@ -204,7 +207,7 @@ function addChannel() {
   const id = newId.value.trim();
   if (!id) return;
   if (rows.value.some((r) => r.id === id)) {
-    showToast("该频道已存在", "error");
+    MessagePlugin.error("该频道已存在");
     return;
   }
   rows.value.push({ id, name: newDisplay.value.trim(), priority: false });
@@ -309,10 +312,10 @@ async function doSave() {
       channelNames,
     });
     dirty.value = false;
-    showToast(`已保存 v${r.version}`, "success");
+    MessagePlugin.success(`已保存 v${r.version}`);
     await load(); // 服务端做了去重/互斥，回读最新
   } catch (e: any) {
-    showToast(e?.message || "保存失败", "error");
+    MessagePlugin.error(e?.message || "保存失败");
     throw e; // 保持弹窗显示错误
   } finally {
     saving.value = false;
@@ -334,9 +337,9 @@ function askReload() {
         const r = await reloadChannels();
         await load();
         reloadMsg.value = `已重载：版本 ${r.version ?? "-"}，默认 ${r.defaultCount} + 优先 ${r.priorityCount} 个频道`;
-        showToast("频道配置已重载", "success");
+        MessagePlugin.success("频道配置已重载");
       } catch (e: any) {
-        showToast(e?.message || "重载失败", "error");
+        MessagePlugin.error(e?.message || "重载失败");
         throw e;
       } finally {
         reloading.value = false;
@@ -350,150 +353,43 @@ onMounted(load);
 
 <style scoped>
 .admin-head-actions { display: flex; gap: 8px; align-items: center; }
+.channel-alert { border-radius: 8px; }
 .channel-add {
   display: flex;
   gap: 10px;
   margin: 16px 0 14px;
 }
-.channel-input {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border-light, #e5dfd0);
-  border-radius: 8px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #1f2937);
-  font-size: 14px;
-}
-.channel-input-sm { max-width: 200px; }
-.channel-input:focus { outline: none; border-color: var(--primary, #0f766e); }
+.channel-input { flex: 1; min-width: 0; }
+.channel-input-sm { max-width: 220px; }
+.channel-body { min-height: 120px; border-radius: 10px; }
 
-/* ===== 表格 ===== */
-.channel-table-wrap {
-  max-height: 460px; /* 内部滚动，避免 77 个频道撑长整页 */
-  overflow-y: auto;
-  border: 1px solid var(--border-light, #e5dfd0);
-  border-radius: 10px;
-  position: relative;
-}
-.channel-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.channel-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--bg-primary, #fffdf8);
-  box-shadow: 0 1px 0 var(--border-light, #e5dfd0);
-}
-.channel-table th {
-  text-align: left;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary, #9ca3af);
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-light, #e5dfd0);
-  letter-spacing: 0.5px;
-}
-.channel-table td {
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border-light, #eee);
-  vertical-align: middle;
-}
-.channel-table tbody tr:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.03)); }
-.channel-table tbody tr:nth-child(even) { background: var(--bg-hover, rgba(15, 118, 110, 0.025)); }
-.col-pri { width: 70px; white-space: nowrap; }
-.col-id { width: 180px; }
-.col-name { min-width: 200px; }
-.col-ops { width: 90px; white-space: nowrap; }
-
-.channel-pri-badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid var(--border-light, #e5dfd0);
-  color: var(--text-tertiary, #9ca3af);
-  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
-}
-/* 表格内部滚动的滚动条美化（WebKit） */
-.channel-table-wrap::-webkit-scrollbar { width: 10px; }
-.channel-table-wrap::-webkit-scrollbar-thumb {
-  background: var(--border-strong, #d6cdb8);
-  border-radius: 999px;
-  border: 2px solid var(--bg-primary, #fffdf8);
-}
-.channel-table-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary, #9ca3af); }
-.channel-table-wrap::-webkit-scrollbar-track { background: transparent; }
-.channel-table-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--text-tertiary, #9ca3af);
-}
-.channel-pri-badge.is-pri {
-  background: rgba(15, 118, 110, 0.14);
-  border-color: rgba(15, 118, 110, 0.3);
-  color: var(--primary, #0f766e);
-  font-weight: 600;
-}
-.channel-id {
-  color: var(--text-secondary, #4b5563);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  word-break: break-all;
-}
-.row-input {
-  width: 100%;
-  max-width: 260px;
-  padding: 5px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  font-size: 13px;
-  background: transparent;
-  color: var(--text-primary, #1f2937);
-}
-.row-input:hover { border-color: var(--border-light, #e5dfd0); background: var(--bg-primary, #fff); }
-.row-input:focus {
-  outline: none;
-  border-color: var(--primary, #0f766e);
-  background: var(--bg-primary, #fff);
-}
-.ops-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary, #9ca3af);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 4px 7px;
-  border-radius: 6px;
-  line-height: 1;
-  margin-right: 2px;
-}
-.ops-btn:hover { background: rgba(0, 0, 0, 0.06); color: var(--text-primary, #1f2937); }
-.ops-btn-danger:hover { background: rgba(239, 68, 68, 0.12); color: var(--error, #ef4444); }
-
-.admin-empty { padding: 24px 0; text-align: center; color: var(--text-tertiary, #9ca3af); font-size: 14px; }
-.admin-notice-warn {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #b45309;
-}
 .channel-tip {
   margin: 0 0 10px;
   font-size: 12px;
   line-height: 1.7;
   color: var(--text-tertiary, #9ca3af);
-  background: var(--bg-hover, rgba(15, 118, 110, 0.04));
+  background: var(--bg-hover, rgba(37, 99, 235, 0.04));
   border-radius: 8px;
   padding: 8px 12px;
 }
 .channel-tip b { color: var(--text-secondary, #4b5563); font-weight: 600; }
-.ops-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  background: transparent;
+
+.channel-id {
+  color: var(--text-secondary, #475569);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+.row-input { width: 100%; max-width: 280px; }
+.ops-cell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.channel-table-hint {
+  margin-top: 8px;
+  font-size: 12px;
   color: var(--text-tertiary, #9ca3af);
 }
+.admin-empty { padding: 24px 0; text-align: center; color: var(--text-tertiary, #9ca3af); font-size: 14px; }
 </style>

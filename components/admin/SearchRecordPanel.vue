@@ -1,122 +1,94 @@
 <template>
-  <section class="admin-card">
-    <div class="admin-card-head">
-      <div>
-        <h2>搜索记录</h2>
-        <p class="admin-card-desc">谁搜了什么 / 某词谁搜过。可对异常 IP 一键加入黑名单。</p>
-      </div>
-    </div>
+  <t-card title="搜索记录" description="谁搜了什么 / 某词谁搜过。可对异常 IP 一键加入黑名单。">
 
     <!-- 查询表单 -->
     <form class="admin-form" @submit.prevent="doSearch">
-      <div class="admin-seg" role="tablist" aria-label="查询方式">
-        <button
-          type="button"
-          :class="['admin-seg-item', { active: mode === 'openid' }]"
-          @click="mode = 'openid'">按 openid 查</button>
-        <button
-          type="button"
-          :class="['admin-seg-item', { active: mode === 'term' }]"
-          @click="mode = 'term'">按搜索词查</button>
-        <button
-          type="button"
-          :class="['admin-seg-item', { active: mode === 'ip' }]"
-          @click="mode = 'ip'">按 IP 查</button>
-      </div>
+      <t-radio-group v-model="mode" variant="default-filled" class="sr-mode">
+        <t-radio-button value="openid">按 openid 查</t-radio-button>
+        <t-radio-button value="term">按搜索词查</t-radio-button>
+        <t-radio-button value="ip">按 IP 查</t-radio-button>
+      </t-radio-group>
       <div class="admin-form-row">
-        <input
+        <t-input
           v-model="keyword"
-          type="text"
+          class="admin-input-t"
           :placeholder="mode === 'openid' ? '输入 openid' : mode === 'term' ? '输入搜索词' : '输入 IP'"
-          class="admin-input"
-          @keyup.enter="doSearch" />
-        <select v-model="days" class="admin-select" aria-label="时间范围">
-          <option value="1">近 1 天</option>
-          <option value="7">近 7 天</option>
-          <option value="30">近 30 天</option>
-          <option value="90">近 90 天</option>
-        </select>
-        <button type="submit" class="btn btn-primary" :disabled="loading || !keyword.trim()">
-          {{ loading ? "查询中…" : "查询" }}
-        </button>
+          clearable
+          @enter="doSearch" />
+        <t-select v-model="days" class="sr-days" aria-label="时间范围">
+          <t-option value="1" label="近 1 天" />
+          <t-option value="7" label="近 7 天" />
+          <t-option value="30" label="近 30 天" />
+          <t-option value="90" label="近 90 天" />
+        </t-select>
+        <t-button theme="primary" :disabled="loading || !keyword.trim()" :loading="loading" @click="doSearch">
+          查询
+        </t-button>
       </div>
     </form>
 
-    <p v-if="error" class="admin-notice admin-notice-error">{{ error }}</p>
+    <t-alert v-if="error" theme="error" :message="error" class="sr-alert" />
 
     <!-- 结果区 -->
     <template v-if="searched">
       <div class="admin-list-head">
         <span>共 {{ total }} 条记录（{{ modeLabel }}：{{ lastKeyword }}）</span>
-        <span class="admin-list-muted">第 {{ page }} / {{ totalPages }} 页 · 每页 {{ PAGE_SIZE }}</span>
       </div>
 
-      <div v-if="loading" class="admin-state">查询中…</div>
-      <div v-else-if="items.length === 0" class="admin-state">无记录（该时间范围内没有数据）</div>
+      <t-loading :loading="loading" text="查询中…" show-overlay>
+        <t-table
+          v-if="items.length > 0"
+          row-key="_idx"
+          :data="items"
+          :columns="tableColumns"
+          :max-height="520"
+          size="small"
+        >
+          <template #op-slot="{ row }">
+            <t-button
+              v-if="row.ip"
+              theme="danger"
+              variant="outline"
+              size="small"
+              :loading="busyKey === `block-${row.ip}`"
+              @click="askBlock(row.ip)">
+              拉黑
+            </t-button>
+            <span v-else class="admin-hint">-</span>
+          </template>
+        </t-table>
+        <div v-else class="admin-state">无记录（该时间范围内没有数据）</div>
 
-      <div v-else class="admin-table-wrap">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>搜索词</th>
-              <th v-if="mode === 'term'">openid</th>
-              <th v-if="mode === 'ip'">openid</th>
-              <th>IP</th>
-              <th>时间（北京时间）</th>
-              <th class="th-op">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(it, idx) in items" :key="idx">
-              <td class="mono">{{ (page - 1) * PAGE_SIZE + idx + 1 }}</td>
-              <td class="cell-term">{{ it.term ?? "-" }}</td>
-              <td v-if="mode === 'term' || mode === 'ip'" class="mono cell-openid">{{ it.openid ?? "-" }}</td>
-              <td class="mono">{{ it.ip || "-" }}</td>
-              <td class="mono">{{ formatTime(it.createdAt) }}</td>
-              <td class="op-cell">
-                <button
-                  v-if="it.ip"
-                  type="button"
-                  class="btn btn-danger"
-                  :disabled="busyKey !== ''"
-                  @click="askBlock(it.ip)">
-                  {{ busyKey === `block-${it.ip}` ? "拉黑中…" : "拉黑" }}
-                </button>
-                <span v-else class="admin-hint">-</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- 分页 -->
-        <div v-if="totalPages > 1" class="sr-pager">
-          <button type="button" class="btn btn-neutral" :disabled="page <= 1 || loading" @click="goPage(page - 1)">
-            ← 上一页
-          </button>
-          <span class="sr-pager-info">{{ page }} / {{ totalPages }}</span>
-          <button type="button" class="btn btn-neutral" :disabled="page >= totalPages || loading" @click="goPage(page + 1)">
-            下一页 →
-          </button>
-        </div>
-      </div>
+        <!-- 分页（change 回调参数是 PageInfo 对象，取 current） -->
+        <t-pagination
+          v-if="totalPages > 1"
+          class="sr-pager"
+          :current="page"
+          :page-size="PAGE_SIZE"
+          :total="total"
+          :show-page-size="false"
+          :show-jumper="false"
+          :disabled="loading"
+          @change="(info: any) => goPage(info.current)"
+        />
+      </t-loading>
     </template>
 
     <!-- 确认弹窗（确认后执行拉黑） -->
     <AdminModal ref="modal" title="拉黑 IP" tone="danger" confirm-text="确认拉黑" />
-  </section>
+  </t-card>
 </template>
 
 <script setup lang="ts">
 /**
- * 搜索记录面板（2026-08-25 admin 规范化重构拆出的子组件）
- * 查询 /api/search-log：按 openid 或按词；结果行内"拉黑"调 /api/blacklist。
+ * 搜索记录面板（2026-09-01 TDesign 化：t-table + t-pagination + t-radio-group）
+ * 查询 /api/search-log：按 openid / 按词 / 按 IP；结果行内"拉黑"调 /api/blacklist。
  */
+import { MessagePlugin } from "tdesign-vue-next";
 import { useAdminApi, type SearchLogItem } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
 
 const { querySearchLog, blockIp } = useAdminApi();
-const { showToast } = useToast();
 const modal = ref<InstanceType<typeof AdminModal>>();
 
 const mode = ref<"openid" | "term" | "ip">("openid");
@@ -138,6 +110,22 @@ const emit = defineEmits<{ (e: "blocked"): void }>();
 const modeLabel = computed(() =>
   mode.value === "openid" ? "openid" : mode.value === "term" ? "搜索词" : "IP",
 );
+
+/** t-table 列：openid 列只在按词/IP 查时展示 */
+const tableColumns = computed(() => {
+  const cols: any[] = [
+    { colKey: "term", title: "搜索词", cell: (_h: any, { row }: any) => row.term ?? "-", ellipsis: true },
+  ];
+  if (mode.value !== "openid") {
+    cols.push({ colKey: "openid", title: "openid", cell: (_h: any, { row }: any) => row.openid ?? "-", ellipsis: true });
+  }
+  cols.push(
+    { colKey: "ip", title: "IP", cell: (_h: any, { row }: any) => row.ip || "-" },
+    { colKey: "time", title: "时间（北京时间）", cell: (_h: any, { row }: any) => formatTime(row.createdAt) },
+    { colKey: "ops", title: "操作", cell: "op-slot", width: 90 },
+  );
+  return cols;
+});
 
 function formatTime(ms?: number): string {
   if (!ms) return "-";
@@ -166,7 +154,7 @@ async function doQuery() {
       limit: PAGE_SIZE,
       offset: (page.value - 1) * PAGE_SIZE,
     });
-    items.value = data.items ?? [];
+    items.value = (data.items ?? []).map((it, idx) => ({ ...it, _idx: idx }));
     total.value = data.total ?? items.value.length;
     lastKeyword.value = kw;
     searched.value = true;
@@ -178,12 +166,12 @@ async function doQuery() {
 }
 
 function goPage(p: number) {
-  if (p < 1 || p > totalPages.value) return;
+  if (typeof p !== "number" || p < 1 || p > totalPages.value) return;
   page.value = p;
   doQuery();
 }
 
-/** 弹确认框（替换 window.confirm），确认后执行拉黑 */
+/** 弹确认框，确认后执行拉黑 */
 function askBlock(ip: string) {
   modal.value?.open({
     title: "拉黑 IP",
@@ -203,11 +191,11 @@ async function doBlock(ip: string) {
     items.value = items.value.filter((it) => it.ip !== ip);
     total.value = Math.max(0, total.value - 1);
     if (items.value.length === 0 && page.value > 1) page.value -= 1;
-    showToast(`已拉黑 ${ip}`, "success");
+    MessagePlugin.success(`已拉黑 ${ip}`);
     emit("blocked");
     await doQuery();
   } catch (e: any) {
-    showToast(e?.message || "拉黑失败", "error");
+    MessagePlugin.error(e?.message || "拉黑失败");
     throw e; // 让 modal 保持打开显示错误
   } finally {
     busyKey.value = "";
@@ -216,17 +204,13 @@ async function doBlock(ip: string) {
 </script>
 
 <style scoped>
+.sr-mode { margin-bottom: 4px; }
+.admin-input-t { flex: 1; min-width: 180px; max-width: 420px; }
+.sr-days { width: 130px; }
+.sr-alert { border-radius: 8px; }
 .sr-pager {
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 12px 0;
-}
-.sr-pager-info {
-  font-size: 13px;
-  color: var(--text-tertiary, #9ca3af);
-  min-width: 60px;
-  text-align: center;
+  padding: 12px 0 4px;
 }
 </style>

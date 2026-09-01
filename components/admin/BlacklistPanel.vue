@@ -1,113 +1,102 @@
 <template>
-  <section class="admin-card">
-    <div class="admin-card-head">
-      <div>
-        <h2>IP 黑名单</h2>
-        <p class="admin-card-desc">封禁中+惯犯档案+计数记录 · 顽固爬虫分级递增（24h → 7 天 → 30 天）</p>
-      </div>
-      <button type="button" class="btn btn-neutral" :disabled="loading" @click="refresh()">
-        {{ loading ? "刷新中…" : "刷新" }}
-      </button>
-    </div>
+  <t-card title="IP 黑名单" description="封禁中+惯犯档案+计数记录 · 顽固爬虫分级递增（24h → 7 天 → 30 天）">
+    <template #actions>
+      <t-button variant="outline" :disabled="loading" :loading="loading" @click="refresh()">
+        刷新
+      </t-button>
+    </template>
 
     <!-- 筛选：IP 搜索 + 状态 -->
     <div class="admin-form-row" style="margin-bottom: 10px">
-      <input
+      <t-input
         v-model="ipFilter"
-        type="text"
-        class="admin-input"
+        class="admin-input-t"
         placeholder="按 IP 搜索（支持部分匹配）…"
-        @keyup.enter="doFilter"
+        clearable
+        @enter="doFilter"
       />
-      <select v-model="status" class="admin-select" aria-label="状态筛选" @change="doFilter">
-        <option value="">全部</option>
-        <option value="blocked">封禁中</option>
-        <option value="free">已解封</option>
-      </select>
-      <button type="button" class="btn btn-neutral" @click="doFilter">筛选</button>
+      <t-select v-model="status" class="bl-status" aria-label="状态筛选" @change="doFilter">
+        <t-option value="" label="全部" />
+        <t-option value="blocked" label="封禁中" />
+        <t-option value="free" label="已解封" />
+      </t-select>
+      <t-button variant="outline" @click="doFilter">筛选</t-button>
     </div>
 
-    <p v-if="error" class="admin-notice admin-notice-error">{{ error }}</p>
+    <t-alert v-if="error" theme="error" :message="error" class="bl-alert" />
 
     <div class="admin-list-head">
       <span>共 {{ total }} 条（{{ statusLabel }}）</span>
-      <span class="admin-list-muted">{{ loading ? "加载中…" : `第 ${page} / ${totalPages} 页` }}</span>
     </div>
 
-    <div v-if="loading && items.length === 0" class="admin-state">加载中…</div>
-    <div v-else-if="items.length === 0 && !error" class="admin-state">暂无符合条件的记录</div>
+    <t-loading :loading="loading && items.length > 0" show-overlay>
+      <t-table
+        v-if="items.length > 0"
+        row-key="ip"
+        :data="items"
+        :columns="columns"
+        :max-height="520"
+        size="small"
+      >
+        <template #reason-slot="{ row }">
+          {{ reasonText[row.reason ?? ""] ?? row.reason ?? "-" }}
+        </template>
+        <template #status-slot="{ row }">
+          <t-tag :theme="row.blocked ? 'danger' : 'default'" variant="light">
+            {{ row.blocked ? "封禁中" : "已解封" }}
+          </t-tag>
+        </template>
+        <template #level-slot="{ row }">{{ blockLevelText(row.blockCount) }}</template>
+        <template #remaining-slot="{ row }">{{ row.blocked ? formatDuration(row.remainingMs) : "-" }}</template>
+        <template #expires-slot="{ row }">
+          <span class="mono">{{ formatTime(row.expiresAt) }}</span>
+        </template>
+        <template #last-slot="{ row }">
+          <span class="mono">{{ formatTime(row.lastAt) }}</span>
+        </template>
+        <template #op-slot="{ row }">
+          <t-button
+            variant="outline"
+            size="small"
+            :loading="busyKey === `remove-${row.ip}`"
+            @click="askRemove(row.ip)">
+            移除
+          </t-button>
+        </template>
+      </t-table>
+      <div v-else-if="!error" class="admin-state">暂无符合条件的记录</div>
 
-    <div v-else class="admin-table-wrap">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>IP</th>
-            <th>原因</th>
-            <th>状态</th>
-            <th>封禁档位</th>
-            <th>剩余</th>
-            <th>解封时间（北京）</th>
-            <th>累计拒绝</th>
-            <th>最近活动（北京）</th>
-            <th class="th-op">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="it in items" :key="it.ip">
-            <td class="mono">{{ it.ip }}</td>
-            <td>{{ reasonText[it.reason ?? ""] ?? it.reason }}</td>
-            <td>
-              <span :class="['badge', it.blocked ? 'badge-blocked' : 'badge-free']">
-                {{ it.blocked ? "封禁中" : "已解封" }}
-              </span>
-            </td>
-            <td>{{ blockLevelText(it.blockCount) }}</td>
-            <td>{{ it.blocked ? formatDuration(it.remainingMs) : "-" }}</td>
-            <td class="mono">{{ formatTime(it.expiresAt) }}</td>
-            <td>{{ it.hitCount ?? 0 }}</td>
-            <td class="mono">{{ formatTime(it.lastAt) }}</td>
-            <td class="op-cell">
-              <button
-                type="button"
-                class="btn btn-neutral"
-                :disabled="busyKey !== ''"
-                @click="askRemove(it.ip)">
-                {{ busyKey === `remove-${it.ip}` ? "移除中…" : "移除" }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- 分页 -->
-      <div v-if="totalPages > 1" class="bl-pager">
-        <button type="button" class="btn btn-neutral" :disabled="page <= 1 || loading" @click="go(page - 1)">
-          ← 上一页
-        </button>
-        <span class="bl-pager-info">{{ page }} / {{ totalPages }}</span>
-        <button type="button" class="btn btn-neutral" :disabled="page >= totalPages || loading" @click="go(page + 1)">
-          下一页 →
-        </button>
-      </div>
-    </div>
+      <!-- 分页（change 回调参数是 PageInfo 对象，取 current） -->
+      <t-pagination
+        v-if="totalPages > 1"
+        class="bl-pager"
+        :current="page"
+        :page-size="PAGE_SIZE"
+        :total="total"
+        :show-page-size="false"
+        :show-jumper="false"
+        :disabled="loading"
+        @change="(info: any) => go(info.current)"
+      />
+    </t-loading>
 
     <!-- 确认弹窗 -->
     <AdminModal ref="modal" :title="'移除 IP'" tone="danger" confirm-text="确认移除" />
-  </section>
+  </t-card>
 </template>
 
 <script setup lang="ts">
 /**
- * IP 黑名单面板（2026-08-25 规范化重构拆出的子组件；2026-08-26 加筛选 + 分页）
+ * IP 黑名单面板（2026-09-01 TDesign 化：t-table + t-pagination + t-tag）
  * 展示 /api/blacklist 封禁中 + 惯犯档案；"移除"即解除封禁。
  * - IP 模糊搜索 + 状态筛选（封禁中/已解封/全部）
  * - limit=50 分页
  */
+import { MessagePlugin } from "tdesign-vue-next";
 import { useAdminApi, type BlacklistItem } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
 
 const { loadBlacklist, removeIp } = useAdminApi();
-const { showToast } = useToast();
 const modalRef = ref<InstanceType<typeof AdminModal>>();
 
 const loading = ref(false);
@@ -125,6 +114,19 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)
 const statusLabel = computed(() =>
   status.value === "blocked" ? "封禁中" : status.value === "free" ? "已解封" : "全部",
 );
+
+/** t-table 列定义（cell 指向上方具名插槽） */
+const columns = [
+  { colKey: "ip", title: "IP", cell: (_h: any, { row }: any) => row.ip },
+  { colKey: "reason", title: "原因", cell: "reason-slot" },
+  { colKey: "status", title: "状态", cell: "status-slot", width: 90 },
+  { colKey: "level", title: "封禁档位", cell: "level-slot", width: 90 },
+  { colKey: "remaining", title: "剩余", cell: "remaining-slot", width: 90 },
+  { colKey: "expires", title: "解封时间（北京）", cell: "expires-slot", width: 150 },
+  { colKey: "hitCount", title: "累计拒绝", width: 90, cell: (_h: any, { row }: any) => row.hitCount ?? 0 },
+  { colKey: "last", title: "最近活动（北京）", cell: "last-slot", width: 150 },
+  { colKey: "ops", title: "操作", cell: "op-slot", width: 90 },
+];
 
 const reasonText: Record<string, string> = {
   bot_ua: "爬虫UA",
@@ -183,7 +185,7 @@ function doFilter() {
 }
 
 function go(p: number) {
-  if (p < 1 || p > totalPages.value) return;
+  if (typeof p !== "number" || p < 1 || p > totalPages.value) return;
   page.value = p;
   load();
 }
@@ -207,10 +209,10 @@ async function doRemove(ip: string) {
     items.value = items.value.filter((it) => it.ip !== ip);
     total.value = Math.max(0, total.value - 1);
     if (items.value.length === 0 && page.value > 1) page.value -= 1;
-    showToast(`已移除 ${ip}`, "success");
+    MessagePlugin.success(`已移除 ${ip}`);
     await load();
   } catch (e: any) {
-    showToast(e?.message || "移除失败", "error");
+    MessagePlugin.error(e?.message || "移除失败");
     throw e; // 让 modal 保持打开显示错误
   } finally {
     busyKey.value = "";
@@ -225,17 +227,16 @@ defineExpose({ refresh: () => load() });
 </script>
 
 <style scoped>
+.admin-input-t { flex: 1; min-width: 180px; max-width: 320px; }
+.bl-status { width: 130px; }
+.bl-alert { border-radius: 8px; }
 .bl-pager {
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 14px;
   padding: 12px 0 4px;
 }
-.bl-pager-info {
-  font-size: 13px;
-  color: var(--text-tertiary, #9ca3af);
-  min-width: 60px;
-  text-align: center;
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 </style>

@@ -1,19 +1,17 @@
 /* ============================================================
- * 管理后台共享样式（2026-08-25 规范化重构引入；2026-08-26 设计稿落地）
- * 供 AdminLayout / 各 admin 面板组件复用：
- * 统一设计令牌 + 卡片 / 表格 / 按钮 / 徽章 / 表单 / 状态组件。
- * 注意：这里定义的组件样式类名以 admin- 前缀，避免与客户页冲突。
+ * 管理后台共享样式（2026-08-25 引入；2026-09-01 TDesign 化瘦身）
  *
- * 2026-08-26 蓝调重构（对齐 Ardot 设计稿）：
- * - 设计稿为蓝色系（主蓝 #2563EB / 深蓝 #2151C7），现有全局变量是暖色米色系。
- * - 为不污染客户首页，这里在 .admin-page/.admin-view 作用域内**局部覆盖**
- *   全局 CSS 变量，把所有面板切到蓝调；客户页不受影响。
+ * 2026-09-01 起，按钮/输入框/表格/分页/徽章/弹窗/消息全部由
+ * TDesign 组件承担（品牌色经下方 --td-* token 覆盖对齐 #2563eb），
+ * 本文件只剩：
+ *   1. admin 作用域的局部 token 覆盖（蓝调，不污染客户页）
+ *   2. 少量跨面板复用的排版类（卡片头 / 表单布局 / 状态提示）
  * ============================================================ */
-:where(.admin-page, .admin-view) {
+:where(.admin-shell, .admin-gate, .admin-auth-shell, .admin-page, .admin-view) {
   --admin-radius: 12px;
   --admin-radius-sm: 8px;
 
-  /* ---- 2026-08-26 蓝调覆盖（仅 admin 作用域） ---- */
+  /* ---- 蓝调覆盖（仅 admin 作用域） ---- */
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
   --primary-glow: rgba(37, 99, 235, 0.2);
@@ -34,144 +32,24 @@
   --shadow-sm: 0 1px 2px 0 rgba(16, 24, 40, 0.05);
 }
 
-/* ---------- 卡片 ---------- */
-.admin-card {
-  background: var(--bg-primary, #fffdf8);
-  border: 1px solid var(--border-light, #e8ecf0);
-  border-radius: var(--radius-lg, 16px);
-  box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(16, 24, 40, 0.05));
-  padding: 20px;
+/* ---- TDesign 品牌色对齐（admin 蓝 #2563eb，替换默认 #0052d9） ----
+   --td-* 变量只被 TDesign 组件消费，而 t- 组件仅存在于 admin 路由，
+   全局覆盖不影响客户端页面。深色模式由 [theme-mode="dark"] 分支自动适配。 */
+:root {
+  --td-brand-color: #2563eb;
+  --td-brand-color-hover: #1d4ed8;
+  --td-brand-color-active: #1d4ed8;
+  --td-brand-color-focus: rgba(37, 99, 235, 0.12);
+  --td-brand-color-light: rgba(37, 99, 235, 0.08);
+  --td-brand-color-light-hover: rgba(37, 99, 235, 0.14);
+  --td-brand-color-disabled: rgba(37, 99, 235, 0.4);
 }
 
-/* 2026-08-26 设计稿：渐变品牌 Logo（蓝 #2563EB → #2151C7） */
-.admin-brand-badge {
-  background: linear-gradient(135deg, #2563eb, #2151c7);
-  color: #fff;
-}
-.admin-brand-badge g,
-.admin-brand-badge path { fill: #fff; }
-.admin-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.admin-card-head h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary, #1f2937);
-}
-.admin-card-desc {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-tertiary, #9ca3af);
-}
-
-/* ---------- 表单 ---------- */
+/* ---------- 表单布局（控件本体走 TDesign） ---------- */
 .admin-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 4px; }
-.admin-seg {
-  display: inline-flex;
-  gap: 4px;
-  padding: 3px;
-  background: var(--bg-secondary, #f7f3ea);
-  border-radius: 10px;
-  width: fit-content;
-}
-.admin-seg-item {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary, #4b5563);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.admin-seg-item.active {
-  background: var(--bg-primary, #fffdf8);
-  color: var(--primary, #0f766e);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
-}
-.admin-form-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.admin-input,
-.admin-select {
-  padding: 9px 12px;
-  border: 1px solid var(--border-light, #e5dfd0);
-  border-radius: var(--radius-sm, 8px);
-  background: var(--bg-input, #fff);
-  color: var(--text-primary, #1f2937);
-  font-size: 14px;
-}
-.admin-input { flex: 1; min-width: 180px; }
-.admin-input:focus,
-.admin-select:focus {
-  outline: none;
-  border-color: var(--primary, #0f766e);
-  box-shadow: 0 0 0 3px var(--primary-glow, rgba(15, 118, 110, 0.2));
-}
+.admin-form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
-/* ---------- 按钮 ---------- */
-.btn {
-  padding: 7px 14px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary {
-  background: var(--primary, #0f766e);
-  color: var(--text-on-primary, #fff);
-}
-.btn-primary:hover:not(:disabled) { background: var(--primary-dark, #115e59); }
-.btn-neutral {
-  background: transparent;
-  color: var(--text-secondary, #4b5563);
-  border: 1px solid var(--border-light, #e5dfd0);
-}
-.btn-neutral:hover:not(:disabled) {
-  background: var(--bg-hover, rgba(15, 118, 110, 0.04));
-  border-color: var(--border-medium, #d4c7ab);
-}
-.btn-danger {
-  background: var(--bg-danger, #fee2e2);
-  color: var(--danger-strong, #dc2626);
-  border: 1px solid var(--danger-border, #fecaca);
-}
-.btn-danger:hover:not(:disabled) {
-  background: var(--error, #ef4444);
-  color: #fff;
-  border-color: transparent;
-}
-.btn-danger-solid {
-  background: var(--error, #ef4444);
-  color: var(--text-on-danger, #fff);
-}
-.btn-danger-solid:hover:not(:disabled) { background: var(--danger-strong, #dc2626); }
-
-/* ---------- 徽章 ---------- */
-.badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-}
-.badge-blocked {
-  background: var(--danger-bg, #fef2f2);
-  color: var(--danger-strong, #dc2626);
-}
-.badge-free {
-  background: var(--bg-secondary, #f3f4f6);
-  color: var(--text-tertiary, #6b7280);
-}
-
-/* ---------- 表格 ---------- */
+/* ---------- 列表头 / 状态 / 提示 ---------- */
 .admin-list-head {
   display: flex;
   align-items: center;
@@ -180,61 +58,17 @@
   font-size: 13px;
   color: var(--text-tertiary, #9ca3af);
 }
-.admin-list-muted { font-size: 12px; }
-.admin-table-wrap {
-  margin-top: 4px;
-  border: 1px solid var(--border-light, #e5dfd0);
-  border-radius: var(--radius-md, 12px);
-  overflow-x: auto;
-  background: var(--bg-primary, #fffdf8);
-}
-.admin-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.admin-table th,
-.admin-table td {
-  text-align: left;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-light, #eee);
-  vertical-align: middle;
-  white-space: nowrap;
-}
-.admin-table th {
-  color: var(--text-tertiary, #9ca3af);
-  font-weight: 600;
-  font-size: 12px;
-  background: var(--bg-secondary, #faf9f4);
-}
-.admin-table tr:last-child td { border-bottom: none; }
-.admin-table tbody tr:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.04)); }
-.admin-table .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-.admin-table .cell-term,
-.admin-table .cell-openid {
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.admin-table .th-op,
-.admin-table .op-cell { text-align: center; }
-
-/* ---------- 状态 / 提示 ---------- */
 .admin-state {
   padding: 28px 16px;
   text-align: center;
   color: var(--text-tertiary, #9ca3af);
   font-size: 14px;
   background: var(--bg-secondary, #f3f4f6);
-  border-radius: var(--radius-md, 12px);
+  border-radius: var(--admin-radius, 12px);
 }
 .admin-notice {
   padding: 10px 14px;
-  border-radius: var(--radius-sm, 8px);
+  border-radius: 8px;
   margin: 12px 0;
   font-size: 14px;
 }
@@ -245,14 +79,8 @@
 }
 .admin-notice .admin-link {
   margin-left: 6px;
-  color: var(--primary, #0f766e);
+  color: var(--primary, #2563eb);
   font-weight: 600;
   text-decoration: none;
 }
 .admin-hint { color: var(--text-tertiary, #b0b7c3); }
-
-.admin-view {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}

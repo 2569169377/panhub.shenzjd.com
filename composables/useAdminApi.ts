@@ -10,7 +10,7 @@
  * 页面只需关心返回数据，不用重复写状态码分支。
  */
 
-export type AdminAuthStatus = "checking" | "ok" | "no-login" | "no-admin";
+export type AdminAuthStatus = "checking" | "ok" | "no-login" | "no-admin" | "error";
 
 /** 搜索记录条目 */
 export interface SearchLogItem {
@@ -54,8 +54,18 @@ export class AdminApiError extends Error {
   }
 }
 
+/** 全站共享的鉴权状态（模块级单例，见 useAdminApi 内注释） */
+const sharedAuthStatus = ref<AdminAuthStatus>("checking");
+/** checkAdminAuth 失败原因（error 态时给页面展示用） */
+const sharedProbeError = ref("");
+
 export function useAdminApi() {
-  const authStatus = ref<AdminAuthStatus>("checking");
+  // 鉴权状态为模块级单例（2026-09-02）：布局层（layouts/admin.vue 的鉴权门）
+  // 与各面板的 useAdminApi() 共享同一份状态——任何面板的接口 401/403 都会
+  // 驱动布局层统一反应（踢去登录页/提示无权限），而不是各面板各自为战。
+  // 仅客户端可变（probeAuth/request 均在 onMounted 后调用），SSR 无跨请求污染。
+  const authStatus = sharedAuthStatus;
+  const probeError = sharedProbeError;
 
   async function request<T = any>(url: string, init?: RequestInit): Promise<T> {
     // credentials: "same-origin" 显式声明：管理接口靠 wxauth-token cookie 鉴权，
@@ -80,26 +90,40 @@ export function useAdminApi() {
     return data.data as T;
   }
 
-  /** 打开管理页即探测管理员权限（onMounted 调用：先补齐 cookie，再探测） */
-  async function probeAuth(): Promise<AdminAuthStatus> {
+  /** 是否存在 wxauth-token cookie（纯本地判断，不发请求、不碰 SDK） */
+  function hasTokenCookie(): boolean {
+    return typeof document !== "undefined" && /(?:^|;\s*)wxauth-token=/.test(document.cookie);
+  }
+
+  /**
+   * 管理员鉴权探测（2026-09-02 重写，流程极简）：
+   *   没有 cookie → no-login（前端直接去登录页，不发请求）
+   *   有 cookie   → GET /api/admin/auth 一次出结论：
+   *                 200 → ok（是管理员，直接进）
+   *                 401 → no-login（token 无效/过期，去登录页）
+   *                 403 → no-admin（已登录但非管理员）
+   *   其他异常    → error（网络等，展示重试）
+   *
+   * 不调用 wx-auth SDK 的 silentCheck——它拿 localStorage 里可能残留的
+   * 小程序 mp: token 去校验，失败时会删掉整个 wxauth-token cookie
+   * （连刚扫码登录的新 token 一起没），是一切"时好时坏"问题的根源。
+   */
+  async function checkAdminAuth(): Promise<AdminAuthStatus> {
     authStatus.value = "checking";
+    probeError.value = "";
+    if (!hasTokenCookie()) {
+      authStatus.value = "no-login";
+      return authStatus.value;
+    }
     try {
-      // 先调一次 wx-auth SDK 静默检查：把 localStorage 备份的 token 落回 cookie，
-      // 或验证无有效凭证（silentCheck 对无 cookie 是幂等安全返回 false）。
-      // 此前优化"有 wxauth-token cookie 就跳过"有个隐患：SDK 可能凭 localStorage
-      // 残留通过 silentCheck 写 cookie，但若写失败/被清，则出现"内存有 token、
-      // cookie 没有"——搜索能过（token 兜底），管理接口却 401（只认 token cookie）。
-      // 2026-08-29：SDK 走 UMD 全局单例（resolveWxAuth 等待就绪，admin 布局
-      // 没引脚本时会自行补插）。加载失败仅跳过补 cookie，不影响后续接口
-      // 探测（401 走 no-login 兜底）。
-      const wxAuth = await resolveWxAuth().catch(() => null);
-      if (wxAuth) await wxAuth.silentCheck().catch(() => {});
-      // 探测：拉一次黑名单（管理员接口），成功即管理员
-      await request("/api/blacklist?limit=1");
+      await request("/api/admin/auth");
       authStatus.value = "ok";
     } catch (e: any) {
-      // 401/403 已被 request 写入 authStatus，其余（网络异常）保持 checking → 走 no-login 兜底
-      if (authStatus.value === "checking") authStatus.value = "no-login";
+      // 401/403 已由 request 写入 authStatus（明确的鉴权结论）
+      if (authStatus.value === "checking") {
+        authStatus.value = "error";
+        probeError.value = e?.message || "登录状态检测失败";
+      }
     }
     return authStatus.value;
   }
@@ -200,5 +224,5 @@ export function useAdminApi() {
     return request("/api/admin/stats");
   }
 
-  return { authStatus, probeAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels, loadStats };
+  return { authStatus, probeError, hasTokenCookie, checkAdminAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels, loadStats };
 }

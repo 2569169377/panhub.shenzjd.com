@@ -4,7 +4,18 @@ import channelsConfig from "./config/channels.json";
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: false },
-  css: ["~/assets/css/admin-shared.css"],
+  // admin-shared.css 只在 layouts/admin.vue 里按需引入（admin 专属），
+  // 不再全局注入——普通用户访问客户端页面不加载任何 admin 代码与样式
+  // 2026-09-01 后台管理接入 TDesign（tdesign.tencent.com）：
+  // 官方 Nuxt 模块，自动按需导入组件/图标/CSS 变量，SSR 友好。
+  // 组件按 t- 前缀解析，客户端页面未使用 t- 组件，不增加客户端包体。
+  modules: ["@tdesign-vue-next/nuxt"],
+  tdesign: {
+    // 关掉模块的全局样式注入：es/style/index.css（token + 基础 reset，约 19KB）
+    // 会进 nuxt.options.css 全局数组，客户端页面也会下载。
+    // 改由 layouts/admin.vue 自行 import，只随 /admin 路由加载。
+    importVariables: false,
+  },
   devServer: {
     port: 4000,
   },
