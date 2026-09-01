@@ -280,6 +280,25 @@ describe("HotSearchService 读缓存", () => {
     expect(b).toEqual(a);
   });
 
+  it("不同 limit 共享同一份候选池缓存（2026-09-01：首页 limit=5/25 只打一次库）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("共享池词");
+    await service.flush();
+
+    // 先以 limit=25 填充 canonical 池缓存
+    const pool = await service.getRandomHotSearches(25);
+    expect(((service as any).readCache as Map<string, unknown>).has("random:25")).toBe(true);
+
+    // 再以更小的 limit 读取：命中同一缓存键，不产生新键、结果为池的切片
+    const cacheSizeBefore = ((service as any).readCache as Map<string, unknown>).size;
+    const five = await service.getRandomHotSearches(5);
+    expect(((service as any).readCache as Map<string, unknown>).size).toBe(cacheSizeBefore);
+    expect(five.length).toBeLessThanOrEqual(5);
+    for (const item of five) {
+      expect(pool.some((p) => p.term === item.term)).toBe(true);
+    }
+  });
+
   it("deleteHotSearch 后读缓存立即失效（被删词不再出现）", async () => {
     await service.clearHotSearches();
     await service.recordSearch("待删缓存词");
@@ -308,7 +327,7 @@ describe("HotSearchService 读缓存", () => {
     expect(((service as any).readCache as Map<string, unknown>).size).toBe(0);
   });
 
-  it("flush 成功后清「按日期聚合」缓存(calendar/day/daily)，但保留首页 hot/random 缓存", async () => {
+  it("flush 不再清任何读缓存（2026-09-01：TTL 自然刷新，避免 60s flush 打穿 5min TTL）", async () => {
     await service.clearHotSearches();
     await service.recordSearch("flush前词");
     await service.flush(); // flush 后缓存空
@@ -326,13 +345,13 @@ describe("HotSearchService 读缓存", () => {
     expect(cache.has("hot:10")).toBe(true);
     expect(cache.has("random:25")).toBe(true);
 
-    // 新搜索再次 flush：日期聚合键应被清空，首页缓存保留（避免高频读次数徒增）
+    // 新搜索再次 flush：所有读缓存保留，交给 TTL 过期自然刷新
     await service.recordSearch("flush后新词");
     await service.flush();
-    expect(cache.has("calendar:30")).toBe(false);
-    expect(cache.has("day:2026-08-25")).toBe(false);
-    expect(cache.has("daily:2026-08-25")).toBe(false);
-    expect(cache.has("hot:10")).toBe(true); // 保留
-    expect(cache.has("random:25")).toBe(true); // 保留
+    expect(cache.has("calendar:30")).toBe(true);
+    expect(cache.has("day:2026-08-25")).toBe(true);
+    expect(cache.has("daily:2026-08-25")).toBe(true);
+    expect(cache.has("hot:10")).toBe(true);
+    expect(cache.has("random:25")).toBe(true);
   });
 });

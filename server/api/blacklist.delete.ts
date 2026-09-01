@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
+import { invalidateAdminCache } from "../core/cache/adminReadCache";
 
 /**
  * IP 手动移除黑名单 API（2026-08-25 管理页"移除"按钮）
@@ -25,6 +26,8 @@ export default defineEventHandler(async (event) => {
 
   const service = getOrCreateBotDefenseService();
   const removed = await service.removeBlock(ip);
+  // 变更后失效管理读缓存：黑名单列表与流量概览立即反映移除结果
+  invalidateAdminCache();
 
   return {
     code: 0,

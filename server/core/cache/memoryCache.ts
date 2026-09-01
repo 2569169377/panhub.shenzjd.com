@@ -164,6 +164,18 @@ export class MemoryCache<T = unknown> {
     if (rec) this.removeEntry(key, rec);
   }
 
+  /** 按前缀批量删除（管理端写操作失效对应面板缓存用），返回删除条数 */
+  deletePrefix(prefix: string): number {
+    let removed = 0;
+    for (const [key, rec] of this.store) {
+      if (key.startsWith(prefix)) {
+        this.removeEntry(key, rec);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   clear(): void {
     this.store.clear();
     this.totalMemoryBytes = 0;

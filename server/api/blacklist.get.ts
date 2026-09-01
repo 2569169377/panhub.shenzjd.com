@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getOrCreateBotDefenseService } from "../core/services/botDefense";
 import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
+import { withAdminCache, ADMIN_LIST_TTL_MS } from "../core/cache/adminReadCache";
 
 /**
  * IP 黑名单管理查询 API（2026-08-25 管理页"IP 黑名单" tab 数据源；2026-08-26 加分页筛选）
@@ -35,10 +36,15 @@ export default defineEventHandler(async (event) => {
   const status =
     statusRaw === "blocked" || statusRaw === "free" ? statusRaw : undefined;
 
-  const service = getOrCreateBotDefenseService();
-  const now = Date.now();
-  const { items, total } = await service.listEntries(limit, { ipFilter, status, offset });
+  // 读缓存（2026-09-01）：按筛选条件缓存原始列表 30s（COUNT + SELECT 两条查询）；
+  // blocked/remainingMs 用当前时间在缓存外计算，缓存命中时剩余时长依然新鲜。
+  // 黑名单 post/delete 写操作会主动失效本缓存。
+  const cacheKey = `admin:blacklist:${limit}:${offset}:${ipFilter}:${status ?? "all"}`;
+  const { items, total } = await withAdminCache(cacheKey, ADMIN_LIST_TTL_MS, () =>
+    getOrCreateBotDefenseService().listEntries(limit, { ipFilter, status, offset })
+  );
 
+  const now = Date.now();
   const enriched = items.map((it) => ({
     ...it,
     blocked: it.expiresAt > now, // 是否仍在封禁期

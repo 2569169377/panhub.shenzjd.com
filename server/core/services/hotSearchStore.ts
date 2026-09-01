@@ -13,6 +13,19 @@ export interface IHotSearchStore {
   recordSearch(term: string, now: number, delta?: number): Promise<void>;
 
   /**
+   * 批量落盘一批词增量（flush 用，2026-09-01 新增）
+   * 实现方应合并为单次 batch 往返（libsql client.batch），替代逐词 execute。
+   * @param entries 已按词聚合的增量列表（term 已规范化）
+   */
+  recordSearchBatch(entries: { term: string; lastAt: number; delta: number }[]): Promise<void>;
+
+  /**
+   * 批量累加多天的搜索次数（flush 用，2026-09-01 新增）
+   * 实现方应合并为单次 batch 往返。
+   */
+  recordDailySearchesBatch(entries: { date: string; delta: number }[]): Promise<void>;
+
+  /**
    * 获取热搜列表
    */
   getHotSearches(limit: number): Promise<HotSearchItem[]>;

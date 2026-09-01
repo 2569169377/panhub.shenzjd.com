@@ -95,6 +95,48 @@ export class TursoHotSearchStore implements IHotSearchStore {
   }
 
   /**
+   * 批量落盘一批词增量（2026-09-01 优化：flush 原来在 service 层逐词 await
+   * recordSearch，100 词 = 100 次 HTTP 往返；现合并为一次 client.batch）
+   */
+  async recordSearchBatch(
+    entries: { term: string; lastAt: number; delta: number }[]
+  ): Promise<void> {
+    await this.waitForInit();
+    const stmts = entries
+      .map((e) => ({ ...e, term: normalize(e.term), delta: Math.max(1, e.delta) }))
+      .filter((e) => e.term)
+      .map((e) => ({
+        sql: `INSERT INTO search_terms (term, count, first_at, last_at)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(term) DO UPDATE SET
+                count = count + excluded.count,
+                last_at = excluded.last_at`,
+        args: [e.term, e.delta, e.lastAt, e.lastAt],
+      }));
+    if (stmts.length === 0) return;
+    await this.client.batch(stmts);
+  }
+
+  /**
+   * 批量累加多天搜索次数（2026-09-01 优化：与 recordSearchBatch 同理，
+   * 多天 daily upsert 合并为一次 client.batch）
+   */
+  async recordDailySearchesBatch(
+    entries: { date: string; delta: number }[]
+  ): Promise<void> {
+    await this.waitForInit();
+    const stmts = entries
+      .filter((e) => Math.max(0, e.delta) > 0)
+      .map((e) => ({
+        sql: `INSERT INTO daily_searches (date, searches) VALUES (?, ?)
+              ON CONFLICT(date) DO UPDATE SET searches = searches + excluded.searches`,
+        args: [e.date, e.delta],
+      }));
+    if (stmts.length === 0) return;
+    await this.client.batch(stmts);
+  }
+
+  /**
    * 获取热搜列表（按搜索次数降序；hot_searches 表已废弃，从 search_terms 聚合）
    * 无生产调用方，保留接口语义：count 当 score，last_at 当 lastSearched
    */

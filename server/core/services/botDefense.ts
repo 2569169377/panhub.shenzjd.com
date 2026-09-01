@@ -50,8 +50,8 @@ function ipMatches(ip: string, entry: string): boolean {
  * 这种降级是安全选择：宁可临时漏拦，不要误把可恢复 IP 永久拉黑。
  *
  * 设计要点：
- * - 黑名单缓存 5min，负缓存 30s：前者保证拦截 hot path 极少触发 Turso 读，
- *   后者避免正常用户在短期内被反复 SELECT 同一 IP
+ * - 黑名单缓存 5min，负缓存 5min（2026-09-01 从 30s 拉长，见常量处说明）：
+ *   两者保证拦截 hot path 极少触发 Turso 读
  * - 阈值策略：同一 IP 在 60s 内累计 5 次 reject → 拉黑 24h
  *   既能逮住分布式低频攻击（被拦 5+ 次说明意图明显），也能容忍真人偶发误判
  * - recordRejection 静默吞错：拦截 hot path 不能因持久化失败拖慢搜索
@@ -70,8 +70,14 @@ function ipMatches(ip: string, entry: string): boolean {
 
 /** 黑名单内存缓存 TTL（热 path 长期命中） */
 const POS_CACHE_TTL_MS = 5 * 60_000;
-/** 负缓存 TTL（短时间内不再查同一个非黑名单 IP） */
-const NEG_CACHE_TTL_MS = 30_000;
+/**
+ * 负缓存 TTL（短时间内不再查同一个非黑名单 IP）
+ * 2026-09-01 优化：30s → 5min。Docker 单进程部署，内存缓存全局共享，
+ * negCache 5min 内该 IP 的 isBlocked 完全不查库；而所有拉黑路径
+ * （阈值自动拉黑 / 手动拉黑 / 探查升级）都会同步删掉该 IP 的 negCache，
+ * 新拉黑立即生效，拉长负缓存不产生"已拉黑仍放行 5min"的窗口。
+ */
+const NEG_CACHE_TTL_MS = 5 * 60_000;
 /** 拉黑阈值：同一 IP 累计拒绝次数（2026-08-24 从 5 调到 50） */
 const HOT_THRESHOLD = 50;
 /** 拉黑阈值时间窗（毫秒，2026-08-24 从 60s 调到 300s） */

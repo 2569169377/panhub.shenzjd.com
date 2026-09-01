@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getSearchLogStore } from "../core/services/tursoSearchLogStore";
 import { isAdminUser, getWxAuthCredential } from "../utils/wxAuthCheck";
+import { withAdminCache, ADMIN_LIST_TTL_MS } from "../core/cache/adminReadCache";
 
 /**
  * 搜索明细管理查询 API（2026-08-25 用户拍板：排查"哪个 openid 搜了什么"）
@@ -42,7 +43,6 @@ export default defineEventHandler(async (event) => {
   const limit = Math.min(Math.max(1, parseInt(String(q.limit || "50"), 10) || 50), 200);
   const offset = Math.max(0, parseInt(String(q.offset || "0"), 10) || 0);
   const daysRaw = parseInt(String(q.days || ""), 10);
-  const since = Number.isFinite(daysRaw) && daysRaw >= 1 ? Date.now() - daysRaw * 86400000 : undefined;
 
   const targetOpenid = String(q.openid || "").trim().slice(0, 128);
   const term = String(q.term || "").trim().slice(0, 200);
@@ -56,31 +56,65 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "需提供 openid / term / ip 参数" });
   }
 
+  // 读缓存（2026-09-01）：明细 SELECT + COUNT 两条查询按条件缓存 30s。
+  // 缓存 key 用 days 而非精确 since（滚动时间戳每毫秒都变会导致永远 miss），
+  // since 在 fetcher 内现算，TTL 内窗口最多滞后 30s，排查场景无感知。
+  const daysKey = Number.isFinite(daysRaw) && daysRaw >= 1 ? daysRaw : "all";
+  const computeSince = () =>
+    Number.isFinite(daysRaw) && daysRaw >= 1 ? Date.now() - daysRaw * 86400000 : undefined;
+
   if (targetOpenid) {
-    const items = await store.searchByOpenid(targetOpenid, limit, since, offset);
-    const total = await store.countSearch("openid", targetOpenid, since);
+    const cached = await withAdminCache(
+      `admin:searchlog:openid:${targetOpenid}:${limit}:${offset}:${daysKey}`,
+      ADMIN_LIST_TTL_MS,
+      async () => {
+        const since = computeSince();
+        return {
+          items: await store.searchByOpenid(targetOpenid, limit, since, offset),
+          total: await store.countSearch("openid", targetOpenid, since),
+        };
+      }
+    );
     return {
       code: 0,
       message: "success",
-      data: { mode: "openid", openid: targetOpenid, items, total },
+      data: { mode: "openid", openid: targetOpenid, items: cached.items, total: cached.total },
     };
   }
 
   if (term) {
-    const items = await store.searchByTerm(term, limit, since, offset);
-    const total = await store.countSearch("term", term, since);
+    const cached = await withAdminCache(
+      `admin:searchlog:term:${term}:${limit}:${offset}:${daysKey}`,
+      ADMIN_LIST_TTL_MS,
+      async () => {
+        const since = computeSince();
+        return {
+          items: await store.searchByTerm(term, limit, since, offset),
+          total: await store.countSearch("term", term, since),
+        };
+      }
+    );
     return {
       code: 0,
       message: "success",
-      data: { mode: "term", term, items, total },
+      data: { mode: "term", term, items: cached.items, total: cached.total },
     };
   }
 
-  const items = await store.searchByIp(ip, limit, since, offset);
-  const total = await store.countSearch("ip", ip, since);
+  const cached = await withAdminCache(
+    `admin:searchlog:ip:${ip}:${limit}:${offset}:${daysKey}`,
+    ADMIN_LIST_TTL_MS,
+    async () => {
+      const since = computeSince();
+      return {
+        items: await store.searchByIp(ip, limit, since, offset),
+        total: await store.countSearch("ip", ip, since),
+      };
+    }
+  );
   return {
     code: 0,
     message: "success",
-    data: { mode: "ip", ip, items, total },
+    data: { mode: "ip", ip, items: cached.items, total: cached.total },
   };
 });

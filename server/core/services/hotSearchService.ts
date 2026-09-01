@@ -17,9 +17,9 @@ const FLUSH_INTERVAL_MS =
  * 读缓存 TTL（2026-08-24 新增：热搜读接口不再每次请求都查库）
  * - READ_TTL_FAST：词云/榜单等高频且实时性要求中的接口
  * - READ_TTL_SLOW：日历/统计等低频变化的历史聚合数据
- * 写 flush 成功后会清「按日期聚合」的读缓存（calendar:/day:/daily:，保证"今日词数"
- * 等聚合读及时反映新 flush 的数据，避免页头/列表口径在 TTL 内不一致的视觉 bug）；
- * 但保留首页 hot:/random: 与累计统计缓存，不徒增高频读次数。delete/clear 时清全部。
+ * 2026-09-01 起 flush 不再清读缓存（原每次 flush 清 calendar:/day:/daily:，
+ * 活跃站点 60s flush 一次导致 5min TTL 形同虚设），所有读缓存一律 TTL 过期
+ * 自然刷新；仅 delete/clear 等管理操作清全部缓存保证立即生效。
  */
 const READ_TTL_FAST_MS = Number(process.env.HOT_SEARCH_READ_TTL_MS) || 60_000;
 const READ_TTL_SLOW_MS = 5 * 60_000;
@@ -132,19 +132,6 @@ export class HotSearchService {
   }
 
   /**
-   * 仅清「按日期聚合」的读缓存（calendar:/day:/daily:），保留首页 hot:/random:
-   * 与累计统计(total_*) 缓存——避免 flush 把高流量首页缓存也打掉导致读次数徒增，
-   * 同时解除页头"今日词数"与列表口径在 TTL 内不一致的视觉 bug。
-   */
-  private clearDateScopedReadCache(): void {
-    for (const key of this.readCache.keys()) {
-      if (key.startsWith("calendar:") || key.startsWith("day:") || key.startsWith("daily:")) {
-        this.readCache.delete(key);
-      }
-    }
-  }
-
-  /**
    * 热搜存储是否已就绪（Turso 已配置且初始化成功）。
    * 未配置时各 GET 接口返回空数据（不报错），页面表现为"没有热搜"。
    */
@@ -193,18 +180,26 @@ export class HotSearchService {
       if (!store) return; // 未配置 Turso：静默丢弃缓冲（热搜尽力而为），错误已在 waitForInit 记录一次
       // 按日期聚合增量（daily_searches 精确计数：从部署起每天一次 upsert，写放大极小）
       const dailyDelta = new Map<string, number>();
-      for (const [term, p] of snapshot) {
-        await store.recordSearch(term, p.lastAt, p.delta);
+      for (const [, p] of snapshot) {
         const day = formatDateKey(p.lastAt);
         dailyDelta.set(day, (dailyDelta.get(day) ?? 0) + p.delta);
       }
-      for (const [day, delta] of dailyDelta) {
-        await store.recordDailySearches(day, delta);
-      }
-      // 落盘成功后只清「按日期聚合」的读缓存(calendar/day/daily)：
-      // 避免页头"今日词数"与列表口径在 5min TTL 内不一致（如页头 60 / 列表 5），
-      // 同时保留首页 hot/random 与累计统计缓存，不徒增高频读次数
-      this.clearDateScopedReadCache();
+      // 2026-09-01 优化：词表与每日次数各一次 batch 往返（原逐词 await，
+      // 100 词的 flush = 100+ 次 HTTP 往返）
+      await store.recordSearchBatch(
+        [...snapshot.entries()].map(([term, p]) => ({
+          term,
+          lastAt: p.lastAt,
+          delta: p.delta,
+        }))
+      );
+      await store.recordDailySearchesBatch(
+        [...dailyDelta.entries()].map(([date, delta]) => ({ date, delta }))
+      );
+      // 2026-09-01 优化：flush 不再清任何读缓存，全部交给 TTL 过期自然刷新。
+      // 原实现每次 flush 清 calendar/day/daily 缓存，活跃站点 60s flush 一次，
+      // hot 页 5min TTL 形同虚设、几乎每次进页都真查库；不清后页头/列表/日历
+      // 在 TTL 内一致老化，口径仍互相一致，只是最多滞后一个 TTL（5min）。
     })()
       .catch((err) => {
         console.log(
@@ -263,15 +258,22 @@ export class HotSearchService {
    * （last_at 在今天 + count desc）作为主源，**保持丰满**（今天 ~350 个
    * 活跃词）。search_log 上线当天去重仅 45 词，用于主页词云太稀。
    *
+   * 2026-09-01 优化：首页两个组件分别以 limit=25（词云）和 limit=5（空状态
+   * 热词）调用本方法，若缓存 key 按 limit 区分会同一页面打两次库。现统一
+   * 缓存一份 canonical 候选池（25 条，即最大调用方），各调用方按需切片，
+   * 同一 TTL 窗口内无论多少种 limit 都只查一次库。
+   *
    * 后续：search_log 攒满一周后，再把 hover 次数切到 search_log 当天精确次数
    * （getDayItems 同步）。search_log 的明细仍只用于管理页排查，不参与展示主源。
    * search_terms 仍服务 sitemap 选词（getTopTerms）。
    */
   async getRandomHotSearches(limit: number = 25): Promise<HotSearchItem[]> {
     await this.waitForInit();
-    return this.getCached(`random:${limit}`, READ_TTL_FAST_MS, () =>
-      this.requireStore().getRandomHotSearches(limit)
+    const canonical = Math.max(25, limit);
+    const pool = await this.getCached(`random:${canonical}`, READ_TTL_FAST_MS, () =>
+      this.requireStore().getRandomHotSearches(canonical)
     );
+    return pool.slice(0, limit);
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
