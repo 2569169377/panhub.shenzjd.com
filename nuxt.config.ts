@@ -57,8 +57,12 @@ export default defineNuxtConfig({
   routeRules: {
     // 热搜接口不缓存，否则 POST 写入后 GET 仍返回旧数据
     "/api/hot-searches": { swr: false, cache: false },
-    // 热搜日历含"今日搜索次数"等实时统计，禁缓存避免滞后
-    "/api/hot-calendar": { swr: false, cache: false },
+    // 首页统计带（2026-09-01 替代 hot-calendar 的页头指标）：走 service 层
+    // TTL 读缓存，路由层禁缓存保证数字不被 SWR 固化 1 小时
+    "/api/hot-stats": { swr: false, cache: false },
+    // /hot 每日榜单页已下线（2026-09-01：公开页不再展示搜索词），
+    // 已收录链接 301 回首页，权重不丢
+    "/hot": { redirect: { to: "/", statusCode: 301 } },
     // 豆瓣热搜允许短时缓存（服务端已有 60 分钟 cache）
     "/api/douban-hot": { swr: false, cache: false },
     // 搜索接口依赖 Cookie 鉴权，禁止缓存避免 401 被缓存

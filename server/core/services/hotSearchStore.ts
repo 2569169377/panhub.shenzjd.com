@@ -92,7 +92,7 @@ export interface IHotSearchStore {
    * 一次 batch 查日历页头三件套：totalTerms（总词数 COUNT(*)）、
    * totalSearches（总次数 SUM(count)）、dailyDayCount（有次数记录的天数）
    * （2026-08-30 扩展：原 totalTerms + dailyDayCount 两查合并 batch 的基础上，
-   * 再并入总搜索次数，hot-calendar 一次往返拿全页头指标）
+   * 再并入总搜索次数，hot-stats 一次往返拿全统计带指标）
    */
   getCalendarMeta(): Promise<{
     totalTerms: number;

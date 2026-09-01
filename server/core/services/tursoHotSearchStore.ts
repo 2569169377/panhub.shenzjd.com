@@ -388,7 +388,7 @@ export class TursoHotSearchStore implements IHotSearchStore {
 
   /**
    * 一次 batch 查日历页头三件套（2026-08-30 扩展：在原 totalTerms + dailyDayCount
-   * 基础上并入 SUM(count) 总搜索次数，hot-calendar 一次往返拿全页头指标）
+   * 基础上并入 SUM(count) 总搜索次数，hot-stats 一次往返拿全统计带指标）
    */
   async getCalendarMeta(): Promise<{
     totalTerms: number;

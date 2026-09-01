@@ -29,14 +29,24 @@
       </aside>
     </div>
 
-    <!-- 热搜趋势入口 -->
-    <div class="trends-entry">
-      <NuxtLink to="/hot" class="trends-entry__link">
-        <span class="trends-entry__icon">🔥</span>
-        <span class="trends-entry__text">热搜趋势</span>
-        <span class="trends-entry__hint">飙升榜 · 完整榜单</span>
-        <span class="trends-entry__arrow">→</span>
-      </NuxtLink>
+    <!-- 站点搜索统计（2026-09-01 替代"热搜趋势"入口：公开页不再展示搜索词与逐日榜单） -->
+    <div v-if="siteStats" class="stats-strip">
+      <div class="stats-strip__item">
+        <span class="stats-strip__value">{{ siteStats.todaySearches.toLocaleString() }}</span>
+        <span class="stats-strip__label">今日搜索次数</span>
+      </div>
+      <div class="stats-strip__item">
+        <span class="stats-strip__value">{{ siteStats.todayTerms.toLocaleString() }}</span>
+        <span class="stats-strip__label">今日搜索词数</span>
+      </div>
+      <div class="stats-strip__item">
+        <span class="stats-strip__value">{{ siteStats.totalSearches.toLocaleString() }}</span>
+        <span class="stats-strip__label">累计搜索次数</span>
+      </div>
+      <div class="stats-strip__item">
+        <span class="stats-strip__value">{{ siteStats.totalTerms.toLocaleString() }}</span>
+        <span class="stats-strip__label">累计搜索词数</span>
+      </div>
     </div>
 
     <!-- 搜索框 -->
@@ -214,6 +224,7 @@ onMounted(async () => {
   if (doubanHotRef.value) await doubanHotRef.value.init();
   if (hotSearchRef.value) await hotSearchRef.value.init();
   fetchHotTerms();
+  fetchSiteStats();
 });
 
 // SEO 元数据
@@ -283,6 +294,30 @@ async function fetchHotTerms() {
     const data = await res.json();
     if (data.code === 0) {
       hotTerms.value = data.data.hotSearches.map((s: any) => s.term);
+    }
+  } catch {}
+}
+
+// hero 下方统计带（2026-09-01 替代 /hot 页：公开侧只展示统计数，不展示搜索词）
+// 接口侧全走 service TTL 读缓存，高频请求也不增加查库
+const siteStats = ref<{
+  todayTerms: number;
+  todaySearches: number;
+  totalSearches: number;
+  totalTerms: number;
+} | null>(null);
+
+async function fetchSiteStats() {
+  try {
+    const res = await fetch("/api/hot-stats");
+    const data = await res.json();
+    if (data.code === 0 && data.data?.configured) {
+      siteStats.value = {
+        todayTerms: data.data.todayTerms,
+        todaySearches: data.data.todaySearches,
+        totalSearches: data.data.totalSearches,
+        totalTerms: data.data.totalTerms,
+      };
     }
   } catch {}
 }
@@ -655,57 +690,67 @@ function visibleSorted(items: any[]) {
   height: 240px !important;
 }
 
-/* 热搜趋势入口 */
-.trends-entry {
-  display: flex;
-}
-
-.trends-entry__link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 16px;
+/* 站点搜索统计带（hero 下方）：4 等分居中，数字为主视觉，列间细分隔线 */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 18px 16px;
   background: var(--bg-surface);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  text-decoration: none;
-  color: var(--text-secondary);
-  transition: border-color var(--transition-fast), color var(--transition-fast),
-    transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.trends-entry__link:hover {
-  border-color: rgba(15, 118, 110, 0.4);
+.stats-strip__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+/* 列间分隔线（首列除外） */
+.stats-strip__item + .stats-strip__item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 70%;
+  width: 1px;
+  background: var(--border-light);
+}
+
+.stats-strip__value {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
   color: var(--primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 
-.trends-entry__icon {
-  font-size: 15px;
-}
-
-.trends-entry__text {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--primary);
-}
-
-.trends-entry__hint {
+.stats-strip__label {
   font-size: 12px;
   color: var(--text-tertiary);
+  letter-spacing: 0.05em;
 }
 
-.trends-entry__arrow {
-  margin-left: auto;
-  font-size: 15px;
-  transition: transform var(--transition-fast);
-}
+@media (max-width: 640px) {
+  /* 窄屏 2×2：隐藏竖分隔线，用行距分组 */
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px 0;
+    padding: 16px 8px;
+  }
 
-.trends-entry__link:hover .trends-entry__arrow {
-  transform: translateX(3px);
+  .stats-strip__item + .stats-strip__item::before {
+    display: none;
+  }
+
+  .stats-strip__value {
+    font-size: 20px;
+  }
 }
 
 /* 统计和过滤器栏 */
