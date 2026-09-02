@@ -54,6 +54,8 @@ export class HotSearchService {
   private flushing: Promise<void> | null = null;
   /** 读缓存（方法+参数 → 结果，TTL 过期自动刷新） */
   private readCache = new Map<string, ReadCacheEntry>();
+  /** in-flight 去重：同 key 并发未命中复用同一 fetch Promise（防缓存击穿） */
+  private inflightFetches = new Map<string, Promise<unknown>>();
 
   constructor() {
     this.initPromise = this.initialize();
@@ -100,6 +102,10 @@ export class HotSearchService {
   /**
    * 读缓存包装（2026-08-24）：TTL 内命中直接返回，避免每次请求查库。
    * 容量保护：超上限时先清过期条目，仍超则淘汰最旧一条（防止缓存无限膨胀）。
+   *
+   * 2026-09-03 新增 in-flight 去重（防缓存击穿）：TTL 到期瞬间并发请求
+   * 都会未命中，各自 fetcher 同时查库（CF Worker 冷启动 isolate 频繁回收
+   * 场景下更明显）。现同 key 并发复用同一个 Promise，N 个并发只查库 1 次。
    */
   private async getCached<T>(
     key: string,
@@ -110,20 +116,31 @@ export class HotSearchService {
     if (hit && hit.expires > Date.now()) {
       return hit.value as T;
     }
-    const value = await fetcher();
-    if (this.readCache.size >= READ_CACHE_MAX) {
-      const now = Date.now();
-      for (const [k, v] of this.readCache) {
-        if (v.expires <= now) this.readCache.delete(k);
-      }
+    const inflight = this.inflightFetches.get(key);
+    if (inflight) return (await inflight) as T;
+
+    const p = (async () => {
+      const value = await fetcher();
       if (this.readCache.size >= READ_CACHE_MAX) {
-        // 仍满：淘汰最早过期的一条（Map 按插入序迭代）
-        const oldestKey = this.readCache.keys().next().value as string | undefined;
-        if (oldestKey) this.readCache.delete(oldestKey);
+        const now = Date.now();
+        for (const [k, v] of this.readCache) {
+          if (v.expires <= now) this.readCache.delete(k);
+        }
+        if (this.readCache.size >= READ_CACHE_MAX) {
+          // 仍满：淘汰最早过期的一条（Map 按插入序迭代）
+          const oldestKey = this.readCache.keys().next().value as string | undefined;
+          if (oldestKey) this.readCache.delete(oldestKey);
+        }
       }
+      this.readCache.set(key, { value, expires: Date.now() + ttlMs });
+      return value;
+    })();
+    this.inflightFetches.set(key, p);
+    try {
+      return await p;
+    } finally {
+      this.inflightFetches.delete(key);
     }
-    this.readCache.set(key, { value, expires: Date.now() + ttlMs });
-    return value;
   }
 
   /** 清空全部读缓存（delete/clear 后调用，保证删后立即可见） */
@@ -186,16 +203,23 @@ export class HotSearchService {
       }
       // 2026-09-01 优化：词表与每日次数各一次 batch 往返（原逐词 await，
       // 100 词的 flush = 100+ 次 HTTP 往返）
-      await store.recordSearchBatch(
+      // 2026-09-03 优化读量：recordSearchBatch 返回本批新增词数，
+      // recordDailySearchesBatch 同批累计 total_searches——两个计数器
+      // 让 getCalendarMeta 只读几行，不再全表 COUNT(*)/SUM(count)
+      const newTerms = await store.recordSearchBatch(
         [...snapshot.entries()].map(([term, p]) => ({
           term,
           lastAt: p.lastAt,
           delta: p.delta,
         }))
       );
-      await store.recordDailySearchesBatch(
-        [...dailyDelta.entries()].map(([date, delta]) => ({ date, delta }))
-      );
+      const counterWrites: Promise<void>[] = [
+        store.recordDailySearchesBatch(
+          [...dailyDelta.entries()].map(([date, delta]) => ({ date, delta }))
+        ),
+      ];
+      if (newTerms > 0) counterWrites.push(store.incrementTotalTerms(newTerms));
+      await Promise.all(counterWrites);
       // 2026-09-01 优化：flush 不再清任何读缓存，全部交给 TTL 过期自然刷新。
       // 原实现每次 flush 清 calendar/day/daily 缓存，活跃站点 60s flush 一次，
       // hot 页 5min TTL 形同虚设、几乎每次进页都真查库；不清后页头/列表/日历
@@ -410,6 +434,7 @@ export class HotSearchService {
     this.clearFlushTimer();
     this.pending.clear();
     this.readCache.clear();
+    this.inflightFetches.clear();
     this.store?.close();
   }
 }

@@ -213,6 +213,94 @@ describe("TursoHotSearchStore", () => {
     expect(await store.getDailySearchesDayCount()).toBe(3);
   });
 
+  it("recordSearchBatch 返回本批新增词数（新词计入、旧词不计）", async () => {
+    const now = Date.now();
+    expect(await store.recordSearchBatch([{ term: "新词一", lastAt: now, delta: 2 }])).toBe(1);
+    // 同词再次落盘：非新词
+    expect(await store.recordSearchBatch([{ term: "新词一", lastAt: now, delta: 1 }])).toBe(0);
+    // 一批混合：1 个新词 + 1 个旧词
+    expect(
+      await store.recordSearchBatch([
+        { term: "新词二", lastAt: now, delta: 1 },
+        { term: "新词一", lastAt: now, delta: 3 },
+      ])
+    ).toBe(1);
+    // 新词 count 正确（0 占位 + delta），旧词累加正确
+    const hot = await store.getHotSearches(10);
+    expect(hot.find((s) => s.term === "新词一")?.score).toBe(2 + 1 + 3);
+    expect(hot.find((s) => s.term === "新词二")?.score).toBe(1);
+  });
+
+  it("flush 维护计数器：getCalendarMeta 日常只读计数器（不再全表扫描）", async () => {
+    const now = Date.now();
+    // 第一批：2 个新词、3 次搜索 → 计数器建立
+    await store.recordSearchBatch([
+      { term: "批词A", lastAt: now, delta: 2 },
+      { term: "批词B", lastAt: now, delta: 1 },
+    ]);
+    await store.recordDailySearchesBatch([{ date: "2026-09-03", delta: 3 }]);
+
+    let meta = await store.getCalendarMeta();
+    expect(meta.totalTerms).toBe(2);
+    expect(meta.totalSearches).toBe(3);
+
+    // 第二批：1 个新词、2 次搜索 → 计数器增量维护（flush 会拿
+    // recordSearchBatch 的返回值调 incrementTotalTerms，这里模拟之）
+    const newTerms = await store.recordSearchBatch([{ term: "批词C", lastAt: now, delta: 2 }]);
+    expect(newTerms).toBe(1);
+    await store.incrementTotalTerms(newTerms);
+    await store.recordDailySearchesBatch([{ date: "2026-09-03", delta: 2 }]);
+
+    meta = await store.getCalendarMeta();
+    expect(meta.totalTerms).toBe(3);
+    expect(meta.totalSearches).toBe(5);
+  });
+
+  it("getCalendarMeta 计数器缺失时一次性回填真实表（recordSearch 直写场景）", async () => {
+    const now = Date.now();
+    // 直写 recordSearch 不走 flush（不维护计数器）→ getCalendarMeta 回填
+    await store.recordSearch("直写词A", now, 4);
+    await store.recordSearch("直写词B", now, 1);
+
+    const meta = await store.getCalendarMeta();
+    expect(meta.totalTerms).toBe(2);
+    expect(meta.totalSearches).toBe(5);
+
+    // 回填后再 flush 增量：计数器继续累加，不重复计直写部分
+    // （同上：flush 会用 batch 返回值维护 total_terms，这里模拟之）
+    const newTerms = await store.recordSearchBatch([{ term: "直写词C", lastAt: now, delta: 2 }]);
+    expect(newTerms).toBe(1);
+    await store.incrementTotalTerms(newTerms);
+    await store.recordDailySearchesBatch([{ date: "2026-09-03", delta: 2 }]);
+    const meta2 = await store.getCalendarMeta();
+    expect(meta2.totalTerms).toBe(3);
+    expect(meta2.totalSearches).toBe(7);
+  });
+
+  it("clearHotSearches 同时清空计数器（stats_meta）", async () => {
+    const now = Date.now();
+    await store.recordSearchBatch([{ term: "清空词", lastAt: now, delta: 5 }]);
+    await store.recordDailySearchesBatch([{ date: "2026-09-03", delta: 5 }]);
+    expect((await store.getCalendarMeta()).totalSearches).toBe(5);
+
+    await store.clearHotSearches();
+    const meta = await store.getCalendarMeta();
+    expect(meta.totalTerms).toBe(0);
+    expect(meta.totalSearches).toBe(0);
+  });
+
+  it("deleteHotSearch 同步递减 total_terms 计数器", async () => {
+    const now = Date.now();
+    await store.recordSearchBatch([
+      { term: "待删词2", lastAt: now, delta: 1 },
+      { term: "保留词2", lastAt: now, delta: 1 },
+    ]);
+    expect((await store.getCalendarMeta()).totalTerms).toBe(2);
+
+    await store.deleteHotSearch("待删词2");
+    expect((await store.getCalendarMeta()).totalTerms).toBe(1);
+  });
+
   it("getCalendarMeta 一次 batch 返回总词数/总次数/有记录天数", async () => {
     const now = Date.now();
     await store.recordSearch("甲", now, 3);

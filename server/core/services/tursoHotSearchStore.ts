@@ -60,6 +60,13 @@ export class TursoHotSearchStore implements IHotSearchStore {
         date TEXT PRIMARY KEY,
         searches INTEGER NOT NULL DEFAULT 0
       )`,
+      // 首页统计带计数器（2026-09-03 优化读量）：total_searches/total_terms 由
+      // flush 增量维护，getCalendarMeta 只读 2 行，替代每次 COUNT(*)/SUM(count)
+      // 对 search_terms 的全表扫描（23k+ 行 × 每次缓存过期是读量大头）
+      `CREATE TABLE IF NOT EXISTS stats_meta (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL DEFAULT 0
+      )`,
     ]);
     // hot_searches 表已废弃（2026-08-18）：生产 API 全部只读 search_terms，
     // 热搜写入只落 search_terms 一张表（原双表每次搜索写 2 行 → 1 行，省一半写入配额）
@@ -97,29 +104,58 @@ export class TursoHotSearchStore implements IHotSearchStore {
   /**
    * 批量落盘一批词增量（2026-09-01 优化：flush 原来在 service 层逐词 await
    * recordSearch，100 词 = 100 次 HTTP 往返；现合并为一次 client.batch）
+   *
+   * 2026-09-03 优化读量：同批先对每个词做 `INSERT ... count=0 ... DO NOTHING
+   * RETURNING term`（新词才会返回行），再做常规 upsert 累加 delta——
+   * 新词行最终 count = 0 + delta，旧词行直接 +delta，语义不变；
+   * 返回"本批新增词数"供 flush 维护 stats_meta.total_terms 计数器，
+   * 替代 getCalendarMeta 里的全表 COUNT(*)。
+   *
+   * @returns 本批新增词数（新词的 RETURNING 行数之和）
    */
   async recordSearchBatch(
     entries: { term: string; lastAt: number; delta: number }[]
-  ): Promise<void> {
+  ): Promise<number> {
     await this.waitForInit();
-    const stmts = entries
+    const norm = entries
       .map((e) => ({ ...e, term: normalize(e.term), delta: Math.max(1, e.delta) }))
-      .filter((e) => e.term)
-      .map((e) => ({
+      .filter((e) => e.term);
+    if (norm.length === 0) return 0;
+    const stmts = norm.flatMap((e) => [
+      {
+        // 新词探测：count=0 占位插入，仅新词返回行（旧词 DO NOTHING）
+        sql: `INSERT INTO search_terms (term, count, first_at, last_at)
+              VALUES (?, 0, ?, ?)
+              ON CONFLICT(term) DO NOTHING
+              RETURNING term`,
+        args: [e.term, e.lastAt, e.lastAt],
+      },
+      {
         sql: `INSERT INTO search_terms (term, count, first_at, last_at)
               VALUES (?, ?, ?, ?)
               ON CONFLICT(term) DO UPDATE SET
                 count = count + excluded.count,
                 last_at = excluded.last_at`,
         args: [e.term, e.delta, e.lastAt, e.lastAt],
-      }));
-    if (stmts.length === 0) return;
-    await this.client.batch(stmts);
+      },
+    ]);
+    const results = await this.client.batch(stmts);
+    // 偶数位语句是新词探测（flatMap 顺序：探测、upsert、探测、upsert ...）
+    let newTerms = 0;
+    for (let i = 0; i < results.length; i += 2) {
+      newTerms += results[i].rows.length > 0 ? 1 : 0;
+    }
+    return newTerms;
   }
 
   /**
    * 批量累加多天搜索次数（2026-09-01 优化：与 recordSearchBatch 同理，
    * 多天 daily upsert 合并为一次 client.batch）
+   *
+   * 2026-09-03 优化读量：同一批内顺手把总搜索次数累计进 stats_meta
+   * （total_searches 计数器），getCalendarMeta 不再全表 SUM(count)。
+   * 计数器在首次读取时一次性回填（见 getCalendarMeta），回填用 MAX
+   * 取大，重复回填/并发回填不会把已累计的增量写丢。
    */
   async recordDailySearchesBatch(
     entries: { date: string; delta: number }[]
@@ -132,8 +168,30 @@ export class TursoHotSearchStore implements IHotSearchStore {
               ON CONFLICT(date) DO UPDATE SET searches = searches + excluded.searches`,
         args: [e.date, e.delta],
       }));
+    const totalDelta = entries.reduce((s, e) => s + Math.max(0, e.delta), 0);
+    if (totalDelta > 0) {
+      stmts.push({
+        sql: `INSERT INTO stats_meta (key, value) VALUES ('total_searches', ?)
+              ON CONFLICT(key) DO UPDATE SET value = value + excluded.value`,
+        args: [totalDelta],
+      });
+    }
     if (stmts.length === 0) return;
     await this.client.batch(stmts);
+  }
+
+  /**
+   * 累加词库总词数计数器（flush 检测到新词时调用，通常一次 +1~+N）。
+   * 计数器行不存在时静默（说明尚未回填，后续 getCalendarMeta 回填会算准）。
+   */
+  async incrementTotalTerms(n: number): Promise<void> {
+    if (n <= 0) return;
+    await this.waitForInit();
+    await this.client.execute(
+      `INSERT INTO stats_meta (key, value) VALUES ('total_terms', ?)
+       ON CONFLICT(key) DO UPDATE SET value = value + excluded.value`,
+      [n]
+    );
   }
 
   /**
@@ -206,9 +264,11 @@ export class TursoHotSearchStore implements IHotSearchStore {
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {
     await this.waitForInit();
+    // stats_meta 一并清空：下次 getCalendarMeta 回填空表得到 0/0
     await this.client.batch([
       "DELETE FROM search_terms",
       "DELETE FROM daily_searches",
+      "DELETE FROM stats_meta",
     ]);
     return { success: true, message: "热搜记录已清除" };
   }
@@ -224,6 +284,10 @@ export class TursoHotSearchStore implements IHotSearchStore {
     const had = (before?.c ?? 0) as number;
     await this.client.execute("DELETE FROM search_terms WHERE term = ?", [term]);
     if (had > 0) {
+      // 同步维护 total_terms 计数器（行不存在说明尚未回填，回填时会算准）
+      await this.client.execute(
+        "UPDATE stats_meta SET value = value - 1 WHERE key = 'total_terms' AND value > 0"
+      );
       return { success: true, message: `热搜词 "${term}" 已删除` };
     }
     return { success: false, message: "热搜词不存在" };
@@ -387,8 +451,15 @@ export class TursoHotSearchStore implements IHotSearchStore {
   }
 
   /**
-   * 一次 batch 查日历页头三件套（2026-08-30 扩展：在原 totalTerms + dailyDayCount
+   * 一次读齐日历页头三件套（2026-08-30 扩展：在原 totalTerms + dailyDayCount
    * 基础上并入 SUM(count) 总搜索次数，hot-stats 一次往返拿全统计带指标）
+   *
+   * 2026-09-03 优化读量（读量大头修复）：totalSearches/totalTerms 改读
+   * stats_meta 计数器（flush 落盘时增量维护），日常读取只有几行；
+   * 计数器缺 key 时一次性回填（对 search_terms 全表 SUM/COUNT 扫一遍，
+   * 仅首次或 clear 后发生）。回填用 MAX 取大写入：即使回填与 flush 增量
+   * 并发，也不会把已累计的增量写丢（SUM/COUNT 本身已含增量，MAX 只增不减）。
+   * dailyDayCount 仍实时聚合 daily_searches（仅十几行，代价可忽略）。
    */
   async getCalendarMeta(): Promise<{
     totalTerms: number;
@@ -396,14 +467,50 @@ export class TursoHotSearchStore implements IHotSearchStore {
     dailyDayCount: number;
   }> {
     await this.waitForInit();
-    const results = await this.client.batch([
-      "SELECT COUNT(*) as c FROM search_terms",
-      "SELECT COALESCE(SUM(count), 0) as s FROM search_terms",
-      "SELECT COUNT(DISTINCT date) as c FROM daily_searches",
-    ]);
-    const totalTerms = ((results[0].rows[0]?.c as number) ?? 0);
-    const totalSearches = ((results[1].rows[0]?.s as number) ?? 0);
-    const dailyDayCount = ((results[2].rows[0]?.c as number) ?? 0);
+    const counterRows = (
+      await this.client.execute(
+        "SELECT key, value FROM stats_meta WHERE key IN ('total_searches', 'total_terms')"
+      )
+    ).rows;
+    let totalSearches: number | null = null;
+    let totalTerms: number | null = null;
+    for (const r of counterRows) {
+      if (r.key === "total_searches") totalSearches = (r.value as number) ?? 0;
+      else if (r.key === "total_terms") totalTerms = (r.value as number) ?? 0;
+    }
+
+    // 缺计数器 → 一次性回填（此后由 flush 增量维护，不再全表扫描）
+    if (totalSearches === null) {
+      const row = (
+        await this.client.execute(
+          "SELECT COALESCE(SUM(count), 0) as s FROM search_terms"
+        )
+      ).rows[0];
+      totalSearches = (row?.s as number) ?? 0;
+      await this.client.execute(
+        `INSERT INTO stats_meta (key, value) VALUES ('total_searches', ?)
+         ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)`,
+        [totalSearches]
+      );
+    }
+    if (totalTerms === null) {
+      const row = (
+        await this.client.execute("SELECT COUNT(*) as c FROM search_terms")
+      ).rows[0];
+      totalTerms = (row?.c as number) ?? 0;
+      await this.client.execute(
+        `INSERT INTO stats_meta (key, value) VALUES ('total_terms', ?)
+         ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)`,
+        [totalTerms]
+      );
+    }
+
+    const dayRow = (
+      await this.client.execute(
+        "SELECT COUNT(DISTINCT date) as c FROM daily_searches"
+      )
+    ).rows[0];
+    const dailyDayCount = (dayRow?.c as number) ?? 0;
     return { totalTerms, totalSearches, dailyDayCount };
   }
 

@@ -354,4 +354,31 @@ describe("HotSearchService 读缓存", () => {
     expect(cache.has("hot:10")).toBe(true);
     expect(cache.has("random:25")).toBe(true);
   });
+
+  it("缓存未命中瞬间的并发请求只查库一次（in-flight 去重防缓存击穿）", async () => {
+    await service.clearHotSearches();
+    // 清空读缓存后用慢速假 store 模拟冷启动查库，统计真实调用次数
+    ((service as any).readCache as Map<string, unknown>).clear();
+    const store = (service as any).store;
+    let calls = 0;
+    const original = store.getHotSearches.bind(store);
+    store.getHotSearches = async (limit: number) => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 50));
+      return original(limit);
+    };
+    try {
+      // 缓存已空（clearHotSearches 只清 service 缓存），3 个并发同时未命中
+      const [a, b, c] = await Promise.all([
+        service.getHotSearches(10),
+        service.getHotSearches(10),
+        service.getHotSearches(10),
+      ]);
+      expect(calls).toBe(1); // 3 个并发复用同一 fetch Promise
+      expect(a).toEqual(b);
+      expect(b).toEqual(c);
+    } finally {
+      store.getHotSearches = original;
+    }
+  });
 });

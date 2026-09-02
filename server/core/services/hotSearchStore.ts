@@ -16,14 +16,21 @@ export interface IHotSearchStore {
    * 批量落盘一批词增量（flush 用，2026-09-01 新增）
    * 实现方应合并为单次 batch 往返（libsql client.batch），替代逐词 execute。
    * @param entries 已按词聚合的增量列表（term 已规范化）
+   * @returns 本批新增词数（2026-09-03 新增：供 flush 维护 total_terms 计数器）
    */
-  recordSearchBatch(entries: { term: string; lastAt: number; delta: number }[]): Promise<void>;
+  recordSearchBatch(entries: { term: string; lastAt: number; delta: number }[]): Promise<number>;
 
   /**
    * 批量累加多天的搜索次数（flush 用，2026-09-01 新增）
    * 实现方应合并为单次 batch 往返。
    */
   recordDailySearchesBatch(entries: { date: string; delta: number }[]): Promise<void>;
+
+  /**
+   * 累加词库总词数计数器（flush 检测到新词时调用，2026-09-03 新增）。
+   * 实现方维护 stats_meta 类计数器，供 getCalendarMeta 免全表 COUNT(*) 读取。
+   */
+  incrementTotalTerms(n: number): Promise<void>;
 
   /**
    * 获取热搜列表
