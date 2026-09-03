@@ -144,6 +144,23 @@ export function useAdminApi() {
     return request(`/api/search-log?${q.toString()}`);
   }
 
+  /**
+   * 蜜罐命中反查（2026-09-03 用户反馈解封闭环）：
+   * - openid：反查该 openid 最近命中过蜜罐的 IP + 各 IP 封禁状态
+   * - ip：反查该 IP 最近影响了哪些 openid
+   */
+  async function lookupHoneypot(opts: {
+    openid?: string;
+    ip?: string;
+    limit?: number;
+  }): Promise<any> {
+    const q = new URLSearchParams();
+    if (opts.openid) q.set("openid", opts.openid.trim());
+    if (opts.ip) q.set("ip", opts.ip.trim());
+    if (opts.limit) q.set("limit", String(opts.limit));
+    return request(`/api/blacklist-lookup?${q.toString()}`);
+  }
+
   /** 黑名单列表（支持 IP 模糊搜索、状态筛选、分页） */
   async function loadBlacklist(opts: {
     limit?: number;
@@ -224,5 +241,5 @@ export function useAdminApi() {
     return request("/api/admin/stats");
   }
 
-  return { authStatus, probeError, hasTokenCookie, checkAdminAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels, loadStats };
+  return { authStatus, probeError, hasTokenCookie, checkAdminAuth, request, querySearchLog, loadBlacklist, blockIp, removeIp, loadChannels, saveChannels, reloadChannels, loadStats, lookupHoneypot };
 }

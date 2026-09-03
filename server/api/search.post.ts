@@ -20,6 +20,7 @@ function getClientAbortSignal(event: any): AbortSignal | undefined {
   return undefined;
 }
 import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { maybeRecordHoneypotOpenid } from "../utils/recordHoneypotOpenid";
 import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
@@ -48,6 +49,9 @@ export default defineEventHandler(async (event) => {
       method: event.method,
       path: event.path,
     });
+    // 2026-09-03：若该请求带有效凭证（真实用户被共享出口 IP 拖累误伤），
+    // 异步记录 openid↔ip，供管理端按 openid 反馈解封（不阻塞蜜罐响应）
+    maybeRecordHoneypotOpenid(event, ip);
     return buildBlockedFakeGenericResponse();
   }
   // 搜索入口 IP 频控（2026-08-25）：60s 内超过阈值（默认 30 次）→ 429

@@ -312,4 +312,97 @@ describe("TursoBotDefenseStore 分级封禁", () => {
     expect(stats.topIps).toHaveLength(3);
     expect(stats.topIps.map((i) => i.ip)).toEqual(["1.1.1.1", "2.2.2.2", "3.3.3.3"]);
   });
+
+  // ===== 蜜罐命中记录 honeypot_hits（2026-09-03 用户反馈解封闭环）=====
+
+  it("recordHoneypotHit：记录 openid↔ip，重复命中 hits 累加 last_at 刷新", async () => {
+    const now = 1_700_000_000_000;
+    expect(await store.recordHoneypotHit("o-real-user", "203.0.113.9", now)).toBe(true);
+    expect(await store.recordHoneypotHit("o-real-user", "203.0.113.9", now + 60_000)).toBe(true);
+    // 同一 openid 命中不同 IP → 新行
+    expect(await store.recordHoneypotHit("o-real-user", "198.51.100.7", now + 120_000)).toBe(true);
+
+    const rows = (
+      await (store as any).client.execute(
+        "SELECT openid, ip, hits, last_at FROM honeypot_hits ORDER BY last_at"
+      )
+    ).rows;
+    expect(rows).toHaveLength(2);
+    // 同 ip 的命中 hits=2、last_at 刷新为第二次
+    expect(rows[0].hits).toBe(2);
+    expect(rows[0].last_at).toBe(now + 60_000);
+    expect(rows[1].ip).toBe("198.51.100.7");
+    expect(rows[1].hits).toBe(1);
+  });
+
+  it("recordHoneypotHit：空 openid/ip 忽略（返回 false）", async () => {
+    const now = 1_700_000_000_000;
+    expect(await store.recordHoneypotHit("", "1.1.1.1", now)).toBe(false);
+    expect(await store.recordHoneypotHit("o-x", "  ", now)).toBe(false);
+    const rows = (
+      await (store as any).client.execute("SELECT COUNT(*) AS c FROM honeypot_hits")
+    ).rows;
+    expect(rows[0].c).toBe(0);
+  });
+
+  it("listHoneypotByOpenid：按最近命中倒序返回该 openid 的 IP", async () => {
+    const now = 1_700_000_000_000;
+    await store.recordHoneypotHit("o-abc", "1.1.1.1", now + 1000);
+    await store.recordHoneypotHit("o-abc", "2.2.2.2", now + 3000);
+    await store.recordHoneypotHit("o-abc", "1.1.1.1", now + 5000);
+    await store.recordHoneypotHit("o-xyz", "9.9.9.9", now + 2000); // 别人的不影响
+
+    const hits = await store.listHoneypotByOpenid("o-abc", 20);
+    expect(hits).toHaveLength(2);
+    // 时间倒序：1.1.1.1（now+5000）在前，2.2.2.2（now+3000）在后
+    expect(hits[0]).toEqual({ ip: "1.1.1.1", hits: 2, lastAt: now + 5000 });
+    expect(hits[1]).toEqual({ ip: "2.2.2.2", hits: 1, lastAt: now + 3000 });
+    // 空 openid / 无记录
+    expect(await store.listHoneypotByOpenid("", 20)).toEqual([]);
+    expect(await store.listHoneypotByOpenid("no-such", 20)).toEqual([]);
+  });
+
+  it("listHoneypotByIp：返回某 IP 最近影响了哪些 openid", async () => {
+    const now = 1_700_000_000_000;
+    await store.recordHoneypotHit("o-1", "5.5.5.5", now + 1000);
+    await store.recordHoneypotHit("o-2", "5.5.5.5", now + 2000);
+    await store.recordHoneypotHit("o-3", "6.6.6.6", now + 3000);
+
+    const hits = await store.listHoneypotByIp("5.5.5.5", 20);
+    expect(hits).toHaveLength(2);
+    // 时间倒序
+    expect(hits[0].openid).toBe("o-2");
+    expect(hits[1].openid).toBe("o-1");
+  });
+
+  it("listStatusByIps：IN 批量查黑名单状态，仅返回有记录的 IP", async () => {
+    const now = 1_700_000_000_000;
+    await store.extendBlock("203.0.113.50", "bot_ua", now);
+    await store.recordRejection("203.0.113.51", "rate_limit", now);
+    // 无记录 IP + 空输入
+    expect(await store.listStatusByIps(["203.0.113.99"], now)).toEqual([]);
+    expect(await store.listStatusByIps([], now)).toEqual([]);
+
+    const rows = await store.listStatusByIps(["203.0.113.50", "203.0.113.51", "203.0.113.99"], now);
+    expect(rows).toHaveLength(2);
+    const map = new Map(rows.map((r) => [r.ip, r]));
+    expect(map.get("203.0.113.50")?.blockCount).toBe(1);
+    expect(map.get("203.0.113.51")?.blockCount).toBe(0);
+    expect(map.has("203.0.113.99")).toBe(false);
+  });
+
+  it("pruneHoneypotHits：只清超过保留期的命中记录", async () => {
+    const now = 1_700_000_000_000;
+    const day = 24 * 60 * 60_000;
+    await store.recordHoneypotHit("o-old", "1.1.1.1", now - 200 * day); // 超期
+    await store.recordHoneypotHit("o-new", "2.2.2.2", now); // 近期
+
+    const pruned = await store.pruneHoneypotHits(now, 90 * day);
+    expect(pruned).toBe(1);
+    const remain = (
+      await (store as any).client.execute("SELECT openid FROM honeypot_hits")
+    ).rows;
+    expect(remain).toHaveLength(1);
+    expect(remain[0].openid).toBe("o-new");
+  });
 });

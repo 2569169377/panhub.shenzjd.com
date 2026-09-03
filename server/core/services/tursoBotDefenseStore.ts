@@ -31,6 +31,19 @@ import { formatDateKey, beijingDayStart } from "./hotSearchUtils";
  *     expires_at INTEGER NOT NULL -- 当前封禁到期时间戳（ms）
  *     block_count INTEGER NOT NULL DEFAULT 0 -- 被正式拉黑次数（分级递增依据，惯犯保留）
  *   )
+ *   honeypot_hits(
+ *     openid TEXT NOT NULL,      -- 带有效凭证命中蜜罐的真人 openid（wx-auth 解析）
+ *     ip TEXT NOT NULL,          -- 其请求来源 IP（同 rejected_ips 规整口径）
+ *     hits INTEGER NOT NULL,     -- 累计命中次数
+ *     last_at INTEGER NOT NULL,  -- 最近一次蜜罐命中时间戳（ms）
+ *     PRIMARY KEY (openid, ip)
+ *   )
+ *
+ * 蜜罐命中记录（2026-09-03）：当真实用户（带有效 wxauth 凭证）访问一个已被
+ * 拉黑的共享出口 IP 时被喂蜜罐，把 (openid, ip) 关联记下来，管理端可按 openid
+ * 反查"该用户是否正在被某个封禁 IP 蜜罐"，实现反馈解封闭环。
+ * 说明：recordRejection 的三类拦截（bot_ua/rate_limit/bad_term）都是**无凭证**
+ * 爬虫，不会走到这里；只有 isBlocked 命中且带凭证的真人请求才记录。
  */
 
 /** 单次被拒绝自动过期时间（首次累计期间短过期，给 1h 等待阈值判定） */
@@ -92,6 +105,13 @@ export class TursoBotDefenseStore {
         block_count INTEGER NOT NULL DEFAULT 0
       )`,
       "CREATE INDEX IF NOT EXISTS idx_rejected_ips_expires ON rejected_ips(expires_at)",
+      `CREATE TABLE IF NOT EXISTS honeypot_hits (
+        openid TEXT NOT NULL,
+        ip TEXT NOT NULL,
+        hits INTEGER NOT NULL DEFAULT 1,
+        last_at INTEGER NOT NULL,
+        PRIMARY KEY (openid, ip)
+      )`,
     ]);
     // 兼容旧表（无 block_count 列）：幂等补列（已存在时报 duplicate column，忽略）
     try {
@@ -272,6 +292,110 @@ export class TursoBotDefenseStore {
   }
 
   /**
+   * 记录一次"真人命中蜜罐"（2026-09-03 用户反馈解封闭环）。
+   *
+   * 场景：真实用户（带有效 wxauth 凭证）访问已被拉黑的 IP（共享出口 NAT /
+   * 公司出口被爬虫拖累），isBlocked 命中后直接喂蜜罐假数据——此前该请求
+   * 在 requireWxAuth 之前就被拦下，openid 从未解析、search_log 也不记录，
+   * 导致用户拿 openid 反馈时管理员无法定位到受影响 IP。
+   *
+   * 本方法在蜜罐命中且成功解出 openid 后异步调用（fire-and-forget）：
+   * upsert 一行 (openid, ip)，hits +1、last_at 刷新。纯 DB **写**，不在热路径
+   * isBlocked 上加任何读。表很小（仅带凭证的误伤真人），主键天然去重。
+   *
+   * @returns 是否写入成功（openid 为空串时忽略）
+   */
+  async recordHoneypotHit(
+    openid: string,
+    ip: string,
+    now: number
+  ): Promise<boolean> {
+    const oid = (openid || "").trim();
+    const nip = (ip || "").trim();
+    if (!oid || !nip || oid.length > 128 || nip.length > 64) return false;
+    await this.waitForInit();
+    await this.client.execute(
+      `INSERT INTO honeypot_hits (openid, ip, hits, last_at)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(openid, ip) DO UPDATE SET
+         hits = hits + 1,
+         last_at = excluded.last_at`,
+      [oid, nip, now]
+    );
+    return true;
+  }
+
+  /**
+   * 管理反查：某 openid 最近命中过蜜罐的 IP 列表（按最近命中倒序）。
+   * 走主键 openid 前缀索引，一条查询。limit 上限 100。
+   */
+  async listHoneypotByOpenid(
+    openid: string,
+    limit = 20,
+    now = Date.now()
+  ): Promise<{ ip: string; hits: number; lastAt: number }[]> {
+    const oid = (openid || "").trim();
+    if (!oid) return [];
+    await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 100);
+    const rows = await this.client.execute(
+      `SELECT ip, hits, last_at FROM honeypot_hits
+       WHERE openid = ?
+       ORDER BY last_at DESC LIMIT ?`,
+      [oid, safe]
+    );
+    return rows.rows.map((r) => ({
+      ip: r.ip as string,
+      hits: (r.hits as number) ?? 0,
+      lastAt: (r.last_at as number) ?? 0,
+    }));
+  }
+
+  /**
+   * 管理反查：某 IP 最近影响了哪些 openid（黑名单条目"谁被这个 IP 蜜罐过"）。
+   * 全表按 ip 过滤（honeypot_hits 无 ip 独立索引，但表很小 + 低频管理查询，
+   * 可接受）。limit 上限 50。
+   */
+  async listHoneypotByIp(
+    ip: string,
+    limit = 20,
+    now = Date.now()
+  ): Promise<{ openid: string; hits: number; lastAt: number }[]> {
+    const nip = (ip || "").trim();
+    if (!nip) return [];
+    await this.waitForInit();
+    const safe = Math.min(Math.max(1, limit), 50);
+    const rows = await this.client.execute(
+      `SELECT openid, hits, last_at FROM honeypot_hits
+       WHERE ip = ?
+       ORDER BY last_at DESC LIMIT ?`,
+      [nip, safe]
+    );
+    return rows.rows.map((r) => ({
+      openid: r.openid as string,
+      hits: (r.hits as number) ?? 0,
+      lastAt: (r.last_at as number) ?? 0,
+    }));
+  }
+
+  /**
+   * 清理超过保留期的蜜罐命中记录（2026-09-03）：
+   * 该表只用于"近期反馈解封"，历史旧命中无价值，随 botDefense 周期 prune
+   * 一并清掉，避免无界膨胀。保留期默认 90 天。
+   */
+  async pruneHoneypotHits(
+    now: number,
+    retainMs: number = 90 * 24 * 60 * 60_000
+  ): Promise<number> {
+    await this.waitForInit();
+    const result = await this.client.execute(
+      "DELETE FROM honeypot_hits WHERE last_at <= ?",
+      [now - retainMs]
+    );
+    return result.rowsAffected ?? 0;
+  }
+
+  /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案 + 未达阈值短记录），
    * 按最近活动倒序。支持：
    * - ipFilter：IP 子串模糊搜索（LIKE，含 IPv4/IPv6 部分匹配）
@@ -337,6 +461,48 @@ export class TursoBotDefenseStore {
         expiresAt: (r.expires_at as number) ?? 0,
       })),
     };
+  }
+
+  /**
+   * 按多个 IP 批量查黑名单状态（2026-09-03 openid 反查用）。
+   * 一条 IN 查询替代 N 次单查，配合 honeypot_hits 反查结果使用，
+   * 尽量少 DB 读。返回按传入 IP 顺序 map（无记录的 IP 不出现在结果里）。
+   */
+  async listStatusByIps(
+    ips: string[],
+    now: number
+  ): Promise<
+    {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      firstAt: number;
+      lastAt: number;
+      expiresAt: number;
+    }[]
+  > {
+    const cleaned = (ips || [])
+      .map((s) => (s || "").trim())
+      .filter(Boolean);
+    if (cleaned.length === 0) return [];
+    await this.waitForInit();
+    // libsql 参数占位符：每个 IP 一个 ?，安全拼 IN 子句
+    const placeholders = cleaned.map(() => "?").join(", ");
+    const rows = await this.client.execute(
+      `SELECT ip, reason, hit_count, block_count, first_at, last_at, expires_at
+       FROM rejected_ips WHERE ip IN (${placeholders})`,
+      cleaned
+    );
+    return rows.rows.map((r) => ({
+      ip: r.ip as string,
+      reason: (r.reason as string) ?? "",
+      hitCount: (r.hit_count as number) ?? 0,
+      blockCount: (r.block_count as number) ?? 0,
+      firstAt: (r.first_at as number) ?? 0,
+      lastAt: (r.last_at as number) ?? 0,
+      expiresAt: (r.expires_at as number) ?? 0,
+    }));
   }
 
   /**

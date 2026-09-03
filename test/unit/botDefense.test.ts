@@ -15,11 +15,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 interface FakeStore {
   blocked: Set<string>;
   hitCount: Map<string, number>;
+  honeypot: Map<string, { openid: string; ip: string; hits: number; lastAt: number }[]>;
   isBlocked: ReturnType<typeof vi.fn>;
   recordRejection: ReturnType<typeof vi.fn>;
   extendBlock: ReturnType<typeof vi.fn>;
   manuallyBlock: ReturnType<typeof vi.fn>;
   removeBlock: ReturnType<typeof vi.fn>;
+  recordHoneypotHit: ReturnType<typeof vi.fn>;
+  listHoneypotByOpenid: ReturnType<typeof vi.fn>;
+  listHoneypotByIp: ReturnType<typeof vi.fn>;
+  listStatusByIps: ReturnType<typeof vi.fn>;
+  pruneHoneypotHits: ReturnType<typeof vi.fn>;
   pruneExpired: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
@@ -28,6 +34,7 @@ function makeFakeStore(): FakeStore {
   const fake: FakeStore = {
     blocked: new Set<string>(),
     hitCount: new Map<string, number>(),
+    honeypot: new Map<string, { openid: string; ip: string; hits: number; lastAt: number }[]>(),
     isBlocked: vi.fn(async (_ip: string, _now: number) => false),
     recordRejection: vi.fn(async (ip: string, _r: string, _n: number) => {
       const c = (fake.hitCount.get(ip) ?? 0) + 1;
@@ -45,6 +52,14 @@ function makeFakeStore(): FakeStore {
     removeBlock: vi.fn(async (ip: string) => {
       return fake.blocked.delete(ip);
     }),
+    recordHoneypotHit: vi.fn(async (openid: string, ip: string) => {
+      if (!openid || !ip) return false;
+      return true;
+    }),
+    listHoneypotByOpenid: vi.fn(async () => []),
+    listHoneypotByIp: vi.fn(async () => []),
+    listStatusByIps: vi.fn(async () => []),
+    pruneHoneypotHits: vi.fn(async () => 0),
     pruneExpired: vi.fn(async () => 0),
     close: vi.fn(),
   };
@@ -59,6 +74,67 @@ vi.mock("../../server/core/services/tursoBotDefenseStore", () => ({
 
 // 必须在 mock 后 import service
 import { BotDefenseService, isBotDefenseEnforced } from "../../server/core/services/botDefense";
+
+describe("BotDefenseService 蜜罐命中记录与反查（2026-09-03 反馈解封闭环）", () => {
+  let svc: BotDefenseService;
+
+  beforeEach(async () => {
+    fake = makeFakeStore();
+    svc = new BotDefenseService();
+    await new Promise((r) => setTimeout(r, 0));
+    svc.reset();
+  });
+
+  it("recordHoneypotHit 转发 store（openid+ip）", async () => {
+    const ok = await svc.recordHoneypotHit("o-real-user", "203.0.113.9");
+    expect(ok).toBe(true);
+    expect(fake.recordHoneypotHit).toHaveBeenCalledWith("o-real-user", "203.0.113.9", expect.any(Number));
+  });
+
+  it("recordHoneypotHit 空 openid 返回 false 且不落库", async () => {
+    expect(await svc.recordHoneypotHit("", "1.1.1.1")).toBe(false);
+    expect(fake.recordHoneypotHit).not.toHaveBeenCalled();
+  });
+
+  it("listHoneypotByOpenid / listHoneypotByIp / listStatusByIps 转发 store 结果", async () => {
+    fake.listHoneypotByOpenid.mockResolvedValue([
+      { ip: "203.0.113.9", hits: 2, lastAt: 1_700_000_000_000 },
+    ]);
+    expect(await svc.listHoneypotByOpenid("o-x", 20)).toEqual([
+      { ip: "203.0.113.9", hits: 2, lastAt: 1_700_000_000_000 },
+    ]);
+    expect(fake.listHoneypotByOpenid).toHaveBeenCalledWith("o-x", 20);
+
+    fake.listHoneypotByIp.mockResolvedValue([
+      { openid: "o-1", hits: 1, lastAt: 1_700_000_000_000 },
+    ]);
+    expect(await svc.listHoneypotByIp("203.0.113.9", 5)).toHaveLength(1);
+
+    fake.listStatusByIps.mockResolvedValue([
+      {
+        ip: "203.0.113.9",
+        reason: "bot_ua",
+        hitCount: 3,
+        blockCount: 1,
+        firstAt: 0,
+        lastAt: 0,
+        expiresAt: 0,
+      },
+    ]);
+    const status = await svc.listStatusByIps(["203.0.113.9"]);
+    expect(status).toHaveLength(1);
+    expect(status[0].blockCount).toBe(1);
+  });
+
+  it("store 抛错时反查方法返回空数组（管理侧 fail-soft）", async () => {
+    fake.listHoneypotByOpenid.mockRejectedValue(new Error("down"));
+    fake.listHoneypotByIp.mockRejectedValue(new Error("down"));
+    fake.listStatusByIps.mockRejectedValue(new Error("down"));
+    expect(await svc.listHoneypotByOpenid("o-x")).toEqual([]);
+    expect(await svc.listHoneypotByIp("1.1.1.1")).toEqual([]);
+    expect(await svc.listStatusByIps(["1.1.1.1"])).toEqual([]);
+  });
+});
 
 describe("BotDefenseService.isBlocked", () => {
   let svc: BotDefenseService;

@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, createError, createEventStream } from "h3";
 import type { H3Event } from "h3";
 import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { maybeRecordHoneypotOpenid } from "../utils/recordHoneypotOpenid";
 import { isSearchRateLimited } from "../utils/entryRateLimit";
 import { parseList } from "../utils/parseQuery";
 import { recordSearchTerm } from "../utils/recordSearchTerm";
@@ -56,6 +57,8 @@ export default defineEventHandler(async (event: H3Event) => {
       method: event.method,
       path: event.path,
     });
+    // 2026-09-03：带凭证真实用户被误伤时异步记录 openid↔ip（见 recordHoneypotOpenid）
+    maybeRecordHoneypotOpenid(event, ip);
     const fakeStream = createEventStream(event);
     const merged = buildBlockedFakeMerged();
     const total = Object.values(merged).reduce(

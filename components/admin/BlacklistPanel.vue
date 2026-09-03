@@ -4,7 +4,100 @@
       <t-button variant="outline" :disabled="loading" :loading="loading" @click="refresh()">
         刷新
       </t-button>
+      <t-button theme="primary" variant="outline" @click="toggleLookup">
+        {{ lookupOpen ? "收起蜜罐反馈" : "蜜罐反馈解封" }}
+      </t-button>
     </template>
+
+    <!-- 蜜罐反馈处理（2026-09-03）：用户拿 openid 反馈"看到蜜罐" → 反查受影响 IP → 一键解封 -->
+    <div v-if="lookupOpen" class="hp-wrap">
+      <div class="hp-head">
+        <t-radio-group v-model="lookupMode" variant="default-filled" size="small">
+          <t-radio-button value="openid">按 openid 查（用户反馈）</t-radio-button>
+          <t-radio-button value="ip">按 IP 查（谁被影响）</t-radio-button>
+        </t-radio-group>
+        <div class="admin-form-row hp-form">
+          <t-input
+            v-model="lookupKeyword"
+            class="admin-input-t"
+            :placeholder="lookupMode === 'openid' ? '输入用户 openid，如 oXXXX…' : '输入被封 IP…'"
+            clearable
+            @enter="doLookup"
+          />
+          <t-button theme="primary" :disabled="!lookupKeyword.trim() || lookupLoading" :loading="lookupLoading" @click="doLookup">
+            反查
+          </t-button>
+        </div>
+      </div>
+      <t-alert v-if="lookupError" theme="error" :message="lookupError" class="hp-alert" />
+
+      <template v-if="lookupDone">
+        <!-- openid 反查结果：受影响 IP + 封禁状态 + 一键解封 -->
+        <div v-if="lookupResult?.mode === 'openid'">
+          <div class="admin-list-head">
+            <span>该 openid 最近命中过蜜罐的 IP：{{ lookupResult.items.length }} 条（可能含已解封历史，仅封禁中的会影响其当前搜索）</span>
+          </div>
+          <t-table
+            v-if="lookupResult.items.length"
+            row-key="ip"
+            :data="lookupResult.items"
+            :columns="hpOpenidColumns"
+            size="small"
+            :max-height="360"
+          >
+            <template #status-slot="{ row }">
+              <t-tag v-if="row.blocked" theme="danger" variant="light">封禁中</t-tag>
+              <t-tag v-else theme="default" variant="light">已解封</t-tag>
+            </template>
+            <template #last-slot="{ row }">
+              <span class="mono">{{ formatTime(row.honeypotLastAt) }}</span>
+            </template>
+            <template #op-slot="{ row }">
+              <t-button
+                v-if="row.blocked"
+                theme="danger"
+                variant="outline"
+                size="small"
+                :loading="lookupBusy === `unblock-${row.ip}`"
+                @click="askUnblock(row.ip)">
+                解封
+              </t-button>
+              <span v-else class="admin-hint">-</span>
+            </template>
+          </t-table>
+          <div v-else class="admin-state">该 openid 没有命中过蜜罐的记录（未被黑名单 IP 影响，或记录已清理）</div>
+        </div>
+
+        <!-- IP 反查结果：该 IP 影响了哪些 openid -->
+        <div v-else-if="lookupResult?.mode === 'ip'">
+          <div class="admin-list-head">
+            <span>IP {{ lookupResult.ip }} 最近影响了 {{ lookupResult.items.length }} 个 openid</span>
+            <t-tag v-if="lookupResult.block?.blocked" theme="danger" variant="light" style="margin-left:8px">该 IP 当前封禁中</t-tag>
+          </div>
+          <t-table
+            v-if="lookupResult.items.length"
+            row-key="openid"
+            :data="lookupResult.items"
+            :columns="hpIpColumns"
+            size="small"
+            :max-height="360"
+          >
+            <template #last-slot="{ row }">
+              <span class="mono">{{ formatTime(row.honeypotLastAt) }}</span>
+            </template>
+            <template #op-slot="{ row }">
+              <t-button
+                variant="outline"
+                size="small"
+                @click="copyOpenid(row.openid)">
+                复制 openid
+              </t-button>
+            </template>
+          </t-table>
+          <div v-else class="admin-state">该 IP 没有影响过带凭证的真人（纯爬虫来源，无人被误伤）</div>
+        </div>
+      </template>
+    </div>
 
     <!-- 筛选：IP 搜索 + 状态 -->
     <div class="admin-form-row" style="margin-bottom: 10px">
@@ -80,8 +173,9 @@
       />
     </t-loading>
 
-    <!-- 确认弹窗 -->
+    <!-- 确认弹窗：移除（黑名单页原操作） / 解封（蜜罐反馈反查） -->
     <AdminModal ref="modal" :title="'移除 IP'" tone="danger" confirm-text="确认移除" />
+    <AdminModal ref="unblockModal" :title="'解封该 IP'" tone="danger" confirm-text="确认解封" />
   </t-card>
 </template>
 
@@ -96,7 +190,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useAdminApi, type BlacklistItem } from "~/composables/useAdminApi";
 import AdminModal from "~/components/admin/AdminModal.vue";
 
-const { loadBlacklist, removeIp } = useAdminApi();
+const { loadBlacklist, removeIp, lookupHoneypot } = useAdminApi();
 const modalRef = ref<InstanceType<typeof AdminModal>>();
 
 const loading = ref(false);
@@ -104,6 +198,18 @@ const error = ref("");
 const items = ref<BlacklistItem[]>([]);
 const total = ref(0);
 const busyKey = ref("");
+
+// ===== 蜜罐反馈解封（2026-09-03 openid 反查闭环）=====
+const lookupOpen = ref(false);
+const lookupMode = ref<"openid" | "ip">("openid");
+const lookupKeyword = ref("");
+const lookupLoading = ref(false);
+const lookupError = ref("");
+const lookupDone = ref(false);
+const lookupResult = ref<any>(null);
+const lookupBusy = ref("");
+const unblockModal = ref<InstanceType<typeof AdminModal>>();
+let pendingUnblockIp = "";
 
 const ipFilter = ref("");
 const status = ref<"" | "blocked" | "free">("");
@@ -142,6 +248,29 @@ function blockLevelText(blockCount?: number): string {
   if (blockCount === 2) return "7 天";
   return "30 天";
 }
+
+/** 蜜罐反查列（openid 模式）：受影响 IP + 封禁状态 + 解封 */
+const hpOpenidColumns = [
+  { colKey: "ip", title: "IP", cell: (_h: any, { row }: any) => row.ip },
+  { colKey: "last", title: "最近蜜罐命中（北京）", cell: "last-slot" },
+  { colKey: "honeypotHits", title: "命中次数", width: 90, cell: (_h: any, { row }: any) => row.honeypotHits ?? 0 },
+  { colKey: "status", title: "状态", cell: "status-slot", width: 90 },
+  {
+    colKey: "expires",
+    title: "解封时间（北京）",
+    cell: (_h: any, { row }: any) => (row.blocked ? formatTime(row.expiresAt) : "-"),
+    width: 150,
+  },
+  { colKey: "ops", title: "操作", cell: "op-slot", width: 90 },
+];
+
+/** 蜜罐反查列（ip 模式）：被影响的 openid 列表 */
+const hpIpColumns = [
+  { colKey: "openid", title: "openid", cell: (_h: any, { row }: any) => row.openid, ellipsis: true },
+  { colKey: "last", title: "最近命中（北京）", cell: "last-slot" },
+  { colKey: "honeypotHits", title: "命中次数", width: 90, cell: (_h: any, { row }: any) => row.honeypotHits ?? 0 },
+  { colKey: "ops", title: "操作", cell: "op-slot", width: 110 },
+];
 
 function formatDuration(ms?: number): string {
   if (!ms || ms <= 0) return "-";
@@ -219,6 +348,83 @@ async function doRemove(ip: string) {
   }
 }
 
+// ===== 蜜罐反馈解封逻辑（2026-09-03）=====
+
+function toggleLookup() {
+  lookupOpen.value = !lookupOpen.value;
+  if (lookupOpen.value) lookupDone.value = false;
+}
+
+/** 模式切换时清掉上次结果 */
+function doLookup() {
+  const kw = lookupKeyword.value.trim();
+  if (!kw) return;
+  lookupLoading.value = true;
+  lookupError.value = "";
+  lookupDone.value = false;
+  const params = lookupMode.value === "openid" ? { openid: kw } : { ip: kw };
+  lookupHoneypot({ ...params, limit: 50 })
+    .then((res: any) => {
+      lookupResult.value = res;
+      lookupDone.value = true;
+    })
+    .catch((e: any) => {
+      lookupError.value = e?.message || "反查失败";
+    })
+    .finally(() => {
+      lookupLoading.value = false;
+    });
+}
+
+/** 确认解封 openid 反查命中的 IP */
+function askUnblock(ip: string) {
+  pendingUnblockIp = ip;
+  unblockModal.value?.open({
+    title: "解封该 IP",
+    message: `确定解封 IP ${ip}？\n该用户反馈"看到蜜罐数据"，此 IP 被拉黑疑似误伤真实用户。\n解封后将立即恢复搜索。`,
+    tone: "danger",
+    confirmText: "确认解封",
+    onConfirm: async () => {
+      await doUnblock(pendingUnblockIp);
+    },
+  });
+}
+
+async function doUnblock(ip: string) {
+  if (lookupBusy.value) return;
+  lookupBusy.value = `unblock-${ip}`;
+  try {
+    await removeIp(ip);
+    MessagePlugin.success(`已解封 ${ip}`);
+    // 反查结果里该 IP 置为已解封
+    if (lookupResult.value?.mode === "openid") {
+      const row = lookupResult.value.items.find((it: any) => it.ip === ip);
+      if (row) {
+        row.blocked = false;
+        row.remainingMs = 0;
+      }
+    }
+    // 同步刷新黑名单列表
+    await load();
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || "解封失败");
+    throw e; // 让 modal 保持打开显示错误
+  } finally {
+    lookupBusy.value = "";
+  }
+}
+
+function copyOpenid(openid: string) {
+  try {
+    if (navigator.clipboard) {
+      void navigator.clipboard.writeText(openid);
+    }
+    MessagePlugin.success("已复制 openid");
+  } catch {
+    MessagePlugin.error("复制失败，请手动选中复制");
+  }
+}
+
 // 首次进入自动加载
 onMounted(() => load());
 
@@ -239,4 +445,25 @@ defineExpose({ refresh: () => load() });
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+
+/* ===== 蜜罐反馈解封区（2026-09-03） ===== */
+.hp-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px dashed var(--td-component-border, var(--border-light, #e8ecf0));
+  border-radius: 10px;
+  background: var(--bg-secondary, #fafbfc);
+}
+.hp-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hp-form { flex: 1; min-width: 260px; margin: 0; }
+.hp-form .admin-input-t { max-width: 420px; }
+.hp-alert { border-radius: 8px; }
 </style>

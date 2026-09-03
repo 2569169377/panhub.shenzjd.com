@@ -334,6 +334,91 @@ export class BotDefenseService {
   }
 
   /**
+   * 记录一次"真人命中蜜罐"（2026-09-03 反馈解封闭环）。
+   * 由 search 端点蜜罐拦截分支在解出 openid 后异步调用（fire-and-forget，
+   * 纯写不读、失败静默），把 (openid, ip) 关联落库供管理端反查。
+   */
+  async recordHoneypotHit(
+    openid: string,
+    ip: string
+  ): Promise<boolean> {
+    // 空 openid/ip（爬虫或异常）直接短路，连 store 调用都不发（热路径）
+    if (!(openid || "").trim() || !(ip || "").trim()) return false;
+    await this.waitForInit();
+    if (!this.store) return false;
+    try {
+      return await this.store.recordHoneypotHit(openid, ip, Date.now());
+    } catch (err) {
+      loggers.api?.warn?.("蜜罐命中记录失败（静默）", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  }
+
+  /** 管理反查：某 openid 最近命中过蜜罐的 IP 列表（honeypot_hits） */
+  async listHoneypotByOpenid(
+    openid: string,
+    limit?: number
+  ): Promise<{ ip: string; hits: number; lastAt: number }[]> {
+    await this.waitForInit();
+    if (!this.store) return [];
+    try {
+      return await this.store.listHoneypotByOpenid(openid, limit);
+    } catch (err) {
+      loggers.api?.warn?.("openid 蜜罐反查失败", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+  }
+
+  /** 管理反查：某 IP 最近影响了哪些 openid（黑名单条目关联） */
+  async listHoneypotByIp(
+    ip: string,
+    limit?: number
+  ): Promise<{ openid: string; hits: number; lastAt: number }[]> {
+    await this.waitForInit();
+    if (!this.store) return [];
+    try {
+      return await this.store.listHoneypotByIp(ip, limit);
+    } catch (err) {
+      loggers.api?.warn?.("IP 蜜罐反查失败", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * 按多个 IP 批量查黑名单状态（2026-09-03 openid 反查用，IN 一次查询）。
+   */
+  async listStatusByIps(
+    ips: string[]
+  ): Promise<
+    {
+      ip: string;
+      reason: string;
+      hitCount: number;
+      blockCount: number;
+      firstAt: number;
+      lastAt: number;
+      expiresAt: number;
+    }[]
+  > {
+    await this.waitForInit();
+    if (!this.store) return [];
+    try {
+      return await this.store.listStatusByIps(ips, Date.now());
+    } catch (err) {
+      loggers.api?.warn?.("按 IP 批量查黑名单状态失败", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+  }
+
+  /**
    * 管理排查：黑名单全部条目（封禁中 + 惯犯档案），按最近活动倒序。
    * 支持 IP 模糊搜索、状态筛选、offset 分页（2026-08-26）。
    * 不依赖 BOT_DEFENSE_ENFORCE 开关（管理侧只看数据，不拦截）。
@@ -475,12 +560,23 @@ export class BotDefenseService {
   private async prune(): Promise<void> {
     if (!this.store) return;
     try {
-      const deleted = await this.store.pruneExpired(Date.now());
+      const now = Date.now();
+      const deleted = await this.store.pruneExpired(now);
       if (deleted > 0) {
         console.log(`[BotDefenseService] prune 过期条目 ${deleted} 条`);
       }
+      // 2026-09-03：顺带清理过期的蜜罐命中记录（反馈反查只关心近期，避免无界膨胀）
+      try {
+        const hDeleted = await this.store.pruneHoneypotHits(now);
+        if (hDeleted > 0) {
+          console.log(`[BotDefenseService] prune 过期蜜罐命中 ${hDeleted} 条`);
+        }
+      } catch (e) {
+        loggers.api?.warn?.("prune 蜜罐命中失败", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
       // 顺便清掉过期缓存（极简实现：每次 prune 全清，由 TTL 重建）
-      const now = Date.now();
       for (const [k, v] of this.posCache) {
         if (v.expiresAt <= now) this.posCache.delete(k);
       }
