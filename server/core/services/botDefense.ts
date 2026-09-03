@@ -82,8 +82,16 @@ const NEG_CACHE_TTL_MS = 5 * 60_000;
 const HOT_THRESHOLD = 50;
 /** 拉黑阈值时间窗（毫秒，2026-08-24 从 60s 调到 300s） */
 const HOT_WINDOW_MS = 5 * 60_000;
-/** prune 周期 */
-const PRUNE_INTERVAL_MS = 5 * 60_000;
+/**
+ * 黑名单表 prune 周期（2026-09-03 用户拍板：5min→1h，减少 Turso 读）。
+ * 被清的是 block_count=0 的计数短记录（TTL 1h，无拦截语义），删晚一小时不影响任何判定；
+ * 表按 IP 为主键每 IP 一行，也不会因删除延迟而膨胀。
+ */
+const PRUNE_INTERVAL_MS = 60 * 60_000;
+/** 内存 pos/neg 缓存清扫周期（纯本地零 DB；与 DB prune 解耦，避免过期项滞留 Map） */
+const MEM_CACHE_CLEAN_INTERVAL_MS = 5 * 60_000;
+/** 蜜罐命中记录清理周期（保留期 90 天，低频每天一次即可，顺带再省 Turso 读） */
+const HONEYPOT_PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 /** 黑名单命中探查升级（2026-08-25 用户拍板"751 次就直接永久拉黑"）：
  *  已拉黑 IP 在封禁期内仍持续探测 → 计数；同 IP 累计 PROBE_UPGRADE_THRESHOLD
  *  次（默认 60）后自动调 extendBlock 升一档（24h→7d→30d→永久）。
@@ -124,6 +132,8 @@ export class BotDefenseService {
   /** in-flight 去重：同 IP 并发 isBlocked 复用同一 Promise，避免缓存击穿 */
   private inflightBlocked = new Map<string, Promise<boolean>>();
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  private cacheTimer: ReturnType<typeof setInterval> | null = null;
+  private honeypotTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.initPromise = this.initialize();
@@ -547,16 +557,30 @@ export class BotDefenseService {
     }
   }
 
-  /** 启动周期 prune（懒启动：首次获取服务时由 factory 触发） */
+  /** 启动周期维护（懒启动：首次获取服务时由 factory 触发）。
+   *  2026-09-03 拆分为三个独立定时器，把 DB 读频降到每天 25 次左右：
+   *  - 黑名单表 prune 1h 一次（原来 5min → 288 次/天 DB 往返）
+   *  - 内存 pos/neg 缓存清扫保持 5min（纯本地，零 DB）
+   *  - 蜜罐命中清理 24h 一次（保留期 90 天，无需高频）
+   */
   startMaintenance(): void {
     if (this.pruneTimer) return;
     this.pruneTimer = setInterval(() => {
       void this.prune();
     }, PRUNE_INTERVAL_MS);
-    const t = this.pruneTimer as unknown as { unref?: () => void };
-    t.unref?.();
+    this.cacheTimer = setInterval(() => {
+      this.cleanExpiredCache();
+    }, MEM_CACHE_CLEAN_INTERVAL_MS);
+    this.honeypotTimer = setInterval(() => {
+      void this.pruneHoneypot();
+    }, HONEYPOT_PRUNE_INTERVAL_MS);
+    // unref：不让定时器阻止进程退出（vitest / CLI 场景）
+    for (const t of [this.pruneTimer, this.cacheTimer, this.honeypotTimer]) {
+      (t as unknown as { unref?: () => void }).unref?.();
+    }
   }
 
+  /** 主表过期清理：只删"从未被正式拉黑（block_count=0）"且已过期的计数短记录 */
   private async prune(): Promise<void> {
     if (!this.store) return;
     try {
@@ -565,29 +589,37 @@ export class BotDefenseService {
       if (deleted > 0) {
         console.log(`[BotDefenseService] prune 过期条目 ${deleted} 条`);
       }
-      // 2026-09-03：顺带清理过期的蜜罐命中记录（反馈反查只关心近期，避免无界膨胀）
-      try {
-        const hDeleted = await this.store.pruneHoneypotHits(now);
-        if (hDeleted > 0) {
-          console.log(`[BotDefenseService] prune 过期蜜罐命中 ${hDeleted} 条`);
-        }
-      } catch (e) {
-        loggers.api?.warn?.("prune 蜜罐命中失败", {
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-      // 顺便清掉过期缓存（极简实现：每次 prune 全清，由 TTL 重建）
-      for (const [k, v] of this.posCache) {
-        if (v.expiresAt <= now) this.posCache.delete(k);
-      }
-      for (const [k, v] of this.negCache) {
-        if (v.expiresAt <= now) this.negCache.delete(k);
-      }
     } catch (err) {
       console.log(
         "[BotDefenseService] prune 失败:",
         err instanceof Error ? err.message : err
       );
+    }
+  }
+
+  /** 蜜罐命中记录清理（保留 90 天；低频每天一次，反馈反查只关心近期） */
+  private async pruneHoneypot(): Promise<void> {
+    if (!this.store) return;
+    try {
+      const hDeleted = await this.store.pruneHoneypotHits(Date.now());
+      if (hDeleted > 0) {
+        console.log(`[BotDefenseService] prune 过期蜜罐命中 ${hDeleted} 条`);
+      }
+    } catch (e) {
+      loggers.api?.warn?.("prune 蜜罐命中失败", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  /** 清掉已过期的内存缓存条目（TTL 过期重建；纯本地，无 DB） */
+  private cleanExpiredCache(): void {
+    const now = Date.now();
+    for (const [k, v] of this.posCache) {
+      if (v.expiresAt <= now) this.posCache.delete(k);
+    }
+    for (const [k, v] of this.negCache) {
+      if (v.expiresAt <= now) this.negCache.delete(k);
     }
   }
 

@@ -106,7 +106,12 @@ DELETE FROM rejected_ips WHERE ip = '1.2.3.4';
 
 #### prune 策略
 
-`BotDefenseService.startMaintenance()` 每 5min 调一次 `pruneExpired`，自动清理 `expires_at <= now` 的条目。
+`BotDefenseService.startMaintenance()` 周期清理（2026-09-03 起为降 Turso 读量拆成三档定时器）：
+- 黑名单表 `pruneExpired`：每 **1h** 一次（原 5min），自动清理 `expires_at <= now` 且 `block_count = 0`
+  的计数短记录；`block_count > 0` 的惯犯档案保留。删除延迟一档不影响任何判定（`isBlocked`
+  只看 `block_count > 0`）。
+- 内存 pos/neg 缓存清扫：每 5min 一次，纯本地无 DB。
+- `honeypot_hits` 蜜罐命中清理：每 24h 一次（保留 90 天，低频即可）。
 
 ## 公众号登录强制认证（写死强制，无开关）
 
