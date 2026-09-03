@@ -364,6 +364,7 @@ async function doSearch() {
   await performSearch({
     ...getSearchOptions(),
     onAuthRequired: handleAuthRequired,
+    onQuotaExceeded: handleQuotaExceeded,
   });
 }
 
@@ -401,6 +402,23 @@ async function onSearch() {
   await doSearch();
 }
 
+// 搜索接口返回 402 时回调（2026-09-04）：
+// 页面端免费搜索次数用完（服务端 search.stream 按 openid 内存计数）→
+// 弹 floating-unlock 广告弹窗，用户扫码看完激励视频广告后返回一次性票据，
+// useSearch 自动带票据（X-Unlock-Ticket/Grant 头）重试本次搜索，
+// 服务端调 wx-auth mp-reward/verify 验票核销后清零配额放行。
+// 返回 null = 用户取消/失败 → useSearch 终止搜索并提示。
+let unlockAdResolving = false;
+async function handleQuotaExceeded() {
+  if (unlockAdResolving) return null;
+  unlockAdResolving = true;
+  try {
+    return await requireUnlockAd();
+  } finally {
+    unlockAdResolving = false;
+  }
+}
+
 // 快速搜索
 async function quickSearch(keyword: string) {
   kw.value = keyword;
@@ -414,6 +432,7 @@ async function handleContinueSearch() {
   await continueSearch({
     ...getSearchOptions(),
     onAuthRequired: handleAuthRequired,
+    onQuotaExceeded: handleQuotaExceeded,
   });
 }
 

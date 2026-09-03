@@ -25,6 +25,16 @@
     <span class="footer-sep">·</span>
     <span class="footer-copy">© {{ new Date().getFullYear() }} PanHub</span>
   </footer>
+
+  <!-- 广告解锁弹窗（floating-unlock WC，2026-09-04）：平时不显示，
+       搜索配额超限（HTTP 402）时由 useUnlockAd 调 unlock() 弹出，
+       用户扫码看激励视频广告后回调 {ticket, grant} 供验票放行 -->
+  <ClientOnly>
+    <floating-unlock
+      api-base="https://wx-auth.shenzjd.com"
+      site-id="panhub.shenzjd.com"
+    ></floating-unlock>
+  </ClientOnly>
 </template>
 
 <script setup lang="ts">
@@ -52,6 +62,12 @@ useHead({
     },
     {
       src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
+      body: true,
+    },
+    {
+      // 广告解锁弹窗（2026-09-04）：搜索配额超限时由 useUnlockAd 弹出，
+      // 模板里的 <floating-unlock> 标签由该脚本注册为 Web Component
+      src: "https://unpkg.com/@wu529778790/floating-unlock@latest/dist/floating-unlock.wc.js",
       body: true,
     },
   ],

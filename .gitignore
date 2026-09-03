@@ -44,3 +44,4 @@ data-test*
 # Guard: this project uses npm, NOT pnpm — ignore accidental pnpm artifacts
 pnpm-lock.yaml
 pnpm-workspace.yaml
+.zcode/

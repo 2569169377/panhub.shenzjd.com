@@ -1,4 +1,5 @@
 import type { MergedLinks, GenericResponse, SearchResponse } from "~/types/search";
+import type { UnlockTicket } from "~/composables/useUnlockAd";
 import { extractMergedFromResponse } from "~/utils/extractMergedFromResponse";
 import { mergeMergedByType } from "~/utils/mergeMergedByType";
 
@@ -28,6 +29,12 @@ export interface SearchOptions {
   };
   /** 当搜索接口返回 401 时回调（公众号认证失效） */
   onAuthRequired?: () => void;
+  /**
+   * 当搜索接口返回 402 时回调（2026-09-04 页面端免费配额用完）：
+   * 弹 floating-unlock 广告弹窗，看完激励视频广告后返回 {ticket, grant}
+   * 供自动重试（服务端验票核销后清零配额放行）；返回 null = 用户取消/失败
+   */
+  onQuotaExceeded?: () => Promise<UnlockTicket | null>;
 }
 
 /**
@@ -431,7 +438,11 @@ export function useSearch() {
     initialMerged?: MergedLinks,
     initialTotal = 0,
     /** 本轮目标结果上限（首搜不传=后端默认 90；「继续」传 已收+90，由后端自己计数停止） */
-    maxResults?: number
+    maxResults?: number,
+    /** 广告解锁票据（2026-09-04：402 后看完广告重试时带上，服务端验票清零放行） */
+    unlockTicket?: UnlockTicket | null,
+    /** 是否允许 402 时弹广告解锁（重试一次后关闭，防解锁失败死循环） */
+    allowUnlockRetry = true
   ): Promise<{ usedFallback: boolean }> {
     const { apiBase, keyword, onAuthRequired } = options;
 
@@ -461,11 +472,41 @@ export function useSearch() {
       const resp = await fetch(`${apiBase}/search.stream?${q.toString()}`, {
         credentials: "include",
         signal: controller.signal,
-        headers: { accept: "text/event-stream" },
+        headers: {
+          accept: "text/event-stream",
+          // 402 解锁重试：带一次性票据头，服务端验票核销后清零配额放行
+          ...(unlockTicket
+            ? {
+                "x-unlock-ticket": unlockTicket.ticket,
+                "x-unlock-grant": unlockTicket.grant,
+              }
+            : {}),
+        },
       });
 
       if (resp.status === 401) {
         onAuthRequired?.();
+        return { usedFallback: false };
+      }
+      if (resp.status === 402) {
+        // 页面端免费配额用完（2026-09-04）：弹 floating-unlock 广告弹窗，
+        // 看完激励视频广告拿到 {ticket, grant} 后原参重发一次（此时无任何
+        // chunk 已消费，状态零丢失）；取消/失败则终止本次搜索并提示。
+        if (allowUnlockRetry && options.onQuotaExceeded) {
+          const ticket = await options.onQuotaExceeded();
+          if (ticket) {
+            return performStreamSearch(
+              options,
+              mySeq,
+              initialMerged,
+              initialTotal,
+              maxResults,
+              ticket,
+              false
+            );
+          }
+        }
+        setError("免费搜索次数已用完，观看视频广告后可继续搜索");
         return { usedFallback: false };
       }
       if (!resp.ok) {
