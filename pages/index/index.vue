@@ -30,14 +30,15 @@
     </div>
 
     <!-- 站点搜索统计（2026-09-01 替代"热搜趋势"入口：公开页不再展示搜索词与逐日榜单） -->
+    <!-- 2026-09-03 口径改为"昨日"：昨日已结算，值恒定，配合服务端日缓存每天只读一次库 -->
     <div v-if="siteStats" class="stats-strip">
       <div class="stats-strip__item">
-        <span class="stats-strip__value">{{ siteStats.todaySearches.toLocaleString() }}</span>
-        <span class="stats-strip__label">今日搜索次数</span>
+        <span class="stats-strip__value">{{ siteStats.yesterdaySearches.toLocaleString() }}</span>
+        <span class="stats-strip__label">昨日搜索次数</span>
       </div>
       <div class="stats-strip__item">
-        <span class="stats-strip__value">{{ siteStats.todayTerms.toLocaleString() }}</span>
-        <span class="stats-strip__label">今日搜索词数</span>
+        <span class="stats-strip__value">{{ siteStats.yesterdayTerms.toLocaleString() }}</span>
+        <span class="stats-strip__label">昨日搜索词数</span>
       </div>
       <div class="stats-strip__item">
         <span class="stats-strip__value">{{ siteStats.totalSearches.toLocaleString() }}</span>
@@ -301,8 +302,8 @@ async function fetchHotTerms() {
 // hero 下方统计带（2026-09-01 替代 /hot 页：公开侧只展示统计数，不展示搜索词）
 // 接口侧全走 service TTL 读缓存，高频请求也不增加查库
 const siteStats = ref<{
-  todayTerms: number;
-  todaySearches: number;
+  yesterdayTerms: number;
+  yesterdaySearches: number;
   totalSearches: number;
   totalTerms: number;
 } | null>(null);
@@ -313,8 +314,8 @@ async function fetchSiteStats() {
     const data = await res.json();
     if (data.code === 0 && data.data?.configured) {
       siteStats.value = {
-        todayTerms: data.data.todayTerms,
-        todaySearches: data.data.todaySearches,
+        yesterdayTerms: data.data.yesterdayTerms,
+        yesterdaySearches: data.data.yesterdaySearches,
         totalSearches: data.data.totalSearches,
         totalTerms: data.data.totalTerms,
       };

@@ -23,6 +23,13 @@ const FLUSH_INTERVAL_MS =
  */
 const READ_TTL_FAST_MS = Number(process.env.HOT_SEARCH_READ_TTL_MS) || 60_000;
 const READ_TTL_SLOW_MS = 5 * 60_000;
+/**
+ * 首页"昨日结算数据"日缓存 TTL（2026-09-03 用户拍板：单 Docker 场景下
+ * 大幅削减 Turso 读配额）。首页统计带/词云展示"昨天"的最终态数字与词池，
+ * 昨天数据恒定不变，故缓存 key 拼上昨日日期 + 25h TTL → 每个数字每天只读
+ * 一次库（今日首次访问触发），跨天自然因 key 变化而刷新，无定时器依赖。
+ */
+const HOME_DAY_CACHE_TTL_MS = 25 * 60 * 60_000;
 /** 读缓存容量上限（防内存无限增长，超限先清过期条目） */
 const READ_CACHE_MAX = 500;
 
@@ -298,6 +305,72 @@ export class HotSearchService {
       this.requireStore().getRandomHotSearches(canonical)
     );
     return pool.slice(0, limit);
+  }
+
+  /**
+   * 首页"昨日结算数据"（2026-09-03 用户拍板：压减 Turso 读配额到每天一次）
+   *
+   * 首页词云 + 统计带改为展示**昨天**的最终态数据（昨天已结束，值恒定，
+   * 与"今天实时涨"的旧口径不同），配合日期键缓存可做到：今日首次访问触发
+   * 一次查库，此后一整天命中内存缓存，跨天 key 变化自动刷新——**每个数字
+   * 每天只读一次库**，无需定时器，单 Docker 常驻下对读配额几乎零消耗。
+   *
+   * 返回（一次 fetch 内并发取齐，避免多次往返）：
+   * - yesterdayTerms   ：昨日被搜索过的去重词数（昨日词云词池大小）
+   * - yesterdaySearches：昨日真实搜索次数（daily_searches 精确记录，未记录为 0）
+   * - wordPool         ：昨日被搜词池（作为首页词云候选，随机取若干展示）
+   * - totalSearches / totalTerms：累计值（源自 stats_meta 计数器，几行读）
+   */
+  async getHomeYesterdayData(limit = 100): Promise<{
+    yesterdayTerms: number;
+    yesterdaySearches: number;
+    totalSearches: number;
+    totalTerms: number;
+    wordPool: { term: string; count: number }[];
+  }> {
+    await this.waitForInit();
+    // 昨日日期键（北京时间）；缓存 key 带它 → 每天自然只查一次。
+    // limit 只影响返回切片，不影响缓存内容（fetch 每次缓存满 100 词池，
+    // 由各调用方按需 slice），保证 hot-stats / hot-searches 共享同一缓存。
+    const yesterday = formatDateKey(Date.now() - 86400000);
+    const safe = Math.min(Math.max(1, limit), 100);
+    const poolSize = 100; // 缓存始终备足 100，供词云按 limit 切片
+    const cached = await this.getCached(`home_yesterday:${yesterday}`, HOME_DAY_CACHE_TTL_MS, async () => {
+      const store = this.requireStore();
+      // 并发取齐（getDayItems 昨日全量词单 / getDailySearches 昨日次数 /
+      // getCalendarMeta 累计计数）。词单为昨日最终态，行数=昨日词数，
+      // 一天一次读取，读配额可忽略。
+      const [dayItems, searches, meta] = await Promise.all([
+        store.getDayItems(yesterday),
+        store.getDailySearches(yesterday),
+        store.getCalendarMeta(),
+      ]);
+      // 词云候选池：昨日词先随机打散再取前 poolSize 个（词云随机展示语义），
+      // 每日首次触发随机一次并缓存一整天，跨天 key 变化再重新随机。
+      const shuffled = dayItems.slice();
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      const wordPool = shuffled.slice(0, poolSize).map((it) => ({
+        term: it.term,
+        count: it.count,
+      }));
+      return {
+        yesterdayTerms: dayItems.length,
+        yesterdaySearches: searches,
+        totalSearches: meta.totalSearches,
+        totalTerms: meta.totalTerms,
+        wordPool,
+      };
+    });
+    return {
+      yesterdayTerms: cached.yesterdayTerms,
+      yesterdaySearches: cached.yesterdaySearches,
+      totalSearches: cached.totalSearches,
+      totalTerms: cached.totalTerms,
+      wordPool: cached.wordPool.slice(0, safe),
+    };
   }
 
   async clearHotSearches(): Promise<{ success: boolean; message: string }> {

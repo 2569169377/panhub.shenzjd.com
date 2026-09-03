@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { HotSearchService } from "../../server/core/services/hotSearchService";
+import { formatDateKey } from "../../server/core/services/hotSearchUtils";
 
 describe("HotSearchService (Turso store, local file::memory:)", () => {
   let service: HotSearchService;
@@ -297,6 +298,30 @@ describe("HotSearchService 读缓存", () => {
     for (const item of five) {
       expect(pool.some((p) => p.term === item.term)).toBe(true);
     }
+  });
+
+  it("getHomeYesterdayData 返回昨日结算数据并按昨日键缓存（每天只读一次）", async () => {
+    await service.clearHotSearches();
+    await service.recordSearch("今日词A");
+    await service.recordSearch("今日词A");
+    await service.recordSearch("今日词B");
+    await service.flush();
+
+    const cache = (service as any).readCache as Map<string, { value: unknown; expires: number }>;
+    cache.clear();
+
+    const data = await service.getHomeYesterdayData(10);
+    // 昨日（无数据）→ 词数 0、词池空；但今日的搜索不会算进昨日
+    expect(data.yesterdayTerms).toBe(0);
+    expect(data.yesterdaySearches).toBe(0);
+    expect(data.wordPool).toEqual([]);
+    // 累计值仍来自 stats_meta 计数器：今日词 A(2)+B(1)=3 次、2 词
+    expect(data.totalSearches).toBe(3);
+    expect(data.totalTerms).toBe(2);
+
+    // 缓存按 "home_yesterday:{昨日日期}" 写入
+    const yesterdayKey = formatDateKey(Date.now() - 86400000);
+    expect(cache.has(`home_yesterday:${yesterdayKey}`)).toBe(true);
   });
 
   it("deleteHotSearch 后读缓存立即失效（被删词不再出现）", async () => {
