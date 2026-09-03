@@ -164,8 +164,7 @@ defineExpose({ init });
 .tag-cloud-wrap {
   min-height: 340px;
   padding: 20px;
-  background: var(--bg-surface);
-  backdrop-filter: blur(8px);
+  background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: 14px;
   cursor: pointer;
@@ -211,8 +210,7 @@ defineExpose({ init });
   gap: 12px;
   padding: 40px 20px;
   color: var(--text-secondary);
-  background: var(--bg-surface);
-  backdrop-filter: blur(8px);
+  background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: 14px;
 }

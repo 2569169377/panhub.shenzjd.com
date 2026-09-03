@@ -715,8 +715,7 @@ function visibleSorted(items: any[]) {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   padding: 18px 16px;
-  background: var(--bg-surface);
-  backdrop-filter: blur(8px);
+  background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
 }
@@ -776,7 +775,6 @@ function visibleSorted(items: any[]) {
 /* 统计和过滤器栏 */
 .stats-bar {
   background: var(--bg-primary);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   padding: 16px;
@@ -955,9 +953,8 @@ function visibleSorted(items: any[]) {
 
 .empty-card {
   width: 100%;
-  background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-xl);
   padding: 40px 44px;
   box-shadow: var(--shadow-xl);

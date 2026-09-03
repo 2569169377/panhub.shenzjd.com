@@ -176,11 +176,12 @@ function formatDate(d?: string) {
 </script>
 
 <style scoped>
-/* 结果卡片主体 - 玻璃拟态设计 */
+/* 结果卡片主体：实色底（2026-09-04 滚动性能优化）。
+   此前半透明 + backdrop-filter: blur(8px) 叠加 app.vue 常驻动画光斑背景，
+   视口内每张卡片每帧都被强制重新采样模糊，是结果页滚动掉帧的主因。
+   改实色后卡片零合成成本，视觉几乎无损（背后本就是静态渐变光斑） */
 .result-card {
-  background: var(--bg-surface);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: 16px;
   box-shadow: 0 8px 22px rgba(17, 24, 39, 0.06);
@@ -290,31 +291,14 @@ function formatDate(d?: string) {
   stroke: currentColor;
 }
 
-/* 资源列表 */
+/* 资源列表：自然撑开，不做内层滚动（2026-09-04）。
+   此前 max-height:600px + overflow-y:auto 让每张卡片成为嵌套滚动容器，
+   触控板手势先被内层消费、到边界才链到外层，滚动体感顿挫；
+   配合"显示更多"折叠（默认仅 3 条）整页保持单一滚动容器 */
 .resource-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-/* 自定义滚动条 */
-.resource-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.resource-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.resource-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 3px;
-}
-
-.resource-list::-webkit-scrollbar-thumb:hover {
-  background: var(--border-medium);
 }
 
 /* 单个资源项 */

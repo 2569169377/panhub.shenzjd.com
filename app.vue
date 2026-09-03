@@ -72,7 +72,10 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-/* 背景装饰 - 玻璃拟态效果 */
+/* 背景装饰光斑：径向渐变模拟软光斑（2026-09-04 滚动性能优化）。
+   此前 filter: blur(48px) 的图层常驻动画，叠加页面各处 backdrop-filter
+   毛玻璃卡片 = 每帧强制重新采样模糊，是滚动掉帧主因之一；
+   改径向渐变后动画只是合成器上的 transform 变换，零重绘成本 */
 .bg-decoration {
   position: fixed;
   top: 0;
@@ -87,7 +90,6 @@ onMounted(() => {
 .blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(48px);
   opacity: 0.28;
   animation: blobFloat 8s ease-in-out infinite;
 }
@@ -95,7 +97,7 @@ onMounted(() => {
 .blob-1 {
   width: 400px;
   height: 400px;
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  background: radial-gradient(circle at 40% 40%, #14b8a6 0%, #0f766e 45%, transparent 72%);
   top: -100px;
   left: -100px;
   animation-delay: 0s;
@@ -104,7 +106,7 @@ onMounted(() => {
 .blob-2 {
   width: 300px;
   height: 300px;
-  background: linear-gradient(135deg, #f59e0b, #fb7185);
+  background: radial-gradient(circle at 40% 40%, #fb7185 0%, #f59e0b 45%, transparent 72%);
   bottom: -50px;
   right: -50px;
   animation-delay: 2s;
@@ -113,7 +115,7 @@ onMounted(() => {
 .blob-3 {
   width: 250px;
   height: 250px;
-  background: linear-gradient(135deg, #0ea5e9, #14b8a6);
+  background: radial-gradient(circle at 40% 40%, #14b8a6 0%, #0ea5e9 45%, transparent 72%);
   top: 50%;
   left: 70%;
   animation-delay: 4s;
@@ -166,10 +168,6 @@ onMounted(() => {
     right: 16px;
     left: 16px;
     top: 70px;
-  }
-
-  .blob {
-    filter: blur(40px);
   }
 }
 

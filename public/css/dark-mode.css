@@ -62,9 +62,10 @@
 }
 
 .dark .blob { opacity: 0.12; }
-.dark .blob-1 { background: linear-gradient(135deg, #0d9488, #2dd4bf); }
-.dark .blob-2 { background: linear-gradient(135deg, #d97706, #fbbf24); }
-.dark .blob-3 { background: linear-gradient(135deg, #0891b2, #2dd4bf); }
+/* 暗色光斑与 app.vue 同步改径向渐变：去 filter blur，动画零重绘（2026-09-04） */
+.dark .blob-1 { background: radial-gradient(circle at 40% 40%, #2dd4bf 0%, #0d9488 45%, transparent 72%); }
+.dark .blob-2 { background: radial-gradient(circle at 40% 40%, #fbbf24 0%, #d97706 45%, transparent 72%); }
+.dark .blob-3 { background: radial-gradient(circle at 40% 40%, #2dd4bf 0%, #0891b2 45%, transparent 72%); }
 
 .dark .header {
   background: rgba(13, 17, 23, 0.78);
