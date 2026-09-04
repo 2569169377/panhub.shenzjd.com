@@ -118,7 +118,7 @@
       <div v-else-if="rows.length === 0" class="admin-empty">暂无频道</div>
     </t-loading>
 
-    <AdminModal ref="modal" :title="'确认操作'" tone="primary" confirm-text="确认" />
+    <AdminModal ref="modalRef" :title="'确认操作'" tone="primary" confirm-text="确认" />
   </t-card>
 </template>
 

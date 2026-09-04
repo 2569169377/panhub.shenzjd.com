@@ -35,7 +35,10 @@
         <!-- openid 反查结果：受影响 IP + 封禁状态 + 一键解封 -->
         <div v-if="lookupResult?.mode === 'openid'">
           <div class="admin-list-head">
-            <span>该 openid 最近命中过蜜罐的 IP：{{ lookupResult.items.length }} 条（可能含已解封历史，仅封禁中的会影响其当前搜索）</span>
+            <span>该 openid 关联的 IP：{{ lookupResult.items.length }} 条（来源：蜜罐命中 / 搜索历史兜底；仅封禁中的会影响其当前搜索）</span>
+          </div>
+          <div v-if="lookupResult.items[0]?.source === 'search_log'" class="admin-hint" style="margin: 4px 0 8px">
+            未命中蜜罐记录，按搜索历史兜底定位（有成功搜索记录即能查到 IP）
           </div>
           <t-table
             v-if="lookupResult.items.length"
@@ -65,7 +68,7 @@
               <span v-else class="admin-hint">-</span>
             </template>
           </t-table>
-          <div v-else class="admin-state">该 openid 没有命中过蜜罐的记录（未被黑名单 IP 影响，或记录已清理）</div>
+          <div v-else class="admin-state">该 openid 没有关联的封禁记录（蜜罐表与搜索历史都没有该 openid 的 IP 记录）</div>
         </div>
 
         <!-- IP 反查结果：该 IP 影响了哪些 openid -->
@@ -174,7 +177,7 @@
     </t-loading>
 
     <!-- 确认弹窗：移除（黑名单页原操作） / 解封（蜜罐反馈反查） -->
-    <AdminModal ref="modal" :title="'移除 IP'" tone="danger" confirm-text="确认移除" />
+    <AdminModal ref="modalRef" :title="'移除 IP'" tone="danger" confirm-text="确认移除" />
     <AdminModal ref="unblockModal" :title="'解封该 IP'" tone="danger" confirm-text="确认解封" />
   </t-card>
 </template>

@@ -70,6 +70,9 @@ export class TursoSearchLogStore {
         created_at INTEGER NOT NULL
       )`,
       "CREATE INDEX IF NOT EXISTS idx_search_log_created ON search_log(created_at)",
+      // 2026-09-04：openid 索引——黑名单 openid 反查兜底 search_log 时走索引，
+      // 避免每次管理反查全表扫（读量吃紧，务必索引化反查路径）
+      "CREATE INDEX IF NOT EXISTS idx_search_log_openid ON search_log(openid)",
     ]);
     console.log("[TursoSearchLogStore] ✅ 存储已就绪");
   }
