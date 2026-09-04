@@ -435,19 +435,6 @@
   color: var(--text-on-primary);
   box-shadow: 0 4px 12px var(--primary-glow);
 }
-.dark .sort-select {
-  background: var(--bg-secondary);
-  border-color: var(--border-light);
-  color: var(--text-primary);
-}
-.dark .sort-select:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border-medium);
-}
-.dark .sort-select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
-}
 .dark .empty-card {
   background: var(--bg-glass);
   border-color: var(--border-light);

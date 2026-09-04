@@ -103,16 +103,6 @@
           </button>
         </div>
 
-        <!-- 排序选择器 -->
-        <div class="sorter" v-if="hasResults">
-          <select v-model="sortType" class="sort-select">
-            <option value="default">默认排序</option>
-            <option value="date-desc">最新发布</option>
-            <option value="date-asc">最早发布</option>
-            <option value="name-asc">名称 A→Z</option>
-            <option value="name-desc">名称 Z→A</option>
-          </select>
-        </div>
       </div>
     </div>
 
@@ -280,8 +270,7 @@ const kw = ref("");
 const placeholder =
   "搜索网盘资源，支持百度云、阿里云盘、夸克网盘、115网盘、迅雷云盘、天翼云盘、123网盘、移动云盘、UC网盘等";
 
-// 排序和过滤
-const sortType = ref<"default" | "date-desc" | "date-asc" | "name-asc" | "name-desc">("default");
+// 平台过滤（结果排序固定按时间最新在前，见 sortItems，不再提供其它排序选项）
 const filterPlatform = ref<string>("all");
 const initialVisible = 3;
 const expandedSet = ref<Set<string>>(new Set());
@@ -440,7 +429,6 @@ async function handleContinueSearch() {
 async function fullReset() {
   // 清空输入框和重置状态
   kw.value = "";
-  sortType.value = "default";
   filterPlatform.value = "all";
   expandedSet.value = new Set();
   resetSearch();
@@ -458,10 +446,14 @@ const platformIcon = (t: string): string => PLATFORM_INFO[t]?.icon || "📦";
 const platformName = (t: string): string => PLATFORM_INFO[t]?.name || t;
 const platformColor = (t: string): string => PLATFORM_INFO[t]?.color || "#9ca3af";
 
-// 获取所有有结果的平台类型
+// 获取所有有结果的平台类型。
+// 2026-09-04：SSE 流推送时 merged 的 key 按首个结果到达顺序插入，次序随机，
+// 这里按结果数量降序 → tab（pill）从左到右为数量多的平台。
 const platforms = computed(() => {
   const m = searchState.value?.merged ?? {};
-  return Object.keys(m).filter((type) => (m[type]?.length ?? 0) > 0);
+  return Object.keys(m)
+    .filter((type) => (m[type]?.length ?? 0) > 0)
+    .sort((a, b) => (m[b]?.length ?? 0) - (m[a]?.length ?? 0));
 });
 
 const groupedResults = computed(() => {
@@ -474,6 +466,9 @@ const groupedResults = computed(() => {
     if (!source[type]?.length) continue;
     list.push({ type, items: source[type] || [] });
   }
+  // 数量多的平台排前面（与上方 platforms tab 顺序一致）：
+  // 流推送各组到达顺序不定，不能依赖 merged 的 key 顺序
+  list.sort((a, b) => (b.items?.length ?? 0) - (a.items?.length ?? 0));
   return list;
 });
 
@@ -490,33 +485,15 @@ function visibleItems(type: string, items: any[]) {
   return isExpanded(type) ? items : items.slice(0, initialVisible);
 }
 
-// 排序
+// 排序（2026-09-04：SSE 流推送时 merge 数组按到达批次 push，组内顺序乱序，
+// 固定按发布时间降序在展示层实时重排——最新到达的结果永远在最前。
+// 产品决定移除其它排序选项，故不再有 sortType 状态）
 function sortItems(items: any[]) {
-  const arr = [...items];
-  switch (sortType.value) {
-    case "date-desc":
-      return arr.sort(
-        (a, b) =>
-          new Date(b.datetime || "1970-01-01").getTime() -
-          new Date(a.datetime || "1970-01-01").getTime()
-      );
-    case "date-asc":
-      return arr.sort(
-        (a, b) =>
-          new Date(a.datetime || "1970-01-01").getTime() -
-          new Date(b.datetime || "1970-01-01").getTime()
-      );
-    case "name-asc":
-      return arr.sort((a, b) =>
-        String(a.note || "").localeCompare(String(b.note || ""), "zh-CN")
-      );
-    case "name-desc":
-      return arr.sort((a, b) =>
-        String(b.note || "").localeCompare(String(a.note || ""), "zh-CN")
-      );
-    default:
-      return items;
-  }
+  return [...items].sort(
+    (a, b) =>
+      new Date(b?.datetime || "1970-01-01").getTime() -
+      new Date(a?.datetime || "1970-01-01").getTime()
+  );
 }
 
 function visibleSorted(items: any[]) {
@@ -899,38 +876,6 @@ function visibleSorted(items: any[]) {
   box-shadow: 0 4px 12px rgba(15, 118, 110, 0.28);
 }
 
-/* 排序选择器 */
-.sorter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sort-select {
-  padding: 8px 12px;
-  border: 1px solid var(--border-light);
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), border-color var(--transition-fast),
-    box-shadow var(--transition-fast);
-  min-width: 140px;
-}
-
-.sort-select:hover {
-  background: var(--bg-primary);
-  border-color: var(--border-medium);
-}
-
-.sort-select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
-}
-
 /* 搜索结果区域 */
 .results-section {
   animation: fadeIn 0.5s ease;
@@ -1139,11 +1084,6 @@ function visibleSorted(items: any[]) {
     font-size: 12px;
   }
 
-  .sort-select {
-    min-width: 120px;
-    font-size: 12px;
-  }
-
   .empty-card {
     padding: 24px 20px;
     flex-direction: column;
@@ -1206,10 +1146,6 @@ function visibleSorted(items: any[]) {
     border-width: 2px;
   }
 
-  .sort-select {
-    border-width: 2px;
-  }
-
   .tag {
     border-width: 2px;
   }
@@ -1237,8 +1173,7 @@ function visibleSorted(items: any[]) {
     animation: none;
   }
 
-  .filter-pill:hover,
-  .sort-select:hover {
+  .filter-pill:hover {
     transform: none;
   }
 
